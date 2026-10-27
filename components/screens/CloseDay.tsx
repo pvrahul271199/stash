@@ -44,7 +44,12 @@ export function CloseDay({
                   {e.label}
                   {e.fromSavings && <span className="ml-2 text-[12px] text-warm">from savings</span>}
                 </p>
-                <p className="text-[13px] text-faint">{e.subcategory ?? e.category}</p>
+                <p className="text-[13px] text-faint">
+                  {e.subcategory ?? e.category}
+                  {e.payment ? ` · ${e.payment}` : ''}
+                  {e.event ? ` · ${e.event}` : ''}
+                </p>
+                {e.note && <p className="mt-0.5 truncate text-[12px] text-soft">{e.note}</p>}
               </div>
               <p className="num text-[18px] text-ink">{inr(e.amount)}</p>
               <button

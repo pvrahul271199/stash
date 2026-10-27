@@ -10,7 +10,21 @@ export interface SampleSpend {
   fromSavings: boolean;
 }
 
-export const DEFAULT_SAMPLE_PLAN = { income: 50000, bills: 18000, savings: 10000, monthLength: 30 };
+export const DEFAULT_SAMPLE_PLAN = {
+  income: 50000,
+  bills: 18000,
+  savings: 10000,
+  monthLength: 30,
+  billItems: [
+    { name: 'Rent', amount: 12000 },
+    { name: 'Health EMI', amount: 3500 },
+    { name: 'Phone & Wi-Fi', amount: 2500 },
+  ],
+  savingsItems: [
+    { name: 'Mutual fund SIP', amount: 6000 },
+    { name: 'Emergency fund', amount: 4000 },
+  ],
+};
 export const SAMPLE_DAYS = 18;
 
 /** Small seeded PRNG so the sample month is identical every time. */

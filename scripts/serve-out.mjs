@@ -43,6 +43,6 @@ createServer((req, res) => {
     ...(urlPath === '/sw.js' ? { 'Cache-Control': 'no-cache, no-store, must-revalidate' } : {}),
   });
   res.end(readFileSync(filePath));
-}).listen(port, '127.0.0.1', () => {
-  console.log(`Serving out/ on http://127.0.0.1:${port}`);
+}).listen(port, '0.0.0.0', () => {
+  console.log(`Serving out/ on http://0.0.0.0:${port} (http://127.0.0.1:${port})`);
 });

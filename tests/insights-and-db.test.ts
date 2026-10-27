@@ -11,8 +11,10 @@ import {
   categoryColorMap,
   categoryTotals,
   cumulative,
+  eventTotals,
   fromSavingsTotal,
   mostFrequent,
+  paymentTotals,
   projectTotal,
   summarize,
   timeBuckets,
@@ -22,6 +24,7 @@ import {
 import { categoryRamp } from '@/theme/tokens';
 import {
   addCategory,
+  addEvent,
   addSpend,
   addSubcategory,
   applyCatchUp,
@@ -33,10 +36,18 @@ import {
   fillSample,
   removeCategory,
   removeEntry,
+  removeEvent,
   removeSubcategory,
+  startEvent,
+  endEvent,
   syncCalendar,
+  toggleEventCategory,
+  updateEntry,
+  updateEventNote,
 } from '@/db/queries';
 import { getDB } from '@/db/schema';
+import { buildCalendar, compactINR, dayTotals, searchEntries } from '@/lib/history';
+import { sumItems } from '@/lib/budget';
 
 describe('validateName', () => {
   it('blocks empty, duplicate (case-insensitive), and >24 char names', () => {
@@ -214,5 +225,174 @@ describe('database queries', () => {
     expect(cycle.currentDay).toBe(SAMPLE_DAYS + 1);
     const csv = await exportCSV();
     expect(csv.split('\n').length).toBeGreaterThan(20);
+    const events = await db.events.toArray();
+    expect(events.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('creates events with custom text and tagged categories, logs event spends, and computes event analytics', async () => {
+    await ensureSeed();
+    await createPlanAndCycle({ income: 50000, bills: 18000, savings: 10000, monthLength: 30 }, '2026-10-27');
+    const db = getDB();
+    const cycle = (await db.cycle.orderBy('id').last())!;
+
+    expect(await addEvent('Goa Trip', ['Travel', 'Food', 'Fun'], '4 days with college friends')).toBeNull();
+    expect(await addEvent('goa trip', ['Food'])).toBe('That one already exists.');
+
+    const ev = (await db.events.where('name').equals('Goa Trip').first())!;
+    expect(ev.note).toBe('4 days with college friends');
+    expect(ev.categories).toEqual(['Travel', 'Food', 'Fun']);
+
+    await toggleEventCategory(ev.id!, 'Shopping');
+    expect((await db.events.get(ev.id!))?.categories).toContain('Shopping');
+    await toggleEventCategory(ev.id!, 'Fun');
+    expect((await db.events.get(ev.id!))?.categories).not.toContain('Fun');
+
+    await updateEventNote(ev.id!, 'Updated trip note');
+    expect((await db.events.get(ev.id!))?.note).toBe('Updated trip note');
+
+    const e1 = await addSpend(cycle, { amount: 1200, label: 'Flight cab', category: 'Travel', event: 'Goa Trip' });
+    const e2 = await addSpend(cycle, { amount: 800, label: 'Beach dinner', category: 'Food', event: 'Goa Trip' });
+    await addSpend(cycle, { amount: 100, label: 'Chai', category: 'Food' });
+
+    const allEntries = await db.entries.toArray();
+    const allEvents = await db.events.toArray();
+    const totals = eventTotals(allEntries, allEvents, null);
+    expect(totals).toHaveLength(1);
+    expect(totals[0].name).toBe('Goa Trip');
+    expect(totals[0].note).toBe('Updated trip note');
+    expect(totals[0].total).toBe(2000);
+    expect(totals[0].count).toBe(2);
+    expect(totals[0].categories).toEqual([
+      { name: 'Travel', total: 1200, count: 1 },
+      { name: 'Food', total: 800, count: 1 },
+      { name: 'Shopping', total: 0, count: 0 },
+    ]);
+
+    // Focused category filters event breakdown too
+    const foodOnly = eventTotals(allEntries, allEvents, 'Food');
+    expect(foodOnly[0].total).toBe(800);
+
+    // Removing the event keeps the spends and their categories, clearing only the event tag
+    await removeEvent(ev.id!);
+    expect(await db.events.get(ev.id!)).toBeUndefined();
+    expect((await db.entries.get(e1.id))?.event).toBeNull();
+    expect((await db.entries.get(e1.id))?.category).toBe('Travel');
+    expect((await db.entries.get(e2.id))?.category).toBe('Food');
+  });
+
+  it('tags every spend with the active event until it ends', async () => {
+    await ensureSeed();
+    await createPlanAndCycle({ income: 50000, bills: 18000, savings: 10000, monthLength: 30 }, '2026-10-27');
+    const db = getDB();
+    const cycle = (await db.cycle.orderBy('id').last())!;
+
+    expect(await startEvent('Goa trip', 'With friends')).toBeNull();
+    expect((await db.meta.get('main'))?.activeEvent).toBe('Goa trip');
+    const a = await addSpend(cycle, { amount: 500, label: 'Cab', category: 'Travel' });
+    const b = await addSpend(cycle, { amount: 300, label: 'Lunch' });
+    expect(a.event).toBe('Goa trip');
+    expect(b.event).toBe('Goa trip');
+
+    await endEvent();
+    const c = await addSpend(cycle, { amount: 20, label: 'Chai' });
+    expect(c.event).toBeNull();
+
+    // Starting with the same name (any case) resumes the existing event instead of duplicating it
+    expect(await startEvent('goa TRIP')).toBeNull();
+    expect(await db.events.count()).toBe(1);
+    expect((await db.meta.get('main'))?.activeEvent).toBe('Goa trip');
+
+    // Removing the active event also stops logging into it
+    const ev = (await db.events.toArray())[0];
+    await removeEvent(ev.id!);
+    expect((await db.meta.get('main'))?.activeEvent).toBeNull();
+  });
+
+  it('tracks payment modes (UPI, Card, Cash), itemised bills/savings, and history calendar + search', async () => {
+    await ensureSeed();
+    const billItems = [
+      { name: 'Rent', amount: 12000 },
+      { name: 'Health EMI', amount: 3500 },
+    ];
+    const savingsItems = [{ name: 'Mutual fund SIP', amount: 5000 }];
+    await createPlanAndCycle(
+      {
+        income: 50000,
+        bills: sumItems(billItems),
+        savings: sumItems(savingsItems),
+        monthLength: 30,
+        billItems,
+        savingsItems,
+      },
+      '2026-10-09',
+    );
+    const db = getDB();
+    const plan = (await db.plan.orderBy('id').last())!;
+    expect(plan.bills).toBe(15500);
+    expect(plan.billItems).toEqual(billItems);
+    expect(plan.savingsItems).toEqual(savingsItems);
+
+    const cycle = (await db.cycle.orderBy('id').last())!;
+    await addSpend(cycle, { amount: 250, label: 'Lunch', category: 'Food', payment: 'UPI' });
+    await addSpend(cycle, { amount: 1200, label: 'Groceries', category: 'Home', payment: 'Card' });
+    await addSpend(cycle, { amount: 40, label: 'Chai', category: 'Food', payment: 'Cash' });
+    expect((await db.meta.get('main'))?.lastPayment).toBe('Cash');
+
+    const entries = await db.entries.toArray();
+    const pm = paymentTotals(entries, null);
+    expect(pm.map((p) => p.name)).toEqual(['Card', 'UPI', 'Cash']);
+    expect(pm[0].total).toBe(1200);
+
+    // Calendar grid & dayTotals
+    const weeks = buildCalendar(cycle.startDate, cycle.totalDays);
+    expect(weeks.length).toBeGreaterThanOrEqual(4);
+    expect(weeks.every((w) => w.length === 7)).toBe(true);
+    const dt = dayTotals(entries);
+    expect(dt.get(1)?.spent).toBe(1490);
+    expect(compactINR(420)).toBe('₹420');
+    expect(compactINR(1490)).toBe('₹1.5k');
+
+    // Search across cycles
+    const cycles = await db.cycle.toArray();
+    expect(searchEntries(entries, cycles, 'Card')).toHaveLength(1);
+    expect(searchEntries(entries, cycles, '1200')[0].entries[0].label).toBe('Groceries');
+    expect(searchEntries(entries, cycles, 'food cash')[0].entries[0].label).toBe('Chai');
+  });
+
+  it('logs optional spend notes and edits existing spends while keeping closed day and pool in sync', async () => {
+    await ensureSeed();
+    await createPlanAndCycle({ income: 50000, bills: 18000, savings: 10000, monthLength: 30 }, '2026-10-09');
+    const db = getDB();
+    const cycle = (await db.cycle.orderBy('id').last())!;
+
+    const e = await addSpend(cycle, {
+      amount: 300,
+      label: 'Lunch',
+      category: 'Food',
+      payment: 'UPI',
+      note: 'Team lunch at Indiranagar',
+    });
+    expect(e.note).toBe('Team lunch at Indiranagar');
+
+    await closeCurrentDay(cycle.id!);
+    const closedBefore = (await db.days.get([cycle.id!, 1]))!;
+    expect(closedBefore.spent).toBe(300);
+
+    // Edit amount from 300 -> 450, payment -> Card, note -> Updated note
+    const edited = await updateEntry(e.id, {
+      amount: 450,
+      payment: 'Card',
+      note: 'Updated lunch note',
+    });
+    expect(edited?.amount).toBe(450);
+    expect(edited?.payment).toBe('Card');
+    expect(edited?.note).toBe('Updated lunch note');
+
+    const closedAfter = (await db.days.get([cycle.id!, 1]))!;
+    expect(closedAfter.spent).toBe(450);
+
+    const cycles = await db.cycle.toArray();
+    const allEntries = await db.entries.toArray();
+    expect(searchEntries(allEntries, cycles, 'Updated lunch')).toHaveLength(1);
   });
 });

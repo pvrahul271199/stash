@@ -7,9 +7,11 @@ import { WeekRow, weekWindow, type WeekDay } from '../ui/WeekRow';
 import { LogSpend } from './LogSpend';
 import { CloseDay } from './CloseDay';
 import { DayClosed } from './DayClosed';
+import { EditSpendSheet } from './EditSpendSheet';
+import { EventSheet } from './EventSheet';
 import { IosHint } from '../pwa/IosHint';
-import { closeCurrentDay, useDayEntries, useDayRows } from '@/db/queries';
-import type { Cycle, Plan } from '@/db/schema';
+import { closeCurrentDay, endEvent, useActiveEvent, useDayEntries, useDayRows } from '@/db/queries';
+import type { Cycle, Entry, Plan } from '@/db/schema';
 import {
   POOL_USED_UP_MESSAGE,
   daysLeft,
@@ -31,6 +33,9 @@ export function TodayTab({ cycle, plan }: { cycle: Cycle; plan: Plan }) {
   const [logReturn, setLogReturn] = useState<View>('today');
   const [result, setResult] = useState<CloseResult | null>(null);
   const [busy, setBusy] = useState(false);
+  const [eventOpen, setEventOpen] = useState(false);
+  const [editing, setEditing] = useState<Entry | null>(null);
+  const activeEvent = useActiveEvent();
   const setSheet = useUI((s) => s.setSheet);
   const entries = useDayEntries(cycle.id, cycle.currentDay) ?? [];
   const dayRows = useDayRows(cycle.id) ?? [];
@@ -79,13 +84,55 @@ export function TodayTab({ cycle, plan }: { cycle: Cycle; plan: Plan }) {
             {formatWithWeekday(dateOfDay(cycle.startDate, cycle.currentDay))}, day {cycle.currentDay} of{' '}
             {cycle.totalDays}
           </p>
-          <button
-            onClick={() => setSheet('plan')}
-            className="rounded-full border border-line px-4 text-[14px] font-medium text-ink"
-          >
-            Plan
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setEventOpen(true)}
+              aria-label={activeEvent ? `Event: ${activeEvent}` : 'Add event'}
+              title={activeEvent ? activeEvent : 'Add event'}
+              className={`flex h-11 w-11 items-center justify-center rounded-full border ${
+                activeEvent ? 'border-ink bg-ink text-white' : 'border-line text-ink'
+              }`}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <rect x="3.5" y="5" width="17" height="15" rx="2.5" />
+                <path d="M8 3v4M16 3v4M3.5 10h17" />
+                {!activeEvent && <path d="M12 13v4M10 15h4" />}
+              </svg>
+            </button>
+            <button
+              onClick={() => setSheet('plan')}
+              className="rounded-full border border-line px-4 text-[14px] font-medium text-ink"
+            >
+              Plan
+            </button>
+          </div>
         </header>
+
+        {activeEvent && (
+          <div className="mt-4 flex items-center justify-between gap-2 rounded-note bg-tint px-3.5 py-2">
+            <button
+              type="button"
+              onClick={() => setEventOpen(true)}
+              aria-label={`Switch event from ${activeEvent}`}
+              className="flex min-h-[32px] min-w-0 flex-1 items-center gap-1.5 text-left text-[14px] text-ink"
+            >
+              <span className="h-2 w-2 shrink-0 rounded-full bg-ink" aria-hidden="true" />
+              <span className="truncate">
+                Logging in <span className="font-semibold">{activeEvent}</span>
+              </span>
+              <span className="ml-0.5 shrink-0 rounded-full bg-white px-2 py-0.5 text-[12px] font-medium text-soft">
+                Switch ▾
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => endEvent()}
+              className="min-h-[32px] shrink-0 rounded-full px-2.5 text-[13px] font-semibold text-soft"
+            >
+              End
+            </button>
+          </div>
+        )}
 
         <p className="mt-8 text-[15px] text-soft">You can still spend today</p>
         <HugeNumber value={left} className="mt-1" />
@@ -115,14 +162,23 @@ export function TodayTab({ cycle, plan }: { cycle: Cycle; plan: Plan }) {
           ) : (
             <ul className="divide-y divide-line">
               {entries.slice(0, 4).map((e) => (
-                <li key={e.id} className="flex items-center justify-between py-3">
-                  <div>
+                <li key={e.id} className="flex items-center justify-between gap-2 py-3">
+                  <button
+                    type="button"
+                    onClick={() => setEditing(e)}
+                    className="min-w-0 flex-1 text-left"
+                  >
                     <p className="text-[15px] font-medium text-ink">
                       {e.label}
                       {e.fromSavings && <span className="ml-2 text-[12px] text-warm">from savings</span>}
                     </p>
-                    <p className="text-[13px] text-faint">{e.subcategory ?? e.category}</p>
-                  </div>
+                    <p className="text-[13px] text-faint">
+                      {e.subcategory ?? e.category}
+                      {e.payment ? ` · ${e.payment}` : ''}
+                      {e.event ? ` · ${e.event}` : ''}
+                    </p>
+                    {e.note && <p className="mt-0.5 truncate text-[12px] text-soft">{e.note}</p>}
+                  </button>
                   <p className="num text-[20px] text-ink">{inr(e.amount)}</p>
                 </li>
               ))}
@@ -156,6 +212,8 @@ export function TodayTab({ cycle, plan }: { cycle: Cycle; plan: Plan }) {
         />
       )}
       {view === 'log' && <LogSpend cycle={cycle} plan={plan} onClose={() => setView(logReturn)} />}
+      {eventOpen && <EventSheet onClose={() => setEventOpen(false)} />}
+      {editing && <EditSpendSheet entry={editing} onClose={() => setEditing(null)} />}
       {view === 'closed' && result && <DayClosed cycle={cycle} result={result} onNext={() => setView('today')} />}
     </>
   );

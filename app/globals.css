@@ -31,9 +31,37 @@ input,
   min-height: 44px;
 }
 
-:focus-visible {
+/* No focus box on tap/click (pie slices, charts, inputs, buttons).
+   A ring is only shown for keyboard navigation on buttons and links. */
+*:focus {
+  outline: none;
+}
+button:focus-visible,
+a:focus-visible {
   outline: 2px solid #0f766e;
   outline-offset: 2px;
+}
+svg,
+svg *,
+svg *:focus,
+svg *:focus-visible,
+[role='group']:focus,
+[role='group']:focus-visible {
+  outline: none !important;
+}
+input,
+textarea,
+select {
+  outline: none !important;
+  box-shadow: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+/* Inputs show focus by darkening their own border instead of an outline box */
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: #1e1b4b;
 }
 
 /* Phone frame: full screen on phones and installed mode, framed on desktop */
@@ -94,12 +122,19 @@ input,
 .chart .dot[data-selected='true'] {
   r: 5px;
 }
+.chart:focus,
 .chart:focus-visible {
-  outline: 2px solid #0f766e;
-  outline-offset: 2px;
+  outline: none;
 }
 
 /* Horizontal scrollers without a visible bar */
 .no-scrollbar {
   scrollbar-width: none;
+  -ms-overflow-style: none;
+  -webkit-overflow-scrolling: touch;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }

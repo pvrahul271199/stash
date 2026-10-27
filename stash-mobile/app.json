@@ -1,0 +1,30 @@
+{
+  "expo": {
+    "name": "Stash",
+    "slug": "stash-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#1E1B4B"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.stash.dailybudget"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#1E1B4B"
+      },
+      "package": "com.stash.dailybudget"
+    },
+    "plugins": [
+      "expo-asset"
+    ]
+  }
+}

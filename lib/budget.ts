@@ -18,11 +18,25 @@ export interface DayRecord {
   status: 'closed' | 'estimated';
 }
 
+/** One line in an itemised bills/savings list, e.g. { name: 'Health EMI', amount: 2500 }. */
+export interface PlanItem {
+  name: string;
+  amount: number;
+}
+
 export interface PlanInput {
   income: number;
   bills: number;
   savings: number;
   monthLength: number;
+  /** Optional breakdown of `bills`. When present, `bills` equals their sum. */
+  billItems?: PlanItem[];
+  /** Optional breakdown of `savings`. When present, `savings` equals their sum. */
+  savingsItems?: PlanItem[];
+}
+
+export function sumItems(items: PlanItem[] | undefined): number {
+  return (items ?? []).reduce((t, i) => t + (Number.isFinite(i.amount) ? Math.max(0, Math.round(i.amount)) : 0), 0);
 }
 
 /* ---------- plan ---------- */

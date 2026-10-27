@@ -98,11 +98,15 @@ export function CategoryList({
   colorOf,
   focus,
   onFocus,
+  focusType = null,
+  onFocusType,
 }: {
   slices: CategoryTotal[];
   colorOf: Record<string, string>;
   focus: string | null;
   onFocus: (name: string) => void;
+  focusType?: string | null;
+  onFocusType?: (typeName: string) => void;
 }) {
   return (
     <ul className="mt-5 divide-y divide-line">
@@ -122,18 +126,38 @@ export function CategoryList({
               <span className="num w-[84px] text-right text-[17px] text-ink">{inr(s.total)}</span>
             </button>
             {on && (
-              <ul className="mb-3 ml-6 flex flex-col gap-2.5">
-                {s.types.map((t) => (
-                  <li key={t.name}>
-                    <div className="flex justify-between text-[13px] text-soft">
-                      <span>{t.name}</span>
-                      <span className="num text-ink">{inr(t.total)}</span>
-                    </div>
-                    <div className="mt-1 h-1 rounded-full bg-tint">
-                      <div className="h-1 rounded-full" style={{ width: `${(t.total / max) * 100}%`, background: colorOf[s.name] }} />
-                    </div>
-                  </li>
-                ))}
+              <ul className="mb-3 ml-5 flex flex-col gap-1.5">
+                {s.types.map((t) => {
+                  const typeSelected = focusType === t.name;
+                  return (
+                    <li
+                      key={t.name}
+                      style={{ opacity: focusType && !typeSelected ? 0.45 : 1 }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => onFocusType?.(t.name)}
+                        aria-pressed={typeSelected}
+                        className={`min-h-0 w-full rounded-[10px] px-2.5 py-1.5 text-left transition-colors ${
+                          typeSelected ? 'bg-tint ring-1 ring-ink/20' : 'hover:bg-tint/50'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between text-[13px]">
+                          <span className={typeSelected ? 'font-semibold text-ink' : 'text-soft'}>
+                            {t.name}
+                          </span>
+                          <span className="num font-medium text-ink">{inr(t.total)}</span>
+                        </div>
+                        <div className="mt-1 h-1.5 rounded-full bg-tint">
+                          <div
+                            className="h-1.5 rounded-full transition-all"
+                            style={{ width: `${(t.total / max) * 100}%`, background: colorOf[s.name] }}
+                          />
+                        </div>
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </li>

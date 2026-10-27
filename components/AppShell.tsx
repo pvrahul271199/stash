@@ -10,6 +10,7 @@ import { WelcomeBack } from './screens/WelcomeBack';
 import { MonthEnd } from './screens/MonthEnd';
 import { PlanScreen } from './screens/PlanScreen';
 import { CategoriesTab } from './screens/CategoriesTab';
+import { HistoryTab } from './screens/HistoryTab';
 import { InsightsTab } from './screens/InsightsTab';
 import { PWAManager } from './pwa/PWAManager';
 import {
@@ -23,6 +24,8 @@ import {
 } from '@/db/queries';
 import { isCycleOver, isPlanValid, type PlanInput } from '@/lib/budget';
 import { todayISO } from '@/lib/dates';
+import { supabaseSync } from '@/lib/sync';
+import { getDB } from '@/db/schema';
 import { useUI } from '@/store/ui';
 
 type Flow = 'welcome' | 'onboarding' | 'summary' | 'changePlan' | 'changeSummary';
@@ -45,9 +48,27 @@ export function AppShell() {
 
   useEffect(() => {
     ensureSeed()
+      .then(async () => {
+        if (supabaseSync.isEnabled()) {
+          const hasLocalCycle = (await getDB().cycle.count()) > 0;
+          if (!hasLocalCycle) {
+            await supabaseSync.pull().catch(() => false);
+          }
+        }
+      })
       .then(() => runSync())
       .then(() => setReady(true));
   }, [runSync]);
+
+  useEffect(() => {
+    const onOnline = () => {
+      if (supabaseSync.isEnabled()) {
+        void supabaseSync.push().catch(() => {});
+      }
+    };
+    window.addEventListener('online', onOnline);
+    return () => window.removeEventListener('online', onOnline);
+  }, []);
 
   useEffect(() => {
     const onVis = () => {
@@ -124,6 +145,7 @@ export function AppShell() {
         <>
           <div className="flex min-h-0 flex-1 flex-col">
             {tab === 'today' && <TodayTab cycle={snap.cycle} plan={snap.plan} />}
+            {tab === 'history' && <HistoryTab activeCycle={snap.cycle} />}
             {tab === 'insights' && <InsightsTab cycle={snap.cycle} plan={snap.plan} />}
             {tab === 'categories' && <CategoriesTab />}
           </div>
@@ -139,6 +161,8 @@ export function AppShell() {
                   bills: snap.plan!.bills,
                   savings: snap.plan!.savings,
                   monthLength: snap.plan!.monthLength,
+                  billItems: snap.plan!.billItems,
+                  savingsItems: snap.plan!.savingsItems,
                 });
                 setSheet('none');
                 setFlow('changePlan');
@@ -161,7 +185,17 @@ export function AppShell() {
   } else if (flow === 'welcome') {
     body = (
       <Welcome
-        onStart={() => setFlow('onboarding')}
+        onStart={async (username) => {
+          if (username && supabaseSync.isEnabled()) {
+            const restored = await supabaseSync.pull().catch(() => false);
+            if (restored) {
+              await runSync();
+              setTab('today');
+              return;
+            }
+          }
+          setFlow('onboarding');
+        }}
         onSample={handleSample}
       />
     );

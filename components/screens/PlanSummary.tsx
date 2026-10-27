@@ -20,9 +20,9 @@ export function PlanSummary({
   const live = moneyToLiveOn(plan);
   const end = formatWithWeekday(cycleEndDate(todayISO(), plan.monthLength));
   const rows = [
-    ['Income', plan.income],
-    ['Bills', plan.bills],
-    ['Savings and investments', plan.savings],
+    { label: 'Income', value: plan.income, items: undefined },
+    { label: 'Bills', value: plan.bills, items: plan.billItems },
+    { label: 'Savings and investments', value: plan.savings, items: plan.savingsItems },
   ] as const;
   return (
     <main className="flex h-full flex-col px-6 pb-6 pt-4">
@@ -37,10 +37,24 @@ export function PlanSummary({
           {plan.monthLength === 1 ? 'day' : 'days'}, until {end}.
         </p>
         <dl className="mt-8 divide-y divide-line border-y border-line">
-          {rows.map(([k, v]) => (
-            <div key={k} className="flex items-center justify-between py-3.5">
-              <dt className="text-[15px] text-soft">{k}</dt>
-              <dd className="num text-[20px] text-ink">{inr(v)}</dd>
+          {rows.map((r) => (
+            <div key={r.label} className="py-3.5">
+              <div className="flex items-center justify-between">
+                <dt className="text-[15px] text-soft">{r.label}</dt>
+                <dd className="num text-[20px] text-ink">{inr(r.value)}</dd>
+              </div>
+              {r.items && r.items.length > 0 && (
+                <ul className="mt-1.5 flex flex-wrap gap-1.5">
+                  {r.items.map((it, i) => (
+                    <li
+                      key={`${it.name}-${i}`}
+                      className="rounded-full bg-tint px-2.5 py-0.5 text-[12px] text-soft"
+                    >
+                      {it.name} <span className="num text-ink">{inr(it.amount)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           ))}
         </dl>

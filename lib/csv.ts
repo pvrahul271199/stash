@@ -7,6 +7,9 @@ export interface CsvRow {
   type: string;
   fromSavings: boolean;
   estimate: boolean;
+  payment?: string;
+  event?: string;
+  note?: string;
 }
 
 function cell(v: string | number | boolean): string {
@@ -15,9 +18,9 @@ function cell(v: string | number | boolean): string {
 }
 
 export function buildCSV(rows: CsvRow[]): string {
-  const head = ['Date', 'Day', 'Amount (INR)', 'Label', 'Category', 'Type', 'From savings', 'Estimate'];
+  const head = ['Date', 'Day', 'Amount (INR)', 'Label', 'Category', 'Type', 'From savings', 'Estimate', 'Payment', 'Event', 'Note'];
   const lines = rows.map((r) =>
-    [r.date, r.day, r.amount, r.label, r.category, r.type, r.fromSavings ? 'yes' : 'no', r.estimate ? 'yes' : 'no']
+    [r.date, r.day, r.amount, r.label, r.category, r.type, r.fromSavings ? 'yes' : 'no', r.estimate ? 'yes' : 'no', r.payment ?? '', r.event ?? '', r.note ?? '']
       .map(cell)
       .join(','),
   );

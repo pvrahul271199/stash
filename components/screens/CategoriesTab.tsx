@@ -5,11 +5,14 @@ import {
   addCategory,
   addSubcategory,
   removeCategory,
+  removeEvent,
   removeSubcategory,
   useCategories,
   useCategoryCounts,
+  useEventCounts,
+  useEvents,
 } from '@/db/queries';
-import type { Category } from '@/db/schema';
+import type { Category, StashEvent } from '@/db/schema';
 import { MAX_NAME } from '@/lib/categories';
 
 function AddInput({
@@ -130,14 +133,34 @@ function Row({
   );
 }
 
+function EventRow({ ev, count, onAskRemove }: { ev: StashEvent; count: number; onAskRemove: () => void }) {
+  return (
+    <li className="flex min-h-[56px] items-center justify-between gap-3 border-b border-line py-2">
+      <div className="min-w-0">
+        <p className="truncate text-[16px] font-semibold text-ink">{ev.name}</p>
+        <p className="truncate text-[13px] text-faint">
+          {count} {count === 1 ? 'spend' : 'spends'}
+          {ev.note ? ` · ${ev.note}` : ''}
+        </p>
+      </div>
+      <button onClick={onAskRemove} className="shrink-0 text-[14px] font-medium text-warm">
+        Remove
+      </button>
+    </li>
+  );
+}
+
 export function CategoriesTab() {
   const cats = useCategories() ?? [];
+  const events = useEvents() ?? [];
   const counts = useCategoryCounts();
+  const eventCounts = useEventCounts();
   const [openId, setOpenId] = useState<number | null>(null);
   const [removing, setRemoving] = useState<Category | null>(null);
+  const [removingEvent, setRemovingEvent] = useState<StashEvent | null>(null);
 
   return (
-    <div className="flex-1 overflow-y-auto px-6 pb-6 pt-6">
+    <div className="flex-1 overflow-y-auto px-6 pb-8 pt-6">
       <h1 className="text-question font-semibold text-ink">Categories</h1>
       <p className="mt-2 text-body text-soft">Make them match your life. Each category can have types inside it.</p>
 
@@ -159,6 +182,28 @@ export function CategoriesTab() {
         <AddInput label="New category" placeholder="e.g. Pets" onAdd={addCategory} />
       </div>
 
+      <section className="mt-10 border-t border-line pt-8" aria-label="Events">
+        <h2 className="text-question font-semibold text-ink">Events</h2>
+        <p className="mt-2 text-body text-soft">
+          Start an event with the calendar button on Today. Spends you log go inside it, and Insights shows each event split by category.
+        </p>
+
+        {events.length === 0 ? (
+          <p className="mt-3 text-[14px] text-faint">No events yet.</p>
+        ) : (
+          <ul className="mt-4 border-t border-line">
+            {events.map((ev) => (
+              <EventRow
+                key={ev.id}
+                ev={ev}
+                count={eventCounts[ev.name] ?? 0}
+                onAskRemove={() => setRemovingEvent(ev)}
+              />
+            ))}
+          </ul>
+        )}
+      </section>
+
       {removing && (
         <ConfirmDialog
           title={`Remove ${removing.name}?`}
@@ -173,6 +218,23 @@ export function CategoriesTab() {
             await removeCategory(removing.id!);
             setRemoving(null);
             setOpenId(null);
+          }}
+        />
+      )}
+
+      {removingEvent && (
+        <ConfirmDialog
+          title={`Remove ${removingEvent.name}?`}
+          body={
+            (eventCounts[removingEvent.name] ?? 0) > 0
+              ? `${eventCounts[removingEvent.name]} ${eventCounts[removingEvent.name] === 1 ? 'spend stays' : 'spends stay'} as they are, just without the event tag.`
+              : 'No spends are tagged with this event.'
+          }
+          confirmLabel={`Remove ${removingEvent.name}`}
+          onCancel={() => setRemovingEvent(null)}
+          onConfirm={async () => {
+            await removeEvent(removingEvent.id!);
+            setRemovingEvent(null);
           }}
         />
       )}

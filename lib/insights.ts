@@ -10,6 +10,9 @@ export interface InsightEntry {
   label: string;
   category: string;
   subcategory: string | null;
+  event?: string | null;
+  payment?: string | null;
+  note?: string | null;
   fromSavings: boolean;
   isEstimate: boolean;
   hour: number;
@@ -136,6 +139,102 @@ export function categoryTotals(entries: InsightEntry[]): CategoryTotal[] {
     }))
     .filter((c) => c.total > 0)
     .sort((a, b) => b.total - a.total);
+}
+
+export interface EventCategoryBreakdown {
+  name: string;
+  total: number;
+  count: number;
+}
+
+export interface EventTotal {
+  name: string;
+  note: string | null;
+  total: number;
+  fromSavings: number;
+  count: number;
+  pct: number;
+  taggedCategories: string[];
+  categories: EventCategoryBreakdown[];
+}
+
+export function eventTotals(
+  entries: InsightEntry[],
+  definedEvents: { name: string; note?: string | null; categories: string[] }[] = [],
+  focusCategory: string | null = null,
+): EventTotal[] {
+  const grand = entries
+    .filter((e) => !e.fromSavings && (!focusCategory || e.category === focusCategory))
+    .reduce((s, e) => s + e.amount, 0);
+
+  const map = new Map<
+    string,
+    {
+      note: string | null;
+      total: number;
+      fromSavings: number;
+      count: number;
+      taggedCategories: string[];
+      cats: Map<string, { total: number; count: number }>;
+    }
+  >();
+
+  for (const ev of definedEvents) {
+    const catsMap = new Map<string, { total: number; count: number }>();
+    for (const c of ev.categories) {
+      catsMap.set(c, { total: 0, count: 0 });
+    }
+    map.set(ev.name, {
+      note: ev.note ?? null,
+      total: 0,
+      fromSavings: 0,
+      count: 0,
+      taggedCategories: ev.categories,
+      cats: catsMap,
+    });
+  }
+
+  for (const e of entries) {
+    if (!e.event) continue;
+    if (focusCategory && e.category !== focusCategory) continue;
+    let bucket = map.get(e.event);
+    if (!bucket) {
+      bucket = {
+        note: null,
+        total: 0,
+        fromSavings: 0,
+        count: 0,
+        taggedCategories: [],
+        cats: new Map(),
+      };
+      map.set(e.event, bucket);
+    }
+    bucket.count += 1;
+    if (e.fromSavings) {
+      bucket.fromSavings += e.amount;
+    } else {
+      bucket.total += e.amount;
+    }
+    const catStat = bucket.cats.get(e.category) ?? { total: 0, count: 0 };
+    catStat.total += e.amount;
+    catStat.count += 1;
+    bucket.cats.set(e.category, catStat);
+  }
+
+  return [...map.entries()]
+    .map(([name, b]) => ({
+      name,
+      note: b.note,
+      total: b.total,
+      fromSavings: b.fromSavings,
+      count: b.count,
+      pct: grand > 0 ? (b.total / grand) * 100 : 0,
+      taggedCategories: b.taggedCategories,
+      categories: [...b.cats.entries()]
+        .map(([catName, stat]) => ({ name: catName, total: stat.total, count: stat.count }))
+        .sort((a, b2) => b2.total - a.total || a.name.localeCompare(b2.name)),
+    }))
+    .sort((a, b) => b.total - a.total || b.count - a.count || a.name.localeCompare(b.name));
 }
 
 /* ---------- day of week ---------- */
@@ -307,4 +406,32 @@ export function projectTotal(days: DayPoint[], totalDays: number): { fromDay: nu
   const last = closed[closed.length - 1].day;
   if (last >= totalDays) return null;
   return { fromDay: last, fromValue: sum, endValue: sum + avg * (totalDays - closed.length) };
+}
+
+/* ---------- payment mode ---------- */
+
+export interface PaymentTotal {
+  name: string;
+  total: number;
+  count: number;
+  pct: number;
+}
+
+/** Spend per payment mode (UPI / Card / Cash). Spends logged before modes existed show as "Not set". */
+export function paymentTotals(entries: InsightEntry[], focus: string | null = null): PaymentTotal[] {
+  const map = new Map<string, { total: number; count: number }>();
+  let grand = 0;
+  for (const e of entries) {
+    if (e.fromSavings || e.isEstimate) continue;
+    if (focus && e.category !== focus) continue;
+    const k = e.payment?.trim() || 'Not set';
+    const m = map.get(k) ?? { total: 0, count: 0 };
+    m.total += e.amount;
+    m.count += 1;
+    map.set(k, m);
+    grand += e.amount;
+  }
+  return [...map.entries()]
+    .map(([name, m]) => ({ name, total: m.total, count: m.count, pct: grand ? (m.total / grand) * 100 : 0 }))
+    .sort((a, b) => b.total - a.total);
 }
