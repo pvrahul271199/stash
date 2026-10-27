@@ -19,6 +19,10 @@ export const metadata: Metadata = {
   title: 'Stash: what can I spend today',
   description: 'A calm expense tracker built around one question: how much can I spend today?',
   appleWebApp: { capable: true, title: 'Stash', statusBarStyle: 'default' },
+  icons: {
+    icon: [{ url: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' }],
+    apple: [{ url: '/icons/apple-touch-icon.png', sizes: '180x180', type: 'image/png' }],
+  },
 };
 
 export const viewport: Viewport = {

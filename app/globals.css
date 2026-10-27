@@ -75,3 +75,31 @@ input,
     scroll-behavior: auto !important;
   }
 }
+
+/* Chart selection: driven by data attributes set imperatively, so the chart layers don't re-render. */
+.chart .bar {
+  opacity: var(--o, 1);
+  transition: opacity 0.12s;
+}
+.chart svg[data-has-sel='true'] .bar {
+  opacity: 0.3;
+}
+.chart svg[data-has-sel='true'] .bar[data-selected='true'] {
+  opacity: 1;
+}
+.chart .dot {
+  r: 2.5px;
+  transition: r 0.12s;
+}
+.chart .dot[data-selected='true'] {
+  r: 5px;
+}
+.chart:focus-visible {
+  outline: 2px solid #0f766e;
+  outline-offset: 2px;
+}
+
+/* Horizontal scrollers without a visible bar */
+.no-scrollbar {
+  scrollbar-width: none;
+}

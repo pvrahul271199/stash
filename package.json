@@ -4,11 +4,12 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
-    "start": "npx serve out",
+    "build": "next build && node scripts/build-sw.mjs",
+    "start": "serve out -l 3100 --no-clipboard",
     "lint": "tsc --noEmit",
     "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "icons": "node scripts/gen-icons.mjs"
   },
   "dependencies": {
     "dexie": "^4.4.7",
@@ -19,12 +20,15 @@
     "zustand": "^5.0.16"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "@types/node": "^26.6.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "autoprefixer": "^10.6.2",
     "fake-indexeddb": "^6.2.6",
     "postcss": "^8.5.32",
+    "serve": "^14.2.6",
+    "sharp": "^0.35.5",
     "tailwindcss": "^3.4.19",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"

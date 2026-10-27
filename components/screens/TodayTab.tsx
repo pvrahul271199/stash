@@ -1,12 +1,15 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { PrimaryButton, SecondaryButton } from '../ui/Button';
 import { Note } from '../ui/Chip';
 import { HugeNumber } from '../ui/HugeNumber';
 import { WeekRow, weekWindow, type WeekDay } from '../ui/WeekRow';
 import { LogSpend } from './LogSpend';
-import { useDayEntries, useDayRows } from '@/db/queries';
-import type { Cycle } from '@/db/schema';
+import { CloseDay } from './CloseDay';
+import { DayClosed } from './DayClosed';
+import { IosHint } from '../pwa/IosHint';
+import { closeCurrentDay, useDayEntries, useDayRows } from '@/db/queries';
+import type { Cycle, Plan } from '@/db/schema';
 import {
   POOL_USED_UP_MESSAGE,
   daysLeft,
@@ -14,17 +17,29 @@ import {
   overMessage,
   spentToday,
   todayAllowance,
+  type CloseResult,
   type CycleState,
 } from '@/lib/budget';
 import { dateOfDay, formatWithWeekday } from '@/lib/dates';
 import { inr } from '@/lib/format';
-import { useToast } from '@/store/toast';
+import { useUI } from '@/store/ui';
 
-export function TodayTab({ cycle }: { cycle: Cycle }) {
-  const [logging, setLogging] = useState(false);
-  const toast = useToast((s) => s.show);
+type View = 'today' | 'log' | 'close' | 'closed';
+
+export function TodayTab({ cycle, plan }: { cycle: Cycle; plan: Plan }) {
+  const [view, setView] = useState<View>('today');
+  const [logReturn, setLogReturn] = useState<View>('today');
+  const [result, setResult] = useState<CloseResult | null>(null);
+  const [busy, setBusy] = useState(false);
+  const setSheet = useUI((s) => s.setSheet);
   const entries = useDayEntries(cycle.id, cycle.currentDay) ?? [];
   const dayRows = useDayRows(cycle.id) ?? [];
+
+  // Lets the shell hold back the month-end screen until the user has seen "Day closed".
+  useEffect(() => {
+    setSheet(view === 'closed' ? 'dayClosed' : 'none');
+    return () => setSheet('none');
+  }, [view, setSheet]);
 
   const state: CycleState = cycle;
   const allowance = todayAllowance(state);
@@ -43,16 +58,29 @@ export function TodayTab({ cycle }: { cycle: Cycle }) {
   });
   const remaining = Math.max(state.pool - spent, 0);
 
+  async function close() {
+    setBusy(true);
+    // Hold back the month-end screen before the write lands (see effect above).
+    setSheet('dayClosed');
+    const r = await closeCurrentDay(cycle.id!);
+    setBusy(false);
+    if (r) {
+      setResult(r);
+      setView('closed');
+    } else setSheet('none');
+  }
+
   return (
     <>
       <div className="flex-1 overflow-y-auto px-6 pb-4 pt-4">
+        <IosHint />
         <header className="flex items-center justify-between">
           <p className="text-[14px] text-soft">
             {formatWithWeekday(dateOfDay(cycle.startDate, cycle.currentDay))}, day {cycle.currentDay} of{' '}
             {cycle.totalDays}
           </p>
           <button
-            onClick={() => toast('Plan settings arrive in a later milestone')}
+            onClick={() => setSheet('plan')}
             className="rounded-full border border-line px-4 text-[14px] font-medium text-ink"
           >
             Plan
@@ -104,13 +132,31 @@ export function TodayTab({ cycle }: { cycle: Cycle }) {
       </div>
 
       <div className="flex shrink-0 flex-col gap-2 px-6 pb-4 pt-2">
-        <PrimaryButton onClick={() => setLogging(true)}>Log a spend</PrimaryButton>
-        <SecondaryButton onClick={() => toast('Closing the day arrives in the next milestone')}>
-          Close the day
-        </SecondaryButton>
+        <PrimaryButton
+          onClick={() => {
+            setLogReturn('today');
+            setView('log');
+          }}
+        >
+          Log a spend
+        </PrimaryButton>
+        <SecondaryButton onClick={() => setView('close')}>Close the day</SecondaryButton>
       </div>
 
-      {logging && <LogSpend cycle={cycle} onClose={() => setLogging(false)} />}
+      {view === 'close' && (
+        <CloseDay
+          entries={entries}
+          busy={busy}
+          onBack={() => setView('today')}
+          onClose={close}
+          onAddMore={() => {
+            setLogReturn('close');
+            setView('log');
+          }}
+        />
+      )}
+      {view === 'log' && <LogSpend cycle={cycle} plan={plan} onClose={() => setView(logReturn)} />}
+      {view === 'closed' && result && <DayClosed cycle={cycle} result={result} onNext={() => setView('today')} />}
     </>
   );
 }
