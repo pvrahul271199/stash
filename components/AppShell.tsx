@@ -53,6 +53,8 @@ export function AppShell() {
           const hasLocalCycle = (await getDB().cycle.count()) > 0;
           if (!hasLocalCycle) {
             await supabaseSync.pull().catch(() => false);
+          } else {
+            await supabaseSync.push().catch(() => {});
           }
         }
       })

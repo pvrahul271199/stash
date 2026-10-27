@@ -122,8 +122,8 @@ export function LogSpend({
       role="dialog"
       aria-modal="true"
       aria-label="Log a spend"
-      className="absolute inset-0 z-40 flex flex-col bg-white px-6"
-      style={{ paddingTop: 'calc(var(--safe-top) + 8px)', paddingBottom: 'calc(var(--safe-bottom) + 24px)' }}
+      className="absolute inset-0 z-40 flex flex-col bg-white px-5"
+      style={{ paddingTop: 'calc(var(--safe-top) + 6px)', paddingBottom: 'calc(var(--safe-bottom) + 14px)' }}
     >
       {view === 'picker' && (
         <CategoryPicker
@@ -149,8 +149,19 @@ export function LogSpend({
       {view === 'keypad' && (
         <>
           <div className="relative flex items-center justify-between gap-2">
-            <IconButton label="Close" onClick={onClose} className="-ml-3 shrink-0">
-              <CloseIcon />
+            <IconButton label="Close" onClick={onClose} className="-ml-2 h-9 w-9 min-h-0 shrink-0">
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                aria-hidden="true"
+              >
+                <path d="M6 6l12 12M18 6L6 18" />
+              </svg>
             </IconButton>
 
             <div className="flex min-w-0 items-center gap-1">
@@ -162,15 +173,15 @@ export function LogSpend({
                 }}
                 aria-expanded={eventMenuOpen}
                 aria-label={activeEvent ? `Logging in ${activeEvent}. Tap to switch event` : 'Choose an event'}
-                className={`inline-flex h-8 min-h-0 max-w-[180px] items-center gap-1.5 rounded-full border px-2.5 text-[12px] font-medium transition-colors ${
+                className={`inline-flex h-7 min-h-0 max-w-[170px] items-center gap-1 rounded-full border px-2.5 text-[11px] font-medium transition-colors ${
                   activeEvent
                     ? 'border-ink bg-ink text-white'
                     : 'border-line bg-tint/70 text-soft'
                 }`}
               >
                 <svg
-                  width="12"
-                  height="12"
+                  width="11"
+                  height="11"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
@@ -184,7 +195,7 @@ export function LogSpend({
                   <path d="M8 3v4M16 3v4M3.5 10h17" />
                 </svg>
                 <span className="truncate">{activeEvent ? activeEvent : 'No event'}</span>
-                <span className="shrink-0 text-[10px] opacity-75" aria-hidden="true">
+                <span className="shrink-0 text-[9px] opacity-75" aria-hidden="true">
                   {eventMenuOpen ? '▴' : '▾'}
                 </span>
               </button>
@@ -198,20 +209,20 @@ export function LogSpend({
                   }}
                   aria-label={`Stop logging in ${activeEvent}`}
                   title="Turn off event"
-                  className="flex h-7 w-7 min-h-0 shrink-0 items-center justify-center rounded-full border border-line bg-tint/70 text-[13px] text-soft"
+                  className="flex h-6 w-6 min-h-0 shrink-0 items-center justify-center rounded-full border border-line bg-tint/70 text-[12px] text-soft"
                 >
                   ×
                 </button>
               )}
             </div>
 
-            <span className="w-8 shrink-0" aria-hidden="true" />
+            <span className="w-7 shrink-0" aria-hidden="true" />
 
             {eventMenuOpen && (
               <div
                 role="region"
                 aria-label="Event switcher"
-                className="absolute left-1/2 top-full z-30 mt-1.5 w-64 -translate-x-1/2 rounded-2xl border border-line bg-white p-2.5 shadow-lg"
+                className="absolute left-1/2 top-full z-30 mt-1 w-60 -translate-x-1/2 rounded-2xl border border-line bg-white p-2 shadow-lg"
               >
                 <div className="flex flex-wrap gap-1">
                   <button
@@ -221,7 +232,7 @@ export function LogSpend({
                       setEventMenuOpen(false);
                     }}
                     aria-pressed={!activeEvent}
-                    className={`h-7 min-h-0 rounded-full border px-2.5 text-[12px] font-medium ${
+                    className={`h-6 min-h-0 rounded-full border px-2 text-[11px] font-medium ${
                       !activeEvent
                         ? 'border-ink bg-ink text-white'
                         : 'border-line bg-tint/60 text-ink'
@@ -240,7 +251,7 @@ export function LogSpend({
                           setEventMenuOpen(false);
                         }}
                         aria-pressed={isCurrent}
-                        className={`h-7 min-h-0 max-w-[140px] truncate rounded-full border px-2.5 text-[12px] font-medium ${
+                        className={`h-6 min-h-0 max-w-[130px] truncate rounded-full border px-2 text-[11px] font-medium ${
                           isCurrent
                             ? 'border-ink bg-ink text-white'
                             : 'border-line bg-tint/60 text-ink'
@@ -252,7 +263,7 @@ export function LogSpend({
                   })}
                 </div>
 
-                <div className="mt-2 flex items-center gap-1">
+                <div className="mt-1.5 flex items-center gap-1">
                   <input
                     type="text"
                     value={newEventName}
@@ -269,17 +280,17 @@ export function LogSpend({
                     placeholder="New event..."
                     aria-label="New event name"
                     maxLength={MAX_NAME + 6}
-                    className="h-7 min-h-0 min-w-0 flex-1 rounded-full border border-line bg-tint/40 px-2.5 text-[12px] text-ink placeholder:text-faint"
+                    className="h-6 min-h-0 min-w-0 flex-1 rounded-full border border-line bg-tint/40 px-2.5 text-[11px] text-ink placeholder:text-faint"
                   />
                   <button
                     type="button"
                     onClick={() => void handleQuickCreateEvent()}
-                    className="h-7 min-h-0 shrink-0 rounded-full bg-ink px-2.5 text-[11px] font-medium text-white"
+                    className="h-6 min-h-0 shrink-0 rounded-full bg-ink px-2.5 text-[11px] font-medium text-white"
                   >
                     Start
                   </button>
                 </div>
-                {eventErr && <p className="mt-1 text-[11px] text-warm">{eventErr}</p>}
+                {eventErr && <p className="mt-1 text-[10px] text-warm">{eventErr}</p>}
               </div>
             )}
           </div>
@@ -296,14 +307,14 @@ export function LogSpend({
               </span>
             </div>
 
-            <div className="mt-3 inline-flex rounded-full bg-tint p-1" role="group" aria-label="Payment mode">
+            <div className="mt-2 inline-flex rounded-full bg-tint p-0.5" role="group" aria-label="Payment mode">
               {PAYMENT_MODES.map((m) => (
                 <button
                   key={m}
                   type="button"
                   onClick={() => setPaymentOverride(m)}
                   aria-pressed={payment === m}
-                  className={`min-h-[32px] rounded-full px-3.5 text-[13px] font-medium ${
+                  className={`h-7 min-h-0 rounded-full px-3 text-[12px] font-medium ${
                     payment === m ? 'bg-ink text-white' : 'text-soft'
                   }`}
                 >
@@ -312,21 +323,21 @@ export function LogSpend({
               ))}
             </div>
 
-            <div className="mt-2 flex h-9 w-full items-center justify-center">
+            <div className="mt-1.5 flex h-7 w-full items-center justify-center">
               {!noteOpen && !note.trim() && (
                 <button
                   type="button"
                   onClick={() => setNoteOpen(true)}
                   aria-label="Add a note"
-                  className="inline-flex h-8 min-h-0 items-center gap-1 rounded-full border border-line bg-white px-3 text-[12px] font-medium text-soft"
+                  className="inline-flex h-6 min-h-0 items-center gap-1 rounded-full border border-line bg-white px-2.5 text-[11px] font-medium text-soft"
                 >
                   <svg
-                    width="12"
-                    height="12"
+                    width="10"
+                    height="10"
                     viewBox="0 0 24 24"
                     fill="none"
                     stroke="currentColor"
-                    strokeWidth="2"
+                    strokeWidth="2.2"
                     strokeLinecap="round"
                     strokeLinejoin="round"
                     aria-hidden="true"
@@ -338,7 +349,7 @@ export function LogSpend({
               )}
 
               {!noteOpen && note.trim() && (
-                <div className="inline-flex h-8 min-h-0 max-w-[240px] items-center gap-1 rounded-full border border-ink/20 bg-tint pl-3 pr-1.5 text-[12px] text-ink">
+                <div className="inline-flex h-6 min-h-0 max-w-[220px] items-center gap-1 rounded-full border border-ink/20 bg-tint pl-2.5 pr-1 text-[11px] text-ink">
                   <button
                     type="button"
                     onClick={() => setNoteOpen(true)}
@@ -351,7 +362,7 @@ export function LogSpend({
                     type="button"
                     onClick={() => setNote('')}
                     aria-label="Clear note"
-                    className="flex h-5 w-5 min-h-0 shrink-0 items-center justify-center rounded-full text-[13px] text-soft"
+                    className="flex h-4 w-4 min-h-0 shrink-0 items-center justify-center rounded-full text-[12px] text-soft"
                   >
                     ×
                   </button>
@@ -359,10 +370,10 @@ export function LogSpend({
               )}
 
               {noteOpen && (
-                <div className="flex h-9 w-full max-w-[270px] items-center gap-1.5 rounded-full border border-line bg-tint/70 px-3">
+                <div className="flex h-7 w-full max-w-[250px] items-center gap-1 rounded-full border border-line bg-tint/70 px-2.5">
                   <svg
-                    width="13"
-                    height="13"
+                    width="11"
+                    height="11"
                     viewBox="0 0 24 24"
                     fill="none"
                     stroke="currentColor"
@@ -389,14 +400,14 @@ export function LogSpend({
                     aria-label="Spend note"
                     autoFocus
                     maxLength={60}
-                    className="h-7 min-h-0 min-w-0 flex-1 bg-transparent text-[13px] text-ink placeholder:text-faint"
+                    className="h-6 min-h-0 min-w-0 flex-1 bg-transparent text-[12px] text-ink placeholder:text-faint"
                   />
                   {note && (
                     <button
                       type="button"
                       onClick={() => setNote('')}
                       aria-label="Clear note text"
-                      className="flex h-5 w-5 min-h-0 shrink-0 items-center justify-center rounded-full text-[13px] text-soft"
+                      className="flex h-4 w-4 min-h-0 shrink-0 items-center justify-center rounded-full text-[12px] text-soft"
                     >
                       ×
                     </button>
@@ -404,7 +415,7 @@ export function LogSpend({
                   <button
                     type="button"
                     onClick={() => setNoteOpen(false)}
-                    className="min-h-0 shrink-0 rounded-full bg-ink px-2.5 py-0.5 text-[11px] font-medium text-white"
+                    className="min-h-0 shrink-0 rounded-full bg-ink px-2 py-0.5 text-[10px] font-medium text-white"
                   >
                     Done
                   </button>
@@ -413,9 +424,13 @@ export function LogSpend({
             </div>
           </div>
 
-          <div className="mb-4 flex flex-wrap justify-center gap-2">
+          <div className="mb-2.5 flex flex-wrap justify-center gap-1.5">
             {labels.map((l) => (
-              <Chip key={l} onClick={() => commit({ label: l })}>
+              <Chip
+                key={l}
+                onClick={() => commit({ label: l })}
+                className="h-8 min-h-0 px-3 text-[12px]"
+              >
                 {l}
               </Chip>
             ))}
@@ -425,13 +440,14 @@ export function LogSpend({
                 if (amount <= 0) toast('Enter an amount first', 'warm');
                 else setView('picker');
               }}
+              className="h-8 min-h-0 px-3 text-[12px]"
             >
               More
             </Chip>
           </div>
 
           <Keypad onKey={press} />
-          <PrimaryButton className="mt-3" onClick={() => commit({ label: 'Sort later' })}>
+          <PrimaryButton className="mt-2 h-[46px] min-h-0 text-[15px]" onClick={() => commit({ label: 'Sort later' })}>
             Save
           </PrimaryButton>
         </>

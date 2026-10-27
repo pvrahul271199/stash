@@ -108,7 +108,11 @@ export function saveUsername(username: string): string {
  */
 export function getSupabaseConfig(): SupabaseConfig | null {
   const envUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ?? '';
-  const envKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() ?? '';
+  const envKey =
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() ||
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY?.trim() ||
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY?.trim() ||
+    '';
   const envWorkspace = process.env.NEXT_PUBLIC_STASH_WORKSPACE_ID?.trim() || 'default';
 
   if (typeof window !== 'undefined') {
@@ -627,6 +631,68 @@ export async function clearRemoteWorkspace(): Promise<void> {
     ]);
   } catch {
     /* offline best-effort */
+  }
+}
+
+export interface RemoteStatus {
+  ok: boolean;
+  workspaceId: string;
+  plans: number;
+  cycles: number;
+  entries: number;
+  events: number;
+  error?: string;
+}
+
+/**
+ * Queries Supabase directly for the active workspace so the user can verify
+ * that rows are actually stored in the remote tables.
+ */
+export async function checkRemoteStatus(): Promise<RemoteStatus> {
+  const config = getSupabaseConfig();
+  if (!config) {
+    return {
+      ok: false,
+      workspaceId: 'default',
+      plans: 0,
+      cycles: 0,
+      entries: 0,
+      events: 0,
+      error: 'No Supabase credentials configured.',
+    };
+  }
+  const ws = encodeURIComponent(config.workspaceId);
+  try {
+    const [plans, cycles, entries, events] = await Promise.all([
+      pgRequest<{ id: number }[]>(config, `stash_plans?workspace_id=eq.${ws}&select=id`),
+      pgRequest<{ id: number }[]>(config, `stash_cycles?workspace_id=eq.${ws}&select=id`),
+      pgRequest<{ id: string }[]>(
+        config,
+        `stash_entries?workspace_id=eq.${ws}&deleted_at=is.null&select=id`,
+      ),
+      pgRequest<{ id: number }[]>(config, `stash_events?workspace_id=eq.${ws}&select=id`).catch(
+        () => [] as { id: number }[],
+      ),
+    ]);
+    return {
+      ok: true,
+      workspaceId: config.workspaceId,
+      plans: plans?.length ?? 0,
+      cycles: cycles?.length ?? 0,
+      entries: entries?.length ?? 0,
+      events: events?.length ?? 0,
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return {
+      ok: false,
+      workspaceId: config.workspaceId,
+      plans: 0,
+      cycles: 0,
+      entries: 0,
+      events: 0,
+      error: msg,
+    };
   }
 }
 
