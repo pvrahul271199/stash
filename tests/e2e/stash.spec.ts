@@ -5,9 +5,10 @@ test.describe('Stash E2E flows', () => {
     await page.clock.install({ time: new Date(2026, 9, 27, 10, 0, 0) });
     await page.goto('/');
 
-    // Welcome -> Onboarding
+    // Welcome -> User screen -> Onboarding
     await expect(page.getByRole('heading', { name: 'Know what you can spend today.' })).toBeVisible();
     await page.getByRole('button', { name: 'Set up my month' }).click();
+    await page.getByRole('button', { name: /Continue/ }).click();
 
     // 1. Income: 50,000
     const input = page.getByRole('textbox');
@@ -79,6 +80,7 @@ test.describe('Stash E2E flows', () => {
     await page.goto('/');
 
     await page.getByRole('button', { name: 'Set up my month' }).click();
+    await page.getByRole('button', { name: /Continue/ }).click();
     const input = page.getByRole('textbox');
     await input.fill('50000');
     await page.getByRole('button', { name: 'Continue' }).click();

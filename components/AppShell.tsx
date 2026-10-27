@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Toast } from './ui/Toast';
 import { TabBar, type Tab } from './ui/TabBar';
 import { Welcome } from './screens/Welcome';
+import { UserScreen } from './screens/UserScreen';
 import { Onboarding } from './screens/Onboarding';
 import { PlanSummary } from './screens/PlanSummary';
 import { TodayTab } from './screens/TodayTab';
@@ -28,7 +29,7 @@ import { supabaseSync } from '@/lib/sync';
 import { getDB } from '@/db/schema';
 import { useUI } from '@/store/ui';
 
-type Flow = 'welcome' | 'onboarding' | 'summary' | 'changePlan' | 'changeSummary';
+type Flow = 'welcome' | 'user' | 'onboarding' | 'summary' | 'changePlan' | 'changeSummary';
 
 export function AppShell() {
   const snap = useSnapshot();
@@ -187,9 +188,20 @@ export function AppShell() {
   } else if (flow === 'welcome') {
     body = (
       <Welcome
-        onStart={async (username) => {
+        onStart={() => setFlow('user')}
+        onSample={handleSample}
+      />
+    );
+  } else if (flow === 'user') {
+    body = (
+      <UserScreen
+        busy={busy}
+        onBack={() => setFlow('welcome')}
+        onContinue={async (username) => {
           if (username && supabaseSync.isEnabled()) {
+            setBusy(true);
             const restored = await supabaseSync.pull().catch(() => false);
+            setBusy(false);
             if (restored) {
               await runSync();
               setTab('today');
@@ -198,14 +210,13 @@ export function AppShell() {
           }
           setFlow('onboarding');
         }}
-        onSample={handleSample}
       />
     );
   } else if (flow === 'onboarding') {
     body = (
       <Onboarding
         initial={draft ?? undefined}
-        onExit={() => setFlow('welcome')}
+        onExit={() => setFlow('user')}
         onDone={(p) => {
           setDraft(p);
           setFlow('summary');
