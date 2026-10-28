@@ -1,7 +1,13 @@
 'use client';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { BackIcon, GhostButton, IconButton, PrimaryButton } from '../ui/Button';
-import { encodeUsernameToBase64, getStoredUsername, saveUsername } from '@/lib/sync';
+import {
+  checkUsernameInCloud,
+  encodeUsernameToBase64,
+  getStoredUsername,
+  saveUsername,
+  type RemoteStatus,
+} from '@/lib/sync';
 
 const AVATAR_THEMES = [
   { name: 'Indigo', bg: '#EEF2FF', ring: '#1E1B4B', accent: '#4F46E5', cheek: '#C7D2FE' },
@@ -23,10 +29,30 @@ export function UserScreen({
   const [username, setUsername] = useState(() => getStoredUsername());
   const [focused, setFocused] = useState(false);
   const [themeIdx, setThemeIdx] = useState(0);
+  const [cloudCheck, setCloudCheck] = useState<RemoteStatus | null>(null);
+  const [checkingCloud, setCheckingCloud] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const trimmed = username.trim().toLowerCase();
   const b64Preview = trimmed ? encodeUsernameToBase64(trimmed) : null;
+  const hasExistingData = Boolean(
+    cloudCheck?.ok && (cloudCheck.cycles > 0 || cloudCheck.plans > 0 || cloudCheck.entries > 0),
+  );
+
+  useEffect(() => {
+    if (!trimmed) {
+      setCloudCheck(null);
+      setCheckingCloud(false);
+      return;
+    }
+    setCheckingCloud(true);
+    const t = setTimeout(async () => {
+      const res = await checkUsernameInCloud(trimmed);
+      setCloudCheck(res);
+      setCheckingCloud(false);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [trimmed]);
 
   const charSum = trimmed.split('').reduce((s, ch) => s + ch.charCodeAt(0), 0);
   const activeIdx = (themeIdx + charSum) % AVATAR_THEMES.length;
@@ -53,10 +79,18 @@ export function UserScreen({
         </div>
 
         <h1 className="mt-2 text-question font-semibold text-ink">
-          {trimmed ? `Welcome, ${trimmed}` : 'Who’s using Stash?'}
+          {hasExistingData
+            ? `Welcome back, ${trimmed}!`
+            : trimmed
+              ? `Welcome, ${trimmed}`
+              : 'Who’s using Stash?'}
         </h1>
         <p className="mt-1.5 text-[14px] text-soft">
-          Pick a username. We convert it to Base64 to keep your workspace synced across devices.
+          {hasExistingData
+            ? `Found your saved workspace (${cloudCheck?.entries ?? 0} ${
+                (cloudCheck?.entries ?? 0) === 1 ? 'spend' : 'spends'
+              }). Tap below to restore your month.`
+            : 'Enter your username. If you used Stash before, we’ll restore your month automatically.'}
         </p>
 
         {/* Interactive SVG Avatar Stage */}
@@ -221,9 +255,23 @@ export function UserScreen({
 
           <div className="mt-2.5 flex min-h-[28px] items-center justify-center">
             {b64Preview ? (
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-tint px-3 py-1 text-[12px] text-soft">
-                <span className="h-1.5 w-1.5 rounded-full bg-good" />
-                DB Key (Base64): <code className="font-mono font-semibold text-ink">{b64Preview}</code>
+              <span
+                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] ${
+                  hasExistingData ? 'bg-goodBg text-good' : 'bg-tint text-soft'
+                }`}
+              >
+                <span className={`h-1.5 w-1.5 rounded-full ${hasExistingData ? 'bg-good' : 'bg-ink'}`} />
+                {checkingCloud ? (
+                  'Checking cloud…'
+                ) : hasExistingData ? (
+                  <>
+                    Existing user found · Key: <code className="font-mono font-semibold">{b64Preview}</code>
+                  </>
+                ) : (
+                  <>
+                    New user · Key: <code className="font-mono font-semibold text-ink">{b64Preview}</code>
+                  </>
+                )}
               </span>
             ) : (
               <span className="text-[12px] text-faint">Tap the avatar above to customize your style</span>
@@ -234,7 +282,13 @@ export function UserScreen({
 
       <div className="flex flex-col gap-1.5">
         <PrimaryButton disabled={busy} onClick={() => submit()}>
-          {busy ? 'Checking workspace…' : trimmed ? `Continue as ${trimmed}` : 'Continue'}
+          {busy
+            ? 'Restoring workspace…'
+            : hasExistingData
+              ? `Restore ${trimmed}’s data`
+              : trimmed
+                ? `Continue as ${trimmed}`
+                : 'Continue'}
         </PrimaryButton>
         {trimmed && (
           <GhostButton disabled={busy} onClick={() => submit('')}>

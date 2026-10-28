@@ -358,6 +358,11 @@ export const supabaseSync: SyncService = {
       is_estimate: e.isEstimate,
       hour: e.hour,
       created_at: e.createdAt,
+      metadata: {
+        event: e.event ?? null,
+        payment: e.payment ?? null,
+        note: e.note ?? null,
+      },
     }));
 
     const categoryRows: DbCategoryRow[] = categories
@@ -384,6 +389,43 @@ export const supabaseSync: SyncService = {
 
     const upsertHeaders = { Prefer: 'resolution=merge-duplicates,return=minimal' };
 
+    const pushEntries = async () => {
+      if (!entryRows.length) return;
+      try {
+        await pgRequest(config, 'stash_entries?on_conflict=workspace_id,id', {
+          method: 'POST',
+          headers: upsertHeaders,
+          body: JSON.stringify(entryRows),
+        });
+      } catch {
+        // Fallback if optional columns (event / payment_method / notes) were not migrated yet:
+        const minimalRows = entries.map((e) => ({
+          workspace_id: ws,
+          id: e.id,
+          cycle_id: e.cycleId,
+          day: e.day,
+          amount: e.amount,
+          label: e.label,
+          category: e.category,
+          subcategory: e.subcategory,
+          from_savings: e.fromSavings,
+          is_estimate: e.isEstimate,
+          hour: e.hour,
+          created_at: e.createdAt,
+          metadata: {
+            event: e.event ?? null,
+            payment: e.payment ?? null,
+            note: e.note ?? null,
+          },
+        }));
+        await pgRequest(config, 'stash_entries?on_conflict=workspace_id,id', {
+          method: 'POST',
+          headers: upsertHeaders,
+          body: JSON.stringify(minimalRows),
+        });
+      }
+    };
+
     await Promise.all([
       planRows.length
         ? pgRequest(config, 'stash_plans?on_conflict=workspace_id,id', {
@@ -404,21 +446,15 @@ export const supabaseSync: SyncService = {
             method: 'POST',
             headers: upsertHeaders,
             body: JSON.stringify(dayRows),
-          })
+          }).catch(() => undefined)
         : Promise.resolve(),
-      entryRows.length
-        ? pgRequest(config, 'stash_entries?on_conflict=workspace_id,id', {
-            method: 'POST',
-            headers: upsertHeaders,
-            body: JSON.stringify(entryRows),
-          })
-        : Promise.resolve(),
+      pushEntries().catch(() => undefined),
       categoryRows.length
         ? pgRequest(config, 'stash_categories?on_conflict=workspace_id,id', {
             method: 'POST',
             headers: upsertHeaders,
             body: JSON.stringify(categoryRows),
-          })
+          }).catch(() => undefined)
         : Promise.resolve(),
       eventRows.length
         ? pgRequest(config, 'stash_events?on_conflict=workspace_id,id', {
@@ -445,12 +481,18 @@ export const supabaseSync: SyncService = {
     const [planRows, cycleRows, dayRows, entryRows, categoryRows, eventRows] = await Promise.all([
       pgRequest<DbPlanRow[]>(config, `stash_plans?workspace_id=eq.${ws}&order=id.asc`),
       pgRequest<DbCycleRow[]>(config, `stash_cycles?workspace_id=eq.${ws}&order=id.asc`),
-      pgRequest<DbDayRow[]>(config, `stash_days?workspace_id=eq.${ws}`),
+      pgRequest<DbDayRow[]>(config, `stash_days?workspace_id=eq.${ws}`).catch(() => [] as DbDayRow[]),
       pgRequest<DbEntryRow[]>(
         config,
         `stash_entries?workspace_id=eq.${ws}&deleted_at=is.null&order=created_at.asc`,
+      ).catch(() =>
+        pgRequest<DbEntryRow[]>(config, `stash_entries?workspace_id=eq.${ws}&order=created_at.asc`).catch(
+          () => [] as DbEntryRow[],
+        ),
       ),
-      pgRequest<DbCategoryRow[]>(config, `stash_categories?workspace_id=eq.${ws}&order=sort_order.asc`),
+      pgRequest<DbCategoryRow[]>(config, `stash_categories?workspace_id=eq.${ws}&order=sort_order.asc`).catch(
+        () => [] as DbCategoryRow[],
+      ),
       pgRequest<DbEventRow[]>(config, `stash_events?workspace_id=eq.${ws}&order=created_at.asc`).catch(
         () => [] as DbEventRow[],
       ),
@@ -462,8 +504,15 @@ export const supabaseSync: SyncService = {
 
     const db = getDB();
     await db.transaction('rw', [db.plan, db.cycle, db.days, db.entries, db.categories, db.events], async () => {
+      await Promise.all([
+        db.plan.clear(),
+        db.cycle.clear(),
+        db.days.clear(),
+        db.entries.clear(),
+        db.events.clear(),
+      ]);
+
       if (planRows?.length) {
-        await db.plan.clear();
         await db.plan.bulkPut(
           planRows.map((r) => ({
             id: r.id,
@@ -483,7 +532,6 @@ export const supabaseSync: SyncService = {
       }
 
       if (cycleRows?.length) {
-        await db.cycle.clear();
         await db.cycle.bulkPut(
           cycleRows.map((r) => ({
             id: r.id,
@@ -499,7 +547,6 @@ export const supabaseSync: SyncService = {
       }
 
       if (dayRows?.length) {
-        await db.days.clear();
         await db.days.bulkPut(
           dayRows.map(
             (r): DayRow => ({
@@ -513,30 +560,28 @@ export const supabaseSync: SyncService = {
         );
       }
 
-      if (entryRows) {
-        await db.entries.clear();
-        if (entryRows.length) {
-          await db.entries.bulkPut(
-            entryRows.map(
-              (r): Entry => ({
-                id: r.id,
-                cycleId: Number(r.cycle_id),
-                day: Number(r.day),
-                amount: Number(r.amount),
-                label: r.label,
-                category: r.category,
-                subcategory: r.subcategory,
-                event: r.event ?? null,
-                payment: r.payment_method ?? null,
-                note: r.notes ?? null,
-                fromSavings: Boolean(r.from_savings),
-                isEstimate: Boolean(r.is_estimate),
-                hour: Number(r.hour),
-                createdAt: Number(r.created_at),
-              }),
-            ),
-          );
-        }
+      if (entryRows?.length) {
+        await db.entries.bulkPut(
+          entryRows.map(
+            (r): Entry => ({
+              id: r.id,
+              cycleId: Number(r.cycle_id),
+              day: Number(r.day),
+              amount: Number(r.amount),
+              label: r.label,
+              category: r.category,
+              subcategory: r.subcategory,
+              event: r.event ?? (typeof r.metadata?.event === 'string' ? r.metadata.event : null),
+              payment:
+                r.payment_method ?? (typeof r.metadata?.payment === 'string' ? r.metadata.payment : null),
+              note: r.notes ?? (typeof r.metadata?.note === 'string' ? r.metadata.note : null),
+              fromSavings: Boolean(r.from_savings),
+              isEstimate: Boolean(r.is_estimate),
+              hour: Number(r.hour),
+              createdAt: Number(r.created_at),
+            }),
+          ),
+        );
       }
 
       if (categoryRows?.length) {
@@ -555,7 +600,6 @@ export const supabaseSync: SyncService = {
       }
 
       if (eventRows?.length) {
-        await db.events.clear();
         await db.events.bulkPut(
           eventRows.map(
             (r): StashEvent => ({
@@ -692,6 +736,50 @@ export async function checkRemoteStatus(): Promise<RemoteStatus> {
       entries: 0,
       events: 0,
       error: msg,
+    };
+  }
+}
+
+/**
+ * Checks whether a specific username already has saved data in Supabase
+ * without mutating localStorage yet.
+ */
+export async function checkUsernameInCloud(username: string): Promise<RemoteStatus | null> {
+  const baseConfig = getSupabaseConfig();
+  if (!baseConfig) return null;
+  const clean = username.trim().toLowerCase();
+  if (!clean) return null;
+  const b64 = encodeUsernameToBase64(clean);
+  const config: SupabaseConfig = { ...baseConfig, workspaceId: b64 };
+  const ws = encodeURIComponent(b64);
+  try {
+    const [plans, cycles, entries, events] = await Promise.all([
+      pgRequest<{ id: number }[]>(config, `stash_plans?workspace_id=eq.${ws}&select=id`),
+      pgRequest<{ id: number }[]>(config, `stash_cycles?workspace_id=eq.${ws}&select=id`),
+      pgRequest<{ id: string }[]>(config, `stash_entries?workspace_id=eq.${ws}&select=id`).catch(
+        () => [] as { id: string }[],
+      ),
+      pgRequest<{ id: number }[]>(config, `stash_events?workspace_id=eq.${ws}&select=id`).catch(
+        () => [] as { id: number }[],
+      ),
+    ]);
+    return {
+      ok: true,
+      workspaceId: b64,
+      plans: plans?.length ?? 0,
+      cycles: cycles?.length ?? 0,
+      entries: entries?.length ?? 0,
+      events: events?.length ?? 0,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      workspaceId: b64,
+      plans: 0,
+      cycles: 0,
+      entries: 0,
+      events: 0,
+      error: err instanceof Error ? err.message : String(err),
     };
   }
 }

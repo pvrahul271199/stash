@@ -28,6 +28,7 @@ import { todayISO } from '@/lib/dates';
 import { supabaseSync } from '@/lib/sync';
 import { getDB } from '@/db/schema';
 import { useUI } from '@/store/ui';
+import { useToast } from '@/store/toast';
 
 type Flow = 'welcome' | 'user' | 'onboarding' | 'summary' | 'changePlan' | 'changeSummary';
 
@@ -35,6 +36,7 @@ export function AppShell() {
   const snap = useSnapshot();
   const sheet = useUI((s) => s.sheet);
   const setSheet = useUI((s) => s.setSheet);
+  const toast = useToast((s) => s.show);
   const [ready, setReady] = useState(false);
   const [flow, setFlow] = useState<Flow>('welcome');
   const [draft, setDraft] = useState<PlanInput | null>(null);
@@ -204,7 +206,9 @@ export function AppShell() {
             setBusy(false);
             if (restored) {
               await runSync();
+              setFlow('welcome');
               setTab('today');
+              toast(`Welcome back, ${username}! Restored your data.`);
               return;
             }
           }

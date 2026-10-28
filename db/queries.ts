@@ -29,11 +29,11 @@ import { DEFAULT_SAMPLE_PLAN, SAMPLE_DAYS, generateSampleSpends } from '@/lib/sa
 import { buildCSV, type CsvRow } from '@/lib/csv';
 import { validateName } from '@/lib/categories';
 import {
-  clearRemoteWorkspace,
   deleteRemoteCategory,
   deleteRemoteEntry,
   deleteRemoteEvent,
   scheduleSync,
+  supabaseSync,
 } from '@/lib/sync';
 
 /* ---------- reads ---------- */
@@ -180,6 +180,9 @@ async function startCycle(p: PlanInput, startDate: string, addPlan: boolean): Pr
 export async function createPlanAndCycle(p: PlanInput, startDate: string = todayISO()): Promise<void> {
   await startCycle(p, startDate, true);
   await persistStorage();
+  if (supabaseSync.isEnabled()) {
+    await supabaseSync.push().catch(() => {});
+  }
   scheduleSync();
 }
 
@@ -188,6 +191,9 @@ export async function startNextMonth(): Promise<void> {
   const plan = await getDB().plan.orderBy('id').last();
   if (!plan) return;
   await startCycle(plan, todayISO(), false);
+  if (supabaseSync.isEnabled()) {
+    await supabaseSync.push().catch(() => {});
+  }
   scheduleSync();
 }
 
@@ -644,6 +650,9 @@ export async function fillSample(now: Date = new Date()): Promise<void> {
     await db.cycle.update(cycleId, { currentDay: state.currentDay, pool: state.pool, fromSavingsTotal: fromSavings });
   });
   await persistStorage();
+  if (supabaseSync.isEnabled()) {
+    await supabaseSync.push().catch(() => {});
+  }
   scheduleSync();
 }
 
@@ -672,11 +681,11 @@ export async function exportCSV(): Promise<string> {
   return buildCSV(rows);
 }
 
+/** Clears local data on this device only (preserves Supabase cloud backup so the user can restore by username). */
 export async function deleteAllData(): Promise<void> {
   const db = getDB();
   await db.transaction('rw', db.tables, async () => {
     await Promise.all(db.tables.map((t) => t.clear()));
   });
   await ensureSeed();
-  void clearRemoteWorkspace();
 }
