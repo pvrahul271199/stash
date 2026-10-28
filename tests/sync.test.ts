@@ -1,10 +1,12 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createPlanAndCycle, deleteAllData } from '@/db/queries';
+import { addSpend, createPlanAndCycle, deleteAllData } from '@/db/queries';
+import { getDB } from '@/db/schema';
 import {
   decodeBase64Username,
   encodeUsernameToBase64,
   featureDataRepo,
+  getActiveUserId,
   getStoredUsername,
   getSupabaseConfig,
   saveSupabaseConfig,
@@ -25,7 +27,7 @@ describe('Supabase Sync & Scalable Feature Store', () => {
     expect(supabaseSync.isEnabled()).toBe(false);
   });
 
-  it('pushes local Dexie tables and upserts featureDataRepo items when configured', async () => {
+  it('pushes local Dexie tables with user_id and upserts stash_users + featureDataRepo items when configured', async () => {
     const requests: { url: string; method: string; body: unknown }[] = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       requests.push({
@@ -51,18 +53,40 @@ describe('Supabase Sync & Scalable Feature Store', () => {
     saveSupabaseConfig({
       url: 'https://demo.supabase.co',
       anonKey: 'test-anon-key',
-      workspaceId: 'rahul-personal',
+      workspaceId: 'cmFodWw=',
     });
+    saveUsername('Rahul', 'Emerald');
 
     expect(supabaseSync.isEnabled()).toBe(true);
+    expect(getActiveUserId()).toBe('cmFodWw=');
 
     await createPlanAndCycle({ income: 80000, bills: 25000, savings: 15000, monthLength: 30 }, '2026-10-01');
+    const cycle = await getDB().cycle.orderBy('id').last();
+    expect(cycle?.userId).toBe('cmFodWw=');
+
+    const entry = await addSpend(cycle!, { amount: 250, label: 'Lunch', category: 'Food', subcategory: 'Lunch' });
+    expect(entry.userId).toBe('cmFodWw=');
+
     await supabaseSync.push();
 
     const urls = requests.map((r) => r.url);
+    expect(urls.some((u) => u.includes('/rest/v1/stash_users'))).toBe(true);
     expect(urls.some((u) => u.includes('/rest/v1/stash_plans'))).toBe(true);
     expect(urls.some((u) => u.includes('/rest/v1/stash_cycles'))).toBe(true);
+    expect(urls.some((u) => u.includes('/rest/v1/stash_entries'))).toBe(true);
     expect(urls.some((u) => u.includes('/rest/v1/stash_categories'))).toBe(true);
+
+    // Every transaction row pushed to stash_entries must carry user_id: 'cmFodWw='
+    const entryReq = requests.find((r) => r.url.includes('/rest/v1/stash_entries'));
+    expect(Array.isArray(entryReq?.body)).toBe(true);
+    const firstRow = (entryReq?.body as Array<Record<string, unknown>>)[0];
+    expect(firstRow.user_id).toBe('cmFodWw=');
+
+    // stash_users table receives the normalized user record
+    const userReq = requests.find((r) => r.url.includes('/rest/v1/stash_users'));
+    const userRow = (userReq?.body as Array<Record<string, unknown>>)[0];
+    expect(userRow.user_id).toBe('cmFodWw=');
+    expect(userRow.username).toBe('rahul');
 
     // Test extensible feature store
     await featureDataRepo.upsert('savings_goals', 'goal-1', {
@@ -74,7 +98,7 @@ describe('Supabase Sync & Scalable Feature Store', () => {
     vi.unstubAllGlobals();
   });
 
-  it('encodes username to Base64 for workspace_id and decodes it back', () => {
+  it('encodes username to Base64 for user_id and decodes it back', () => {
     const store = new Map<string, string>();
     vi.stubGlobal('window', {
       localStorage: {
@@ -96,7 +120,8 @@ describe('Supabase Sync & Scalable Feature Store', () => {
     const b64 = saveUsername('Rahul');
     expect(b64).toBe('cmFodWw=');
     expect(getStoredUsername()).toBe('rahul');
-    expect(getSupabaseConfig()?.workspaceId).toBe('cmFodWw=');
+    expect(getActiveUserId()).toBe('cmFodWw=');
+    expect(getSupabaseConfig()?.userId).toBe('cmFodWw=');
 
     vi.unstubAllGlobals();
   });

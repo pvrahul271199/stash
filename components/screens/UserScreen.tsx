@@ -64,7 +64,7 @@ export function UserScreen({
 
   function submit(nameToUse?: string) {
     const clean = (nameToUse ?? trimmed).trim().toLowerCase();
-    saveUsername(clean);
+    saveUsername(clean, theme.name);
     onContinue(clean || undefined);
   }
 
@@ -265,11 +265,11 @@ export function UserScreen({
                   'Checking cloud…'
                 ) : hasExistingData ? (
                   <>
-                    Existing user found · Key: <code className="font-mono font-semibold">{b64Preview}</code>
+                    Existing user found · User ID: <code className="font-mono font-semibold">{b64Preview}</code>
                   </>
                 ) : (
                   <>
-                    New user · Key: <code className="font-mono font-semibold text-ink">{b64Preview}</code>
+                    New user · User ID: <code className="font-mono font-semibold text-ink">{b64Preview}</code>
                   </>
                 )}
               </span>

@@ -9,6 +9,7 @@ import {
   type Entry,
   type Plan,
   type StashEvent,
+  type UserRecord,
 } from './schema';
 import {
   catchUp,
@@ -29,9 +30,13 @@ import { DEFAULT_SAMPLE_PLAN, SAMPLE_DAYS, generateSampleSpends } from '@/lib/sa
 import { buildCSV, type CsvRow } from '@/lib/csv';
 import { validateName } from '@/lib/categories';
 import {
+  buildUserProfile,
   deleteRemoteCategory,
   deleteRemoteEntry,
   deleteRemoteEvent,
+  getActiveUserId,
+  getStoredAvatarTheme,
+  getStoredUsername,
   scheduleSync,
   supabaseSync,
 } from '@/lib/sync';
@@ -103,6 +108,13 @@ export function useEvents(): StashEvent[] | undefined {
   return useLiveQuery(async () => getDB().events.orderBy('createdAt').reverse().toArray(), []);
 }
 
+export function useCurrentUser(): UserRecord | undefined {
+  return useLiveQuery(async () => {
+    const uid = getActiveUserId();
+    return (await getDB().users.get(uid)) ?? buildUserProfile(getStoredUsername(), getStoredAvatarTheme());
+  }, []);
+}
+
 /** category name -> number of spends */
 export function useCategoryCounts(): Record<string, number> {
   return (
@@ -134,10 +146,12 @@ export function useEventCounts(): Record<string, number> {
 
 export async function ensureSeed(): Promise<void> {
   const db = getDB();
-  await db.transaction('rw', db.categories, db.meta, async () => {
+  const uid = getActiveUserId();
+  await db.transaction('rw', db.categories, db.meta, db.users, async () => {
     if ((await db.categories.count()) === 0) {
       await db.categories.bulkAdd(
         DEFAULT_CATEGORIES.map((c, i) => ({
+          userId: uid,
           name: c.name,
           sortOrder: i,
           isSystem: c.name === 'Other',
@@ -145,9 +159,19 @@ export async function ensureSeed(): Promise<void> {
         })),
       );
     }
-    if (!(await db.meta.get('main'))) {
-      await db.meta.put({ id: 'main', lastUsedLabel: null, schemaVersion: SCHEMA_VERSION });
+    const existingMeta = await db.meta.get('main');
+    if (!existingMeta) {
+      await db.meta.put({ id: 'main', lastUsedLabel: null, activeUserId: uid, schemaVersion: SCHEMA_VERSION });
+    } else if (existingMeta.activeUserId !== uid) {
+      await db.meta.update('main', { activeUserId: uid });
     }
+    const existingUser = await db.users.get(uid);
+    const profile = buildUserProfile(getStoredUsername(), getStoredAvatarTheme());
+    await db.users.put({
+      ...profile,
+      createdAt: existingUser?.createdAt ?? profile.createdAt,
+      lastSeenAt: Date.now(),
+    });
   });
 }
 
@@ -162,9 +186,11 @@ async function persistStorage() {
 async function startCycle(p: PlanInput, startDate: string, addPlan: boolean): Promise<void> {
   const db = getDB();
   const s = initialCycleState(p);
+  const uid = getActiveUserId();
   await db.transaction('rw', db.plan, db.cycle, async () => {
-    if (addPlan) await db.plan.add({ ...p, createdAt: Date.now() });
+    if (addPlan) await db.plan.add({ ...p, userId: uid, createdAt: Date.now() });
     await db.cycle.add({
+      userId: uid,
       startDate,
       totalDays: s.totalDays,
       planAmount: moneyToLiveOn(p),
@@ -234,8 +260,10 @@ export async function addSpend(cycle: Cycle, spend: NewSpend, now: Date = new Da
         ? { category: 'Other', subcategory: null }
         : resolveLabel(spend.label, cats);
   const activeEvent = spend.event === undefined ? ((await db.meta.get('main'))?.activeEvent ?? null) : spend.event;
+  const uid = getActiveUserId();
   const entry: Entry = {
     id: crypto.randomUUID(),
+    userId: uid,
     cycleId: cycle.id!,
     day: cycle.currentDay,
     amount: Math.round(spend.amount),
@@ -279,6 +307,7 @@ export async function updateEntry(id: string, patch: SpendUpdate): Promise<Entry
     const nextFromSavings = patch.fromSavings != null ? patch.fromSavings : prev.fromSavings;
     const next: Entry = {
       ...prev,
+      userId: prev.userId ?? getActiveUserId(),
       amount: nextAmount,
       label: patch.label != null ? patch.label.trim() || prev.label : prev.label,
       category: patch.category != null ? patch.category : prev.category,
@@ -345,13 +374,14 @@ export async function removeEntry(id: string): Promise<void> {
 
 export async function closeCurrentDay(cycleId: number): Promise<CloseResult | null> {
   const db = getDB();
+  const uid = getActiveUserId();
   const res = await db.transaction('rw', db.cycle, db.entries, db.days, async () => {
     const c = await db.cycle.get(cycleId);
     if (!c || c.currentDay > c.totalDays) return null;
     const entries = await db.entries.where('[cycleId+day]').equals([cycleId, c.currentDay]).toArray();
     const r = closeDay(c, spentToday(entries));
-    await db.days.put({ cycleId, ...r.record });
-    await db.cycle.update(cycleId, { currentDay: r.state.currentDay, pool: r.state.pool });
+    await db.days.put({ cycleId, userId: uid, ...r.record });
+    await db.cycle.update(cycleId, { currentDay: r.state.currentDay, pool: r.state.pool, userId: c.userId ?? uid });
     return r;
   });
   if (res) scheduleSync();
@@ -368,6 +398,7 @@ export interface PendingCatchUp {
 /** Runs on load and whenever the app becomes visible again. */
 export async function syncCalendar(today: string = todayISO()): Promise<PendingCatchUp | null> {
   const db = getDB();
+  const uid = getActiveUserId();
   return db.transaction('rw', db.cycle, db.entries, db.days, async () => {
     const c = await db.cycle.orderBy('id').last();
     if (!c || c.currentDay > c.totalDays) return null;
@@ -383,8 +414,8 @@ export async function syncCalendar(today: string = todayISO()): Promise<PendingC
     }
     const plan = planSync(c, cal, (day) => byDay.get(day) ?? { hasEntries: false, spent: 0 });
     if (plan.closes.length) {
-      await db.days.bulkPut(plan.closes.map((r) => ({ cycleId: c.id!, ...r })));
-      await db.cycle.update(c.id!, { currentDay: plan.state.currentDay, pool: plan.state.pool });
+      await db.days.bulkPut(plan.closes.map((r) => ({ cycleId: c.id!, userId: uid, ...r })));
+      await db.cycle.update(c.id!, { currentDay: plan.state.currentDay, pool: plan.state.pool, userId: c.userId ?? uid });
     }
     if (!plan.gap) return null;
     return { cycleId: c.id!, gap: plan.gap, onPlan: onPlanTotal(plan.state, plan.gap), startDate: c.startDate };
@@ -393,14 +424,16 @@ export async function syncCalendar(today: string = todayISO()): Promise<PendingC
 
 export async function applyCatchUp(cycleId: number, total: number, gap: { from: number; to: number }, now = new Date()) {
   const db = getDB();
+  const uid = getActiveUserId();
   await db.transaction('rw', db.cycle, db.entries, db.days, async () => {
     const c = await db.cycle.get(cycleId);
     if (!c || c.currentDay !== gap.from) return;
     const r = catchUp(c, total, gap);
-    await db.days.bulkPut(r.days.map((d) => ({ cycleId, ...d })));
+    await db.days.bulkPut(r.days.map((d) => ({ cycleId, userId: uid, ...d })));
     await db.entries.bulkAdd(
       r.entries.map((e) => ({
         id: crypto.randomUUID(),
+        userId: uid,
         cycleId,
         day: e.day,
         amount: e.amount,
@@ -413,7 +446,7 @@ export async function applyCatchUp(cycleId: number, total: number, gap: { from: 
         createdAt: now.getTime(),
       })),
     );
-    await db.cycle.update(cycleId, { currentDay: r.state.currentDay, pool: r.state.pool });
+    await db.cycle.update(cycleId, { currentDay: r.state.currentDay, pool: r.state.pool, userId: c.userId ?? uid });
   });
   scheduleSync();
 }
@@ -441,7 +474,13 @@ export async function addCategory(name: string): Promise<string | null> {
   const all = await db.categories.toArray();
   const err = validateName(name, all.map((c) => c.name));
   if (err) return err;
-  await db.categories.add({ name: name.trim(), sortOrder: all.length, isSystem: false, subcategories: [] });
+  await db.categories.add({
+    userId: getActiveUserId(),
+    name: name.trim(),
+    sortOrder: all.length,
+    isSystem: false,
+    subcategories: [],
+  });
   await reindexCategories();
   scheduleSync();
   return null;
@@ -499,6 +538,7 @@ export async function addEvent(name: string, categories: string[] = [], note?: s
   if (err) return err;
   const uniqueCats = Array.from(new Set(categories.map((c) => c.trim()).filter(Boolean)));
   await db.events.add({
+    userId: getActiveUserId(),
     name: name.trim(),
     note: note?.trim() || null,
     categories: uniqueCats,
@@ -569,6 +609,7 @@ export async function endEvent(): Promise<void> {
 export async function fillSample(now: Date = new Date()): Promise<void> {
   await ensureSeed();
   const db = getDB();
+  const uid = getActiveUserId();
   let plan: PlanInput | undefined = await db.plan.orderBy('id').last();
   let addPlan = false;
   if (!plan || !isPlanValid(plan) || plan.monthLength <= SAMPLE_DAYS) {
@@ -584,21 +625,24 @@ export async function fillSample(now: Date = new Date()): Promise<void> {
     await Promise.all([db.cycle.clear(), db.days.clear(), db.entries.clear(), db.events.clear()]);
     await db.events.bulkAdd([
       {
+        userId: uid,
         name: 'Weekend getaway',
         note: 'Lonavala trip with friends',
         categories: [],
         createdAt: Date.now() - 2000,
       },
       {
+        userId: uid,
         name: 'Family dinner',
         note: 'Hosting parents at home',
         categories: [],
         createdAt: Date.now() - 1000,
       },
     ]);
-    if (addPlan) await db.plan.add({ ...plan!, createdAt: Date.now() });
+    if (addPlan) await db.plan.add({ ...plan!, userId: uid, createdAt: Date.now() });
     let state = initialCycleState(plan!);
     const cycleId = await db.cycle.add({
+      userId: uid,
       startDate,
       totalDays: state.totalDays,
       planAmount: moneyToLiveOn(plan!),
@@ -626,6 +670,7 @@ export async function fillSample(now: Date = new Date()): Promise<void> {
         }
         entries.push({
           id: crypto.randomUUID(),
+          userId: uid,
           cycleId,
           day,
           amount: s.amount,
@@ -642,7 +687,7 @@ export async function fillSample(now: Date = new Date()): Promise<void> {
       });
       const spent = mine.filter((s) => !s.fromSavings).reduce((t, s) => t + s.amount, 0);
       const r = closeDay(state, spent);
-      rows.push({ cycleId, ...r.record });
+      rows.push({ cycleId, userId: uid, ...r.record });
       state = r.state;
     }
     await db.entries.bulkAdd(entries);

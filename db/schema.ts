@@ -1,7 +1,21 @@
 import Dexie, { type Table } from 'dexie';
 
+export interface UserRecord {
+  /** Primary key: Base64-encoded username (e.g. "cmFodWw="). */
+  userId: string;
+  /** Normalized lowercase username (e.g. "rahul"). */
+  username: string;
+  displayName: string;
+  avatarTheme: string;
+  createdAt: number;
+  lastSeenAt?: number;
+  updatedAt: number;
+}
+
 export interface Plan {
   id?: number;
+  /** Base64-encoded user ID owning this plan. */
+  userId?: string;
   income: number;
   bills: number;
   savings: number;
@@ -16,6 +30,8 @@ export interface Plan {
 
 export interface Cycle {
   id?: number;
+  /** Base64-encoded user ID owning this cycle. */
+  userId?: string;
   /** ISO yyyy-mm-dd, local. */
   startDate: string;
   totalDays: number;
@@ -29,6 +45,8 @@ export interface Cycle {
 export interface DayRow {
   cycleId: number;
   day: number;
+  /** Base64-encoded user ID owning this closed day record. */
+  userId?: string;
   allowanceAtStart: number;
   spent: number;
   status: 'closed' | 'estimated';
@@ -36,6 +54,8 @@ export interface DayRow {
 
 export interface Entry {
   id: string;
+  /** Base64-encoded user ID who logged this spend transaction. */
+  userId?: string;
   cycleId: number;
   day: number;
   amount: number;
@@ -57,6 +77,8 @@ export interface Entry {
 
 export interface StashEvent {
   id?: number;
+  /** Base64-encoded user ID owning this event. */
+  userId?: string;
   /** Event title / text provided by user (e.g. "Goa trip", "Birthday party"). */
   name: string;
   /** Optional descriptive text / note for the event. */
@@ -68,6 +90,8 @@ export interface StashEvent {
 
 export interface Category {
   id?: number;
+  /** Base64-encoded user ID owning this category. */
+  userId?: string;
   name: string;
   sortOrder: number;
   /** Only "Other". */
@@ -79,6 +103,8 @@ export interface Meta {
   id: 'main';
   lastUsedLabel: string | null;
   schemaVersion: number;
+  /** Active Base64 user ID on this device. */
+  activeUserId?: string | null;
   /** Event currently being logged into. Every new spend is tagged with it until it ends. */
   activeEvent?: string | null;
   /** Last payment mode used, so the next spend defaults to it. */
@@ -88,9 +114,10 @@ export interface Meta {
 export const PAYMENT_MODES = ['UPI', 'Card', 'Cash'] as const;
 export type PaymentMode = (typeof PAYMENT_MODES)[number];
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 export class StashDB extends Dexie {
+  users!: Table<UserRecord, string>;
   plan!: Table<Plan, number>;
   cycle!: Table<Cycle, number>;
   days!: Table<DayRow, [number, number]>;
@@ -127,6 +154,17 @@ export class StashDB extends Dexie {
       entries: 'id, cycleId, [cycleId+day], [cycleId+createdAt], category, event, payment, createdAt',
       categories: '++id, name, sortOrder',
       events: '++id, name, createdAt',
+      meta: 'id',
+    });
+    this.version(4).stores({
+      users: 'userId, username, updatedAt',
+      plan: '++id, userId, createdAt',
+      cycle: '++id, userId, startDate',
+      days: '[cycleId+day], cycleId, userId',
+      entries:
+        'id, userId, cycleId, [userId+cycleId], [cycleId+day], [cycleId+createdAt], category, event, payment, createdAt',
+      categories: '++id, userId, name, sortOrder',
+      events: '++id, userId, name, createdAt',
       meta: 'id',
     });
   }
