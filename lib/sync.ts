@@ -22,6 +22,7 @@ import {
   normalizeUsername,
   type UserProfile,
 } from './user';
+import { dateOfDay, daysBetween } from './dates';
 
 export {
   DEFAULT_USER_ID,
@@ -271,6 +272,7 @@ interface DbEntryRow {
   id: string;
   cycle_id: number;
   day: number;
+  entry_date?: string | null;
   amount: number;
   label: string;
   category: string;
@@ -499,32 +501,40 @@ export const supabaseSync: SyncService = {
       status: d.status,
     }));
 
-    const entryRows: DbEntryRow[] = entries.map((e) => ({
-      workspace_id: ws,
-      user_id: uid,
-      id: e.id,
-      cycle_id: e.cycleId,
-      day: e.day,
-      amount: e.amount,
-      label: e.label,
-      category: e.category,
-      subcategory: e.subcategory,
-      event: e.event ?? null,
-      payment_method: e.payment ?? null,
-      notes: e.note ?? null,
-      from_savings: e.fromSavings,
-      is_estimate: e.isEstimate,
-      hour: e.hour,
-      created_at: e.createdAt,
-      metadata: {
-        userId: uid,
-        username,
+    const cycleStartMap = new Map(cycles.map((c) => [c.id!, c.startDate]));
+
+    const entryRows: DbEntryRow[] = entries.map((e) => {
+      const entryIso =
+        e.date || (cycleStartMap.get(e.cycleId) ? dateOfDay(cycleStartMap.get(e.cycleId)!, e.day) : null);
+      return {
+        workspace_id: ws,
+        user_id: uid,
+        id: e.id,
+        cycle_id: e.cycleId,
+        day: e.day,
+        entry_date: entryIso,
+        amount: e.amount,
+        label: e.label,
+        category: e.category,
+        subcategory: e.subcategory,
         event: e.event ?? null,
-        payment: e.payment ?? null,
-        note: e.note ?? null,
-        adjustsPool: e.adjustsPool ?? true,
-      },
-    }));
+        payment_method: e.payment ?? null,
+        notes: e.note ?? null,
+        from_savings: e.fromSavings,
+        is_estimate: e.isEstimate,
+        hour: e.hour,
+        created_at: e.createdAt,
+        metadata: {
+          userId: uid,
+          username,
+          date: entryIso,
+          event: e.event ?? null,
+          payment: e.payment ?? null,
+          note: e.note ?? null,
+          adjustsPool: e.adjustsPool ?? true,
+        },
+      };
+    });
 
     const categoryRows: DbCategoryRow[] = categories
       .filter((c): c is Category & { id: number } => c.id != null)
@@ -803,16 +813,32 @@ export const supabaseSync: SyncService = {
         }
 
         if (entryRows.length) {
+          const cycleMap = new Map(cycleRows.map((c) => [Number(c.id), c.start_date]));
+          const uniqueEntries = new Map<string, DbEntryRow>();
+          for (const r of entryRows) {
+            uniqueEntries.set(r.id, r);
+          }
+
           await db.entries.bulkPut(
-            entryRows.map(
-              (r): Entry => ({
+            Array.from(uniqueEntries.values()).map((r): Entry => {
+              const cid = Number(r.cycle_id);
+              const cycleStart = cycleMap.get(cid);
+              const rawDate =
+                r.entry_date ||
+                (typeof r.metadata?.date === 'string' ? r.metadata.date : null) ||
+                (cycleStart ? dateOfDay(cycleStart, Number(r.day)) : null);
+              const resolvedDay =
+                cycleStart && rawDate ? Math.max(1, daysBetween(cycleStart, rawDate) + 1) : Number(r.day);
+
+              return {
                 id: r.id,
                 userId:
                   r.user_id ||
                   (typeof r.metadata?.userId === 'string' ? r.metadata.userId : null) ||
                   uid,
-                cycleId: Number(r.cycle_id),
-                day: Number(r.day),
+                cycleId: cid,
+                day: resolvedDay,
+                date: rawDate ?? undefined,
                 amount: Number(r.amount),
                 label: r.label,
                 category: r.category,
@@ -827,8 +853,8 @@ export const supabaseSync: SyncService = {
                 isEstimate: Boolean(r.is_estimate),
                 hour: Number(r.hour),
                 createdAt: Number(r.created_at),
-              }),
-            ),
+              };
+            }),
           );
         }
 

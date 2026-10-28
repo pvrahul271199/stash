@@ -58,6 +58,8 @@ export interface Entry {
   userId?: string;
   cycleId: number;
   day: number;
+  /** Exact calendar ISO date (yyyy-mm-dd) this transaction belongs to. */
+  date?: string;
   amount: number;
   label: string;
   category: string;
@@ -164,7 +166,7 @@ export class StashDB extends Dexie {
       cycle: '++id, userId, startDate',
       days: '[cycleId+day], cycleId, userId',
       entries:
-        'id, userId, cycleId, [userId+cycleId], [cycleId+day], [cycleId+createdAt], category, event, payment, createdAt',
+        'id, userId, cycleId, date, [cycleId+date], [userId+cycleId], [cycleId+day], [cycleId+createdAt], category, event, payment, createdAt',
       categories: '++id, userId, name, sortOrder',
       events: '++id, userId, name, createdAt',
       meta: 'id',

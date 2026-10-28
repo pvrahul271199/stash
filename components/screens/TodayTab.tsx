@@ -40,12 +40,8 @@ export function TodayTab({ cycle, plan }: { cycle: Cycle; plan: Plan }) {
   const [editing, setEditing] = useState<Entry | null>(null);
   const setSheet = useUI((s) => s.setSheet);
   const entries = useDayEntries(cycle.id, cycle.currentDay) ?? [];
-  const allCycleEntries = useCycleEntries(cycle.id) ?? [];
   const dayRows = useDayRows(cycle.id) ?? [];
-  const recentEntries =
-    entries.length > 0
-      ? entries.slice(0, 4)
-      : [...allCycleEntries].sort((a, b) => b.createdAt - a.createdAt).slice(0, 4);
+  const todayEntries = entries.slice(0, 10);
 
   // Lets the shell hold back the month-end screen until the user has seen "Day closed".
   useEffect(() => {
@@ -121,16 +117,14 @@ export function TodayTab({ cycle, plan }: { cycle: Cycle; plan: Plan }) {
           <span className="num text-ink">{inr(remaining)}</span> left for {n} {n === 1 ? 'day' : 'days'}
         </p>
 
-        <section className="mt-6" aria-label="Recent spends">
-          {recentEntries.length === 0 ? (
-            <p className="text-body text-soft">Paid for something? Log it in a few seconds.</p>
+        <section className="mt-6" aria-label="Today's spends">
+          {todayEntries.length === 0 ? (
+            <p className="text-body text-soft">No spends logged today yet. Paid for something? Log it in a few seconds.</p>
           ) : (
             <>
-              {entries.length === 0 && (
-                <p className="mb-1 text-[12px] font-medium text-soft">Recent from earlier days</p>
-              )}
+              <p className="mb-1 text-[12px] font-semibold tracking-wide text-soft uppercase">Today&apos;s spends</p>
               <ul className="divide-y divide-line">
-                {recentEntries.map((e) => (
+                {todayEntries.map((e) => (
                   <li key={e.id} className="flex items-center justify-between gap-2 py-3">
                     <button
                       type="button"
@@ -142,7 +136,6 @@ export function TodayTab({ cycle, plan }: { cycle: Cycle; plan: Plan }) {
                         {e.fromSavings && <span className="ml-2 text-[12px] text-warm">from savings</span>}
                       </p>
                       <p className="text-[13px] text-faint">
-                        {e.day !== cycle.currentDay ? `Day ${e.day} · ` : ''}
                         {e.subcategory ?? e.category}
                         {e.payment ? ` · ${e.payment}` : ''}
                         {e.event ? ` · ${e.event}` : ''}

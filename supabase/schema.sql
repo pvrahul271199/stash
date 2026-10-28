@@ -133,6 +133,7 @@ alter table public.stash_days alter column user_id set default 'default';
 alter table public.stash_days alter column user_id set not null;
 
 create index if not exists idx_stash_days_user_cycle on public.stash_days (user_id, cycle_id);
+create index if not exists idx_stash_days_user_cycle_day on public.stash_days (user_id, cycle_id, day);
 create index if not exists idx_stash_days_cycle on public.stash_days (workspace_id, cycle_id);
 
 drop trigger if exists trg_stash_days_updated_at on public.stash_days;
@@ -149,6 +150,7 @@ create table if not exists public.stash_entries (
   user_id text not null default 'default',
   cycle_id bigint not null,
   day integer not null,
+  entry_date text,
   amount integer not null,
   label text not null,
   category text not null,
@@ -171,6 +173,7 @@ create table if not exists public.stash_entries (
 alter table public.stash_entries add column if not exists event text;
 alter table public.stash_entries add column if not exists payment_method text;
 alter table public.stash_entries add column if not exists notes text;
+alter table public.stash_entries add column if not exists entry_date text;
 alter table public.stash_entries drop constraint if exists stash_entries_user_id_fkey;
 drop policy if exists "stash_entries_access" on public.stash_entries;
 alter table public.stash_entries alter column user_id type text using coalesce(user_id::text, workspace_id, 'default');
@@ -179,11 +182,15 @@ alter table public.stash_entries alter column user_id set default 'default';
 alter table public.stash_entries alter column user_id set not null;
 
 create index if not exists idx_stash_entries_user_cycle_day on public.stash_entries (user_id, cycle_id, day);
+create index if not exists idx_stash_entries_user_date on public.stash_entries (user_id, entry_date);
+create index if not exists idx_stash_entries_user_cycle on public.stash_entries (user_id, cycle_id);
 create index if not exists idx_stash_entries_user_created on public.stash_entries (user_id, created_at desc);
 create index if not exists idx_stash_entries_user_category on public.stash_entries (user_id, category);
 create index if not exists idx_stash_entries_user_event on public.stash_entries (user_id, event);
 create index if not exists idx_stash_entries_user_payment on public.stash_entries (user_id, payment_method);
 create index if not exists idx_stash_entries_cycle_day on public.stash_entries (workspace_id, cycle_id, day);
+create index if not exists idx_stash_entries_workspace_id on public.stash_entries (workspace_id, id);
+create index if not exists idx_stash_entries_active on public.stash_entries (user_id, created_at desc) where deleted_at is null;
 create index if not exists idx_stash_entries_metadata on public.stash_entries using gin (metadata);
 
 drop trigger if exists trg_stash_entries_updated_at on public.stash_entries;
@@ -218,6 +225,7 @@ alter table public.stash_categories alter column user_id set default 'default';
 alter table public.stash_categories alter column user_id set not null;
 
 create index if not exists idx_stash_categories_user_id on public.stash_categories (user_id, sort_order);
+create index if not exists idx_stash_categories_user_name on public.stash_categories (user_id, name);
 create index if not exists idx_stash_categories_workspace on public.stash_categories (workspace_id, sort_order);
 
 drop trigger if exists trg_stash_categories_updated_at on public.stash_categories;
@@ -249,6 +257,7 @@ alter table public.stash_events alter column user_id set default 'default';
 alter table public.stash_events alter column user_id set not null;
 
 create index if not exists idx_stash_events_user_id on public.stash_events (user_id, created_at desc);
+create index if not exists idx_stash_events_user_name on public.stash_events (user_id, name);
 create index if not exists idx_stash_events_workspace on public.stash_events (workspace_id, created_at desc);
 
 drop trigger if exists trg_stash_events_updated_at on public.stash_events;
@@ -308,3 +317,18 @@ create policy "stash_entries_access" on public.stash_entries for all using (true
 create policy "stash_categories_access" on public.stash_categories for all using (true) with check (true);
 create policy "stash_events_access" on public.stash_events for all using (true) with check (true);
 create policy "stash_feature_data_access" on public.stash_feature_data for all using (true) with check (true);
+
+-- ============================================================================
+-- 3. AUTOMATIC BACKFILL FOR EXISTING DATA
+-- Populates stash_users from existing cycles/entries if not already present
+-- ============================================================================
+insert into public.stash_users (user_id, username, display_name, avatar_theme, created_at)
+select distinct
+  c.user_id,
+  coalesce(nullif(c.metadata->>'username', ''), 'default'),
+  coalesce(nullif(c.metadata->>'username', ''), 'Guest'),
+  coalesce(nullif(c.metadata->>'avatarTheme', ''), 'Indigo'),
+  (extract(epoch from now()) * 1000)::bigint
+from public.stash_cycles c
+where c.user_id is not null and c.user_id <> ''
+on conflict (user_id) do nothing;

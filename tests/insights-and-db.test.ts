@@ -400,6 +400,7 @@ describe('database queries', () => {
       1,
     );
     expect(backdated.day).toBe(1);
+    expect(backdated.date).toBe('2026-10-09');
     expect(backdated.adjustsPool).toBe(true);
     const closedAfterBackdate = (await db.days.get([cycle.id!, 1]))!;
     expect(closedAfterBackdate.spent).toBe(600);
@@ -414,12 +415,18 @@ describe('database queries', () => {
       1,
     );
     expect(backdatedNoAdjust.day).toBe(1);
+    expect(backdatedNoAdjust.date).toBe('2026-10-09');
     expect(backdatedNoAdjust.adjustsPool).toBe(false);
     expect((await db.days.get([cycle.id!, 1]))?.spent).toBe(800);
     expect((await db.cycle.get(cycle.id!))?.pool).toBe(cycleAfterBackdate.pool);
 
+    // Day 2 entries should strictly be empty and not contain any Day 1 transactions
+    const day2Entries = await db.entries.where('[cycleId+day]').equals([cycle.id!, 2]).toArray();
+    expect(day2Entries).toHaveLength(0);
+
     const cycles = await db.cycle.toArray();
     const allEntries = await db.entries.toArray();
+    expect(allEntries.every((e) => Boolean(e.date))).toBe(true);
     expect(searchEntries(allEntries, cycles, 'Updated lunch')).toHaveLength(1);
   });
 });

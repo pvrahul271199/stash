@@ -25,33 +25,46 @@ export function EditSpendSheet({
   const [subcategory, setSubcategory] = useState<string | null>(entry.subcategory);
   const [event, setEvent] = useState<string | null>(entry.event ?? null);
   const [fromSavings, setFromSavings] = useState(entry.fromSavings);
+  const [busy, setBusy] = useState(false);
 
   const activeCat = cats.find((c) => c.name === category) ?? null;
 
   async function save() {
+    if (busy) return;
     const amt = Number(amountRaw);
     if (!amt || amt <= 0) {
       toast('Enter a valid amount', 'warm');
       return;
     }
-    await updateEntry(entry.id, {
-      amount: amt,
-      label: label.trim() || category,
-      note: note.trim() || null,
-      payment,
-      category,
-      subcategory,
-      event,
-      fromSavings,
-    });
-    toast('Spend updated');
-    onClose();
+    setBusy(true);
+    try {
+      await updateEntry(entry.id, {
+        amount: amt,
+        label: label.trim() || category,
+        note: note.trim() || null,
+        payment,
+        category,
+        subcategory,
+        event,
+        fromSavings,
+      });
+      toast('Spend updated');
+      onClose();
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function del() {
-    await removeEntry(entry.id);
-    toast('Spend removed');
-    onClose();
+    if (busy) return;
+    setBusy(true);
+    try {
+      await removeEntry(entry.id);
+      toast('Spend removed');
+      onClose();
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -69,7 +82,12 @@ export function EditSpendSheet({
         style={{ paddingBottom: 'calc(var(--safe-bottom) + 20px)' }}
       >
         <div className="flex items-center justify-between">
-          <h2 className="text-section font-semibold text-ink">Edit spend</h2>
+          <div>
+            <h2 className="text-section font-semibold text-ink">Edit spend</h2>
+            {entry.date && (
+              <p className="text-[12px] text-faint">Day {entry.day} · {entry.date}</p>
+            )}
+          </div>
           <IconButton label="Close" onClick={onClose} className="-mr-3">
             <CloseIcon />
           </IconButton>
@@ -234,13 +252,16 @@ export function EditSpendSheet({
         </label>
 
         <div className="mt-5 flex flex-col gap-2">
-          <PrimaryButton onClick={save}>Save changes</PrimaryButton>
+          <PrimaryButton disabled={busy} onClick={save}>
+            {busy ? 'Saving…' : 'Save changes'}
+          </PrimaryButton>
           <button
             type="button"
+            disabled={busy}
             onClick={del}
-            className="min-h-[44px] w-full rounded-btn text-[14px] font-semibold text-warm"
+            className="min-h-[44px] w-full rounded-btn text-[14px] font-semibold text-warm disabled:opacity-50"
           >
-            Delete spend
+            {busy ? 'Deleting…' : 'Delete spend'}
           </button>
         </div>
       </div>

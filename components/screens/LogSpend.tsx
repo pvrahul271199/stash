@@ -1,5 +1,5 @@
 'use client';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { BackIcon, IconButton, PrimaryButton, SecondaryButton } from '../ui/Button';
 import { Chip } from '../ui/Chip';
 import { Keypad } from '../ui/Keypad';
@@ -50,6 +50,8 @@ export function LogSpend({
   const [eventErr, setEventErr] = useState<string | null>(null);
   const [view, setView] = useState<'keypad' | 'picker' | 'big' | 'pastAdjust'>('keypad');
   const [pending, setPending] = useState<Pending | null>(null);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const lastUsed = useLastUsedLabel();
   const lastPayment = useLastPayment();
   const [paymentOverride, setPaymentOverride] = useState<string | null>(null);
@@ -85,20 +87,30 @@ export function LogSpend({
   const targetDateLabel = formatShort(targetIso);
 
   async function persist(p: Pending, fromSavings: boolean, adjustPool = true) {
-    await addSpend(
-      cycle,
-      { amount, ...p, payment, note: note.trim() || null, fromSavings, adjustPool },
-      new Date(),
-      targetDay,
-    );
-    navigator.vibrate?.(10);
-    const suffix = targetDay != null && targetDay !== cycle.currentDay ? ` on ${targetDateLabel} (Day ${targetDay})` : '';
-    toast(
-      p.label === 'Sort later'
-        ? `Saved ₹${num(amount)}${suffix}`
-        : `Saved ₹${num(amount)} for ${p.label}${suffix}`,
-    );
-    onClose();
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      await addSpend(
+        cycle,
+        { amount, ...p, payment, note: note.trim() || null, fromSavings, adjustPool },
+        new Date(),
+        targetDay,
+      );
+      navigator.vibrate?.(10);
+      const suffix = targetDay != null && targetDay !== cycle.currentDay ? ` on ${targetDateLabel} (Day ${targetDay})` : '';
+      toast(
+        p.label === 'Sort later'
+          ? `Saved ₹${num(amount)}${suffix}`
+          : `Saved ₹${num(amount)} for ${p.label}${suffix}`,
+      );
+      onClose();
+    } catch {
+      toast('Failed to save spend. Please try again.', 'warm');
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
   }
 
   /** Every save path goes through here so the past-day adjustment or big-spend rule always applies. */
@@ -247,11 +259,11 @@ export function LogSpend({
             </div>
 
             <div className="flex flex-col gap-2 pt-2">
-              <PrimaryButton onClick={() => persist(pending, false, true)}>
-                Yes, adjust remaining days
+              <PrimaryButton disabled={saving} onClick={() => persist(pending, false, true)}>
+                {saving ? 'Saving…' : 'Yes, adjust remaining days'}
               </PrimaryButton>
-              <SecondaryButton onClick={() => persist(pending, false, false)}>
-                No, keep remaining days as is
+              <SecondaryButton disabled={saving} onClick={() => persist(pending, false, false)}>
+                {saving ? 'Saving…' : 'No, keep remaining days as is'}
               </SecondaryButton>
             </div>
           </div>
@@ -589,8 +601,12 @@ export function LogSpend({
           </div>
 
           <Keypad onKey={press} />
-          <PrimaryButton className="mt-2 h-[46px] min-h-0 text-[15px]" onClick={() => commit({ label: 'Sort later' })}>
-            Save
+          <PrimaryButton
+            disabled={saving}
+            className="mt-2 h-[46px] min-h-0 text-[15px]"
+            onClick={() => commit({ label: 'Sort later' })}
+          >
+            {saving ? 'Saving…' : 'Save'}
           </PrimaryButton>
         </>
       )}

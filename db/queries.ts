@@ -60,14 +60,37 @@ export function useSnapshot(): Snapshot | undefined {
 export function useDayEntries(cycleId: number | undefined, day: number | undefined): Entry[] | undefined {
   return useLiveQuery(async () => {
     if (cycleId == null || day == null) return [];
-    const rows = await getDB().entries.where('[cycleId+day]').equals([cycleId, day]).toArray();
-    return rows.sort((a, b) => b.createdAt - a.createdAt);
+    const db = getDB();
+    const [cycle, rows] = await Promise.all([
+      db.cycle.get(cycleId),
+      db.entries.where('[cycleId+day]').equals([cycleId, day]).toArray(),
+    ]);
+    const expectedDate = cycle ? dateOfDay(cycle.startDate, day) : null;
+    const seen = new Set<string>();
+    return rows
+      .filter((e) => {
+        if (seen.has(e.id)) return false;
+        seen.add(e.id);
+        if (e.day !== day) return false;
+        if (expectedDate && e.date && e.date !== expectedDate) return false;
+        return true;
+      })
+      .sort((a, b) => b.createdAt - a.createdAt);
   }, [cycleId, day]);
 }
 
 export function useCycleEntries(cycleId: number | undefined): Entry[] | undefined {
   return useLiveQuery(
-    async () => (cycleId == null ? [] : getDB().entries.where('cycleId').equals(cycleId).toArray()),
+    async () => {
+      if (cycleId == null) return [];
+      const rows = await getDB().entries.where('cycleId').equals(cycleId).toArray();
+      const seen = new Set<string>();
+      return rows.filter((e) => {
+        if (seen.has(e.id)) return false;
+        seen.add(e.id);
+        return true;
+      });
+    },
     [cycleId],
   );
 }
@@ -270,12 +293,27 @@ export async function addSpend(
   const uid = getActiveUserId();
   const dayToLog =
     targetDay != null ? Math.min(Math.max(1, Math.round(targetDay)), cycle.totalDays) : cycle.currentDay;
+  const entryDate = dateOfDay(cycle.startDate, dayToLog);
+  const [ey, em, ed] = entryDate.split('-').map(Number);
+  const entryTimestamp =
+    dayToLog !== cycle.currentDay
+      ? new Date(
+          ey,
+          em - 1,
+          ed,
+          now.getHours(),
+          now.getMinutes(),
+          now.getSeconds(),
+          now.getMilliseconds(),
+        ).getTime()
+      : now.getTime();
   const shouldAdjustPool = spend.adjustPool !== false;
   const entry: Entry = {
     id: crypto.randomUUID(),
     userId: uid,
     cycleId: cycle.id!,
     day: dayToLog,
+    date: entryDate,
     amount: Math.round(spend.amount),
     label: spend.label,
     category: resolved.category,
@@ -287,7 +325,7 @@ export async function addSpend(
     adjustsPool: shouldAdjustPool,
     isEstimate: false,
     hour: now.getHours(),
-    createdAt: now.getTime(),
+    createdAt: entryTimestamp,
   };
   await db.transaction('rw', db.entries, db.meta, db.cycle, db.days, async () => {
     await db.entries.add(entry);
@@ -370,11 +408,13 @@ export async function updateEntry(id: string, patch: SpendUpdate): Promise<Entry
   await db.transaction('rw', db.entries, db.cycle, db.days, async () => {
     const prev = await db.entries.get(id);
     if (!prev) return;
+    const cForDate = await db.cycle.get(prev.cycleId);
     const nextAmount = patch.amount != null ? Math.max(1, Math.round(patch.amount)) : prev.amount;
     const nextFromSavings = patch.fromSavings != null ? patch.fromSavings : prev.fromSavings;
     const next: Entry = {
       ...prev,
       userId: prev.userId ?? getActiveUserId(),
+      date: prev.date ?? (cForDate ? dateOfDay(cForDate.startDate, prev.day) : undefined),
       amount: nextAmount,
       label: patch.label != null ? patch.label.trim() || prev.label : prev.label,
       category: patch.category != null ? patch.category : prev.category,
@@ -522,20 +562,25 @@ export async function applyCatchUp(cycleId: number, total: number, gap: { from: 
     const r = catchUp(c, total, gap);
     await db.days.bulkPut(r.days.map((d) => ({ cycleId, userId: uid, ...d })));
     await db.entries.bulkAdd(
-      r.entries.map((e) => ({
-        id: crypto.randomUUID(),
-        userId: uid,
-        cycleId,
-        day: e.day,
-        amount: e.amount,
-        label: 'Rough total',
-        category: 'Other',
-        subcategory: null,
-        fromSavings: false,
-        isEstimate: true,
-        hour: 12,
-        createdAt: now.getTime(),
-      })),
+      r.entries.map((e) => {
+        const iso = dateOfDay(c.startDate, e.day);
+        const [y, m, d] = iso.split('-').map(Number);
+        return {
+          id: crypto.randomUUID(),
+          userId: uid,
+          cycleId,
+          day: e.day,
+          date: iso,
+          amount: e.amount,
+          label: 'Rough total',
+          category: 'Other',
+          subcategory: null,
+          fromSavings: false,
+          isEstimate: true,
+          hour: 12,
+          createdAt: new Date(y, m - 1, d, 12, 0, 0).getTime(),
+        };
+      }),
     );
     await db.cycle.update(cycleId, { currentDay: r.state.currentDay, pool: r.state.pool, userId: c.userId ?? uid });
   });
@@ -750,7 +795,8 @@ export async function fillSample(now: Date = new Date()): Promise<void> {
     const rows = [];
     for (let day = 1; day <= SAMPLE_DAYS; day++) {
       const mine = spends.filter((s) => s.day === day);
-      const [y, m, d] = dateOfDay(startDate, day).split('-').map(Number);
+      const dayIso = dateOfDay(startDate, day);
+      const [y, m, d] = dayIso.split('-').map(Number);
       mine.forEach((s, i) => {
         const cat = cats.find((c) => c.name === s.category);
         const sub = cat?.subcategories.find((t) => t === s.subcategory) ?? null;
@@ -767,6 +813,7 @@ export async function fillSample(now: Date = new Date()): Promise<void> {
           userId: uid,
           cycleId,
           day,
+          date: dayIso,
           amount: s.amount,
           label: s.label,
           category: resolvedCat,

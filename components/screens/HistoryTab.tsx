@@ -51,13 +51,22 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: Cycle; plan?: P
   const totalsByDay = useMemo(() => dayTotals(cycleEntries), [cycleEntries]);
   const rowByDay = useMemo(() => new Map(dayRows.map((r) => [r.day, r])), [dayRows]);
 
-  const dayEntries = useMemo(
-    () =>
-      cycleEntries
-        .filter((e) => e.day === activeDay)
-        .sort((a, b) => b.createdAt - a.createdAt),
-    [cycleEntries, activeDay],
-  );
+  const activeDayStat = totalsByDay.get(activeDay);
+  const activeDayRow = rowByDay.get(activeDay);
+  const activeDayIso = dateOfDay(cycle.startDate, activeDay);
+
+  const dayEntries = useMemo(() => {
+    const seen = new Set<string>();
+    return cycleEntries
+      .filter((e) => {
+        if (seen.has(e.id)) return false;
+        seen.add(e.id);
+        if (e.day !== activeDay) return false;
+        if (e.date && e.date !== activeDayIso) return false;
+        return true;
+      })
+      .sort((a, b) => b.createdAt - a.createdAt);
+  }, [cycleEntries, activeDay, activeDayIso]);
 
   const searchResults = useMemo(
     () => (query.trim() ? searchEntries(allEntries, allCycles, query) : []),
@@ -68,10 +77,6 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: Cycle; plan?: P
     () => cycleEntries.filter((e) => !e.fromSavings).reduce((s, e) => s + e.amount, 0),
     [cycleEntries],
   );
-
-  const activeDayStat = totalsByDay.get(activeDay);
-  const activeDayRow = rowByDay.get(activeDay);
-  const activeDayIso = dateOfDay(cycle.startDate, activeDay);
 
   return (
     <div className="flex-1 overflow-y-auto px-6 pb-8 pt-6">
