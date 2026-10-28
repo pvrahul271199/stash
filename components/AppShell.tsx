@@ -53,9 +53,12 @@ export function AppShell() {
     ensureSeed()
       .then(async () => {
         if (supabaseSync.isEnabled()) {
-          const hasLocalCycle = (await getDB().cycle.count()) > 0;
-          if (!hasLocalCycle) {
-            await supabaseSync.pull().catch(() => false);
+          const localEntries = await getDB().entries.count();
+          if (localEntries === 0) {
+            const pulled = await supabaseSync.pull().catch(() => false);
+            if (!pulled && (await getDB().cycle.count()) > 0) {
+              await supabaseSync.push().catch(() => {});
+            }
           } else {
             await supabaseSync.push().catch(() => {});
           }
@@ -103,6 +106,30 @@ export function AppShell() {
   let body: React.ReactNode = null;
   if (!ready || !snap) {
     body = <div className="h-full" aria-busy="true" />;
+  } else if (flow === 'user') {
+    body = (
+      <UserScreen
+        busy={busy}
+        onBack={() => {
+          setFlow('welcome');
+        }}
+        onContinue={async (username) => {
+          if (username && supabaseSync.isEnabled()) {
+            setBusy(true);
+            const restored = await supabaseSync.pull().catch(() => false);
+            setBusy(false);
+            if (restored) {
+              await runSync();
+              setFlow('welcome');
+              setTab('today');
+              toast(`Welcome back, ${username}! Restored your data.`);
+              return;
+            }
+          }
+          setFlow('onboarding');
+        }}
+      />
+    );
   } else if (flow === 'changePlan') {
     body = (
       <Onboarding
@@ -129,7 +156,7 @@ export function AppShell() {
         }}
       />
     );
-  } else if (snap.cycle && snap.plan) {
+  } else if (snap.cycle && snap.plan && flow !== 'onboarding' && flow !== 'summary') {
     const cycleOver = isCycleOver(snap.cycle);
     if (catchUpGap && catchUpGap.cycleId === snap.cycle.id) {
       body = (
@@ -160,6 +187,10 @@ export function AppShell() {
               plan={snap.plan}
               cycle={snap.cycle}
               onClose={() => setSheet('none')}
+              onSwitchUser={() => {
+                setSheet('none');
+                setFlow('user');
+              }}
               onChangePlan={() => {
                 setDraft({
                   income: snap.plan!.income,
@@ -192,28 +223,6 @@ export function AppShell() {
       <Welcome
         onStart={() => setFlow('user')}
         onSample={handleSample}
-      />
-    );
-  } else if (flow === 'user') {
-    body = (
-      <UserScreen
-        busy={busy}
-        onBack={() => setFlow('welcome')}
-        onContinue={async (username) => {
-          if (username && supabaseSync.isEnabled()) {
-            setBusy(true);
-            const restored = await supabaseSync.pull().catch(() => false);
-            setBusy(false);
-            if (restored) {
-              await runSync();
-              setFlow('welcome');
-              setTab('today');
-              toast(`Welcome back, ${username}! Restored your data.`);
-              return;
-            }
-          }
-          setFlow('onboarding');
-        }}
       />
     );
   } else if (flow === 'onboarding') {

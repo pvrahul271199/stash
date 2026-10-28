@@ -14,6 +14,7 @@ export function PlanScreen({
   plan,
   cycle,
   onClose,
+  onSwitchUser,
   onChangePlan,
   onSampleDone,
   onDeleted,
@@ -21,6 +22,7 @@ export function PlanScreen({
   plan: Plan;
   cycle: Cycle;
   onClose: () => void;
+  onSwitchUser?: () => void;
   onChangePlan: () => void;
   onSampleDone: () => void;
   onDeleted: () => void;
@@ -98,6 +100,7 @@ export function PlanScreen({
 
         <div className="mt-6 flex flex-col gap-2">
           <PrimaryButton onClick={onChangePlan}>Change my plan</PrimaryButton>
+          {onSwitchUser && <SecondaryButton onClick={onSwitchUser}>Switch user</SecondaryButton>}
           {installEvent && <SecondaryButton onClick={install}>Install Stash</SecondaryButton>}
           <SecondaryButton onClick={() => setConfirm('sample')}>Fill with a sample month</SecondaryButton>
           <SecondaryButton onClick={doExport}>Export to CSV</SecondaryButton>

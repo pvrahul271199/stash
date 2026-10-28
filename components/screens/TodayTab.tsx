@@ -10,7 +10,14 @@ import { DayClosed } from './DayClosed';
 import { EditSpendSheet } from './EditSpendSheet';
 import { EventSheet } from './EventSheet';
 import { IosHint } from '../pwa/IosHint';
-import { closeCurrentDay, endEvent, useActiveEvent, useDayEntries, useDayRows } from '@/db/queries';
+import {
+  closeCurrentDay,
+  endEvent,
+  useActiveEvent,
+  useCycleEntries,
+  useDayEntries,
+  useDayRows,
+} from '@/db/queries';
 import type { Cycle, Entry, Plan } from '@/db/schema';
 import {
   POOL_USED_UP_MESSAGE,
@@ -38,7 +45,12 @@ export function TodayTab({ cycle, plan }: { cycle: Cycle; plan: Plan }) {
   const activeEvent = useActiveEvent();
   const setSheet = useUI((s) => s.setSheet);
   const entries = useDayEntries(cycle.id, cycle.currentDay) ?? [];
+  const allCycleEntries = useCycleEntries(cycle.id) ?? [];
   const dayRows = useDayRows(cycle.id) ?? [];
+  const recentEntries =
+    entries.length > 0
+      ? entries.slice(0, 4)
+      : [...allCycleEntries].sort((a, b) => b.createdAt - a.createdAt).slice(0, 4);
 
   // Lets the shell hold back the month-end screen until the user has seen "Day closed".
   useEffect(() => {
@@ -157,32 +169,38 @@ export function TodayTab({ cycle, plan }: { cycle: Cycle; plan: Plan }) {
         </p>
 
         <section className="mt-6" aria-label="Recent spends">
-          {entries.length === 0 ? (
+          {recentEntries.length === 0 ? (
             <p className="text-body text-soft">Paid for something? Log it in a few seconds.</p>
           ) : (
-            <ul className="divide-y divide-line">
-              {entries.slice(0, 4).map((e) => (
-                <li key={e.id} className="flex items-center justify-between gap-2 py-3">
-                  <button
-                    type="button"
-                    onClick={() => setEditing(e)}
-                    className="min-w-0 flex-1 text-left"
-                  >
-                    <p className="text-[15px] font-medium text-ink">
-                      {e.label}
-                      {e.fromSavings && <span className="ml-2 text-[12px] text-warm">from savings</span>}
-                    </p>
-                    <p className="text-[13px] text-faint">
-                      {e.subcategory ?? e.category}
-                      {e.payment ? ` · ${e.payment}` : ''}
-                      {e.event ? ` · ${e.event}` : ''}
-                    </p>
-                    {e.note && <p className="mt-0.5 truncate text-[12px] text-soft">{e.note}</p>}
-                  </button>
-                  <p className="num text-[20px] text-ink">{inr(e.amount)}</p>
-                </li>
-              ))}
-            </ul>
+            <>
+              {entries.length === 0 && (
+                <p className="mb-1 text-[12px] font-medium text-soft">Recent from earlier days</p>
+              )}
+              <ul className="divide-y divide-line">
+                {recentEntries.map((e) => (
+                  <li key={e.id} className="flex items-center justify-between gap-2 py-3">
+                    <button
+                      type="button"
+                      onClick={() => setEditing(e)}
+                      className="min-w-0 flex-1 text-left"
+                    >
+                      <p className="text-[15px] font-medium text-ink">
+                        {e.label}
+                        {e.fromSavings && <span className="ml-2 text-[12px] text-warm">from savings</span>}
+                      </p>
+                      <p className="text-[13px] text-faint">
+                        {e.day !== cycle.currentDay ? `Day ${e.day} · ` : ''}
+                        {e.subcategory ?? e.category}
+                        {e.payment ? ` · ${e.payment}` : ''}
+                        {e.event ? ` · ${e.event}` : ''}
+                      </p>
+                      {e.note && <p className="mt-0.5 truncate text-[12px] text-soft">{e.note}</p>}
+                    </button>
+                    <p className="num text-[20px] text-ink">{inr(e.amount)}</p>
+                  </li>
+                ))}
+              </ul>
+            </>
           )}
         </section>
       </div>

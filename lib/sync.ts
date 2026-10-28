@@ -280,6 +280,60 @@ interface DbEventRow {
   created_at: number;
 }
 
+interface WorkspaceBundle {
+  planRows: DbPlanRow[];
+  cycleRows: DbCycleRow[];
+  dayRows: DbDayRow[];
+  entryRows: DbEntryRow[];
+  categoryRows: DbCategoryRow[];
+  eventRows: DbEventRow[];
+}
+
+async function fetchBundleForKey(config: SupabaseConfig, key: string): Promise<WorkspaceBundle> {
+  const ws = encodeURIComponent(key);
+  const [planRows, cycleRows, dayRows, entryRows, categoryRows, eventRows] = await Promise.all([
+    pgRequest<DbPlanRow[]>(config, `stash_plans?workspace_id=eq.${ws}&order=id.asc`).catch(() => [] as DbPlanRow[]),
+    pgRequest<DbCycleRow[]>(config, `stash_cycles?workspace_id=eq.${ws}&order=id.asc`).catch(() => [] as DbCycleRow[]),
+    pgRequest<DbDayRow[]>(config, `stash_days?workspace_id=eq.${ws}`).catch(() => [] as DbDayRow[]),
+    pgRequest<DbEntryRow[]>(
+      config,
+      `stash_entries?workspace_id=eq.${ws}&deleted_at=is.null&order=created_at.asc`,
+    ).catch(() =>
+      pgRequest<DbEntryRow[]>(config, `stash_entries?workspace_id=eq.${ws}&order=created_at.asc`).catch(
+        () => [] as DbEntryRow[],
+      ),
+    ),
+    pgRequest<DbCategoryRow[]>(config, `stash_categories?workspace_id=eq.${ws}&order=sort_order.asc`).catch(
+      () => [] as DbCategoryRow[],
+    ),
+    pgRequest<DbEventRow[]>(config, `stash_events?workspace_id=eq.${ws}&order=created_at.asc`).catch(
+      () => [] as DbEventRow[],
+    ),
+  ]);
+  return {
+    planRows: planRows ?? [],
+    cycleRows: cycleRows ?? [],
+    dayRows: dayRows ?? [],
+    entryRows: entryRows ?? [],
+    categoryRows: categoryRows ?? [],
+    eventRows: eventRows ?? [],
+  };
+}
+
+function candidateKeys(primaryWs: string): string[] {
+  const keys = [primaryWs];
+  const decoded = decodeBase64Username(primaryWs);
+  if (decoded && !keys.includes(decoded)) keys.push(decoded);
+  if (decoded) {
+    const cap = decoded.charAt(0).toUpperCase() + decoded.slice(1);
+    const capB64 = typeof Buffer !== 'undefined' ? Buffer.from(cap, 'utf-8').toString('base64') : btoa(cap);
+    if (!keys.includes(capB64)) keys.push(capB64);
+    if (!keys.includes(cap)) keys.push(cap);
+  }
+  if (!keys.includes('default')) keys.push('default');
+  return keys;
+}
+
 /* ---------- Core Sync Service ---------- */
 
 export const supabaseSync: SyncService = {
@@ -470,36 +524,99 @@ export const supabaseSync: SyncService = {
 
   /**
    * Pulls all workspace rows from Supabase and hydrates local IndexedDB (Dexie).
-   * Returns true if remote data existed and was restored.
+   * Automatically checks fallback keys (plain username / 'default') if data was logged
+   * before a Base64 username was set, and ensures plan/cycle/entries are aligned.
    */
   async pull(): Promise<boolean> {
     const config = getSupabaseConfig();
     if (!config) return false;
 
-    const ws = encodeURIComponent(config.workspaceId);
+    const primary = await fetchBundleForKey(config, config.workspaceId);
+    let { planRows, cycleRows, dayRows, entryRows, categoryRows, eventRows } = primary;
 
-    const [planRows, cycleRows, dayRows, entryRows, categoryRows, eventRows] = await Promise.all([
-      pgRequest<DbPlanRow[]>(config, `stash_plans?workspace_id=eq.${ws}&order=id.asc`),
-      pgRequest<DbCycleRow[]>(config, `stash_cycles?workspace_id=eq.${ws}&order=id.asc`),
-      pgRequest<DbDayRow[]>(config, `stash_days?workspace_id=eq.${ws}`).catch(() => [] as DbDayRow[]),
-      pgRequest<DbEntryRow[]>(
-        config,
-        `stash_entries?workspace_id=eq.${ws}&deleted_at=is.null&order=created_at.asc`,
-      ).catch(() =>
-        pgRequest<DbEntryRow[]>(config, `stash_entries?workspace_id=eq.${ws}&order=created_at.asc`).catch(
-          () => [] as DbEntryRow[],
-        ),
-      ),
-      pgRequest<DbCategoryRow[]>(config, `stash_categories?workspace_id=eq.${ws}&order=sort_order.asc`).catch(
-        () => [] as DbCategoryRow[],
-      ),
-      pgRequest<DbEventRow[]>(config, `stash_events?workspace_id=eq.${ws}&order=created_at.asc`).catch(
-        () => [] as DbEventRow[],
-      ),
-    ]);
+    // If any core table is missing under the primary key (e.g. plan or spends were logged under 'default' yesterday),
+    // check candidate fallback keys and merge missing pieces.
+    if (!planRows.length || !cycleRows.length || !entryRows.length) {
+      const fallbacks = candidateKeys(config.workspaceId).filter((k) => k !== config.workspaceId);
+      for (const fk of fallbacks) {
+        const fb = await fetchBundleForKey(config, fk);
+        if (!planRows.length && fb.planRows.length) planRows = fb.planRows;
+        if (!cycleRows.length && fb.cycleRows.length) cycleRows = fb.cycleRows;
+        if (!dayRows.length && fb.dayRows.length) dayRows = fb.dayRows;
+        if (!entryRows.length && fb.entryRows.length) entryRows = fb.entryRows;
+        if (!categoryRows.length && fb.categoryRows.length) categoryRows = fb.categoryRows;
+        if (!eventRows.length && fb.eventRows.length) eventRows = fb.eventRows;
+        if (planRows.length && cycleRows.length && entryRows.length) break;
+      }
+    }
 
-    if (!planRows?.length && !cycleRows?.length && !entryRows?.length && !eventRows?.length) {
+    if (!planRows.length && !cycleRows.length && !entryRows.length && !eventRows.length) {
       return false;
+    }
+
+    // Reconstruct missing plan or cycle if partial rows exist in Supabase
+    if (!cycleRows.length && (planRows.length || entryRows.length)) {
+      const lastPlan = planRows[planRows.length - 1];
+      const planAmt = lastPlan ? Math.max(Number(lastPlan.income) - Number(lastPlan.bills) - Number(lastPlan.savings), 0) : 22000;
+      const totalDays = lastPlan ? Number(lastPlan.month_length) : 30;
+      const earliestTs = entryRows.length
+        ? Math.min(...entryRows.map((e) => Number(e.created_at)))
+        : Date.now();
+      const d = new Date(earliestTs);
+      const startIso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const maxDay = entryRows.length ? Math.max(...entryRows.map((e) => Number(e.day))) : 1;
+      const targetCycleId = entryRows.length ? Number(entryRows[entryRows.length - 1].cycle_id) || 1 : 1;
+      cycleRows = [
+        {
+          workspace_id: config.workspaceId,
+          id: targetCycleId,
+          start_date: startIso,
+          total_days: totalDays,
+          plan_amount: planAmt,
+          current_day: maxDay,
+          pool: planAmt,
+          from_savings_total: entryRows
+            .filter((e) => e.from_savings)
+            .reduce((s, e) => s + Number(e.amount), 0),
+          leftover_moved: false,
+        },
+      ];
+    }
+
+    if (!planRows.length && cycleRows.length) {
+      const lastCycle = cycleRows[cycleRows.length - 1];
+      planRows = [
+        {
+          workspace_id: config.workspaceId,
+          id: 1,
+          income: Number(lastCycle.plan_amount),
+          bills: 0,
+          savings: 0,
+          month_length: Number(lastCycle.total_days) || 30,
+          created_at: Date.now(),
+        },
+      ];
+    }
+
+    // If multiple cycles exist and the latest cycle has 0 spends while an earlier cycle has spends,
+    // or if entries point to a cycle_id not present in cycleRows, align them so the active cycle shows all spends.
+    if (cycleRows.length && entryRows.length) {
+      const cycleIds = new Set(cycleRows.map((c) => Number(c.id)));
+      const entryCycleIds = new Set(entryRows.map((e) => Number(e.cycle_id)));
+      const activeCycle = cycleRows[cycleRows.length - 1];
+      const activeHasEntries = entryCycleIds.has(Number(activeCycle.id));
+
+      if (!activeHasEntries) {
+        // Either drop a duplicate empty cycle created during re-login or re-attach orphaned entries to activeCycle
+        const cyclesWithEntries = cycleRows.filter((c) => entryCycleIds.has(Number(c.id)));
+        if (cyclesWithEntries.length > 0) {
+          cycleRows = cyclesWithEntries;
+        } else {
+          entryRows = entryRows.map((e) =>
+            cycleIds.has(Number(e.cycle_id)) ? e : { ...e, cycle_id: Number(activeCycle.id) },
+          );
+        }
+      }
     }
 
     const db = getDB();
@@ -512,10 +629,10 @@ export const supabaseSync: SyncService = {
         db.events.clear(),
       ]);
 
-      if (planRows?.length) {
+      if (planRows.length) {
         await db.plan.bulkPut(
           planRows.map((r) => ({
-            id: r.id,
+            id: Number(r.id),
             income: Number(r.income),
             bills: Number(r.bills),
             savings: Number(r.savings),
@@ -531,10 +648,10 @@ export const supabaseSync: SyncService = {
         );
       }
 
-      if (cycleRows?.length) {
+      if (cycleRows.length) {
         await db.cycle.bulkPut(
           cycleRows.map((r) => ({
-            id: r.id,
+            id: Number(r.id),
             startDate: r.start_date,
             totalDays: Number(r.total_days),
             planAmount: Number(r.plan_amount),
@@ -546,7 +663,7 @@ export const supabaseSync: SyncService = {
         );
       }
 
-      if (dayRows?.length) {
+      if (dayRows.length) {
         await db.days.bulkPut(
           dayRows.map(
             (r): DayRow => ({
@@ -560,7 +677,7 @@ export const supabaseSync: SyncService = {
         );
       }
 
-      if (entryRows?.length) {
+      if (entryRows.length) {
         await db.entries.bulkPut(
           entryRows.map(
             (r): Entry => ({
@@ -584,12 +701,12 @@ export const supabaseSync: SyncService = {
         );
       }
 
-      if (categoryRows?.length) {
+      if (categoryRows.length) {
         await db.categories.clear();
         await db.categories.bulkPut(
           categoryRows.map(
             (r): Category => ({
-              id: r.id,
+              id: Number(r.id),
               name: r.name,
               sortOrder: Number(r.sort_order),
               isSystem: Boolean(r.is_system),
@@ -599,11 +716,11 @@ export const supabaseSync: SyncService = {
         );
       }
 
-      if (eventRows?.length) {
+      if (eventRows.length) {
         await db.events.bulkPut(
           eventRows.map(
             (r): StashEvent => ({
-              id: r.id,
+              id: Number(r.id),
               name: r.name,
               note: r.note ?? null,
               categories: Array.isArray(r.categories) ? r.categories : [],
@@ -751,25 +868,28 @@ export async function checkUsernameInCloud(username: string): Promise<RemoteStat
   if (!clean) return null;
   const b64 = encodeUsernameToBase64(clean);
   const config: SupabaseConfig = { ...baseConfig, workspaceId: b64 };
-  const ws = encodeURIComponent(b64);
   try {
-    const [plans, cycles, entries, events] = await Promise.all([
-      pgRequest<{ id: number }[]>(config, `stash_plans?workspace_id=eq.${ws}&select=id`),
-      pgRequest<{ id: number }[]>(config, `stash_cycles?workspace_id=eq.${ws}&select=id`),
-      pgRequest<{ id: string }[]>(config, `stash_entries?workspace_id=eq.${ws}&select=id`).catch(
-        () => [] as { id: string }[],
-      ),
-      pgRequest<{ id: number }[]>(config, `stash_events?workspace_id=eq.${ws}&select=id`).catch(
-        () => [] as { id: number }[],
-      ),
-    ]);
+    let plansCount = 0;
+    let cyclesCount = 0;
+    let entriesCount = 0;
+    let eventsCount = 0;
+
+    for (const key of candidateKeys(b64)) {
+      const b = await fetchBundleForKey(config, key);
+      if (!plansCount && b.planRows.length) plansCount = b.planRows.length;
+      if (!cyclesCount && b.cycleRows.length) cyclesCount = b.cycleRows.length;
+      if (!entriesCount && b.entryRows.length) entriesCount = b.entryRows.length;
+      if (!eventsCount && b.eventRows.length) eventsCount = b.eventRows.length;
+      if (plansCount && cyclesCount && entriesCount) break;
+    }
+
     return {
       ok: true,
       workspaceId: b64,
-      plans: plans?.length ?? 0,
-      cycles: cycles?.length ?? 0,
-      entries: entries?.length ?? 0,
-      events: events?.length ?? 0,
+      plans: plansCount,
+      cycles: cyclesCount,
+      entries: entriesCount,
+      events: eventsCount,
     };
   } catch (err) {
     return {
