@@ -25,7 +25,12 @@ import {
 } from '@/db/queries';
 import { isCycleOver, isPlanValid, type PlanInput } from '@/lib/budget';
 import { todayISO } from '@/lib/dates';
-import { supabaseSync } from '@/lib/sync';
+import {
+  clearBrowserSessionUser,
+  getBrowserSessionUser,
+  setBrowserSessionUser,
+  supabaseSync,
+} from '@/lib/sync';
 import { getDB } from '@/db/schema';
 import { useUI } from '@/store/ui';
 import { useToast } from '@/store/toast';
@@ -44,6 +49,16 @@ export function AppShell() {
   const [busy, setBusy] = useState(false);
   const [catchUpGap, setCatchUpGap] = useState<PendingCatchUp | null>(null);
 
+  // ============================================================================
+  // TEMPORARY DIRECT ENTRY VIA BROWSER SESSION
+  // NOTE [FUTURE_AUTH_MIGRATION]:
+  // Stores the active user in browser session. If a username/session is present,
+  // the user is admitted directly into the app (restoring their workspace from
+  // Supabase if needed) without re-prompting.
+  // This will be replaced by Supabase Auth (OAuth/magic link/passkeys) in the future.
+  // ============================================================================
+  const sessionUser = getBrowserSessionUser();
+
   const runSync = useCallback(async () => {
     const gap = await syncCalendar(todayISO());
     setCatchUpGap(gap);
@@ -54,9 +69,10 @@ export function AppShell() {
       .then(async () => {
         if (supabaseSync.isEnabled()) {
           const localEntries = await getDB().entries.count();
-          if (localEntries === 0) {
+          const localCycles = await getDB().cycle.count();
+          if (localEntries === 0 || localCycles === 0) {
             const pulled = await supabaseSync.pull().catch(() => false);
-            if (!pulled && (await getDB().cycle.count()) > 0) {
+            if (!pulled && localCycles > 0) {
               await supabaseSync.push().catch(() => {});
             }
           } else {
@@ -114,6 +130,9 @@ export function AppShell() {
           setFlow('welcome');
         }}
         onContinue={async (username) => {
+          if (username) {
+            setBrowserSessionUser(username);
+          }
           if (username && supabaseSync.isEnabled()) {
             setBusy(true);
             const restored = await supabaseSync.pull().catch(() => false);
@@ -188,6 +207,7 @@ export function AppShell() {
               cycle={snap.cycle}
               onClose={() => setSheet('none')}
               onSwitchUser={() => {
+                clearBrowserSessionUser();
                 setSheet('none');
                 setFlow('user');
               }}
@@ -208,6 +228,7 @@ export function AppShell() {
                 setTab('insights');
               }}
               onDeleted={() => {
+                clearBrowserSessionUser();
                 setSheet('none');
                 setDraft(null);
                 setFlow('welcome');
@@ -219,12 +240,29 @@ export function AppShell() {
       );
     }
   } else if (flow === 'welcome') {
-    body = (
-      <Welcome
-        onStart={() => setFlow('user')}
-        onSample={handleSample}
-      />
-    );
+    // If a browser session/username is already present, bypass Welcome directly
+    if (sessionUser && !snap.cycle) {
+      body = (
+        <Onboarding
+          initial={draft ?? undefined}
+          onExit={() => {
+            clearBrowserSessionUser();
+            setFlow('welcome');
+          }}
+          onDone={(p) => {
+            setDraft(p);
+            setFlow('summary');
+          }}
+        />
+      );
+    } else {
+      body = (
+        <Welcome
+          onStart={() => setFlow('user')}
+          onSample={handleSample}
+        />
+      );
+    }
   } else if (flow === 'onboarding') {
     body = (
       <Onboarding

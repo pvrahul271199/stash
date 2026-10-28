@@ -3,14 +3,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { addSpend, closeCurrentDay, createPlanAndCycle, deleteAllData } from '@/db/queries';
 import { getDB } from '@/db/schema';
 import {
+  clearBrowserSessionUser,
   decodeBase64Username,
   encodeUsernameToBase64,
   featureDataRepo,
   getActiveUserId,
+  getBrowserSessionUser,
   getStoredUsername,
   getSupabaseConfig,
   saveSupabaseConfig,
   saveUsername,
+  setBrowserSessionUser,
   supabaseSync,
 } from '@/lib/sync';
 
@@ -41,12 +44,19 @@ describe('Supabase Sync & Scalable Feature Store', () => {
 
     // Simulate browser localStorage
     const store = new Map<string, string>();
+    const sessionStore = new Map<string, string>();
     vi.stubGlobal('window', {
       localStorage: {
         getItem: (k: string) => store.get(k) ?? null,
         setItem: (k: string, v: string) => store.set(k, v),
         removeItem: (k: string) => store.delete(k),
         clear: () => store.clear(),
+      },
+      sessionStorage: {
+        getItem: (k: string) => sessionStore.get(k) ?? null,
+        setItem: (k: string, v: string) => sessionStore.set(k, v),
+        removeItem: (k: string) => sessionStore.delete(k),
+        clear: () => sessionStore.clear(),
       },
     });
 
@@ -131,12 +141,19 @@ describe('Supabase Sync & Scalable Feature Store', () => {
 
   it('encodes username to Base64 for user_id and decodes it back', () => {
     const store = new Map<string, string>();
+    const sessionStore = new Map<string, string>();
     vi.stubGlobal('window', {
       localStorage: {
         getItem: (k: string) => store.get(k) ?? null,
         setItem: (k: string, v: string) => store.set(k, v),
         removeItem: (k: string) => store.delete(k),
         clear: () => store.clear(),
+      },
+      sessionStorage: {
+        getItem: (k: string) => sessionStore.get(k) ?? null,
+        setItem: (k: string, v: string) => sessionStore.set(k, v),
+        removeItem: (k: string) => sessionStore.delete(k),
+        clear: () => sessionStore.clear(),
       },
     });
 
@@ -153,6 +170,12 @@ describe('Supabase Sync & Scalable Feature Store', () => {
     expect(getStoredUsername()).toBe('rahul');
     expect(getActiveUserId()).toBe('cmFodWw=');
     expect(getSupabaseConfig()?.userId).toBe('cmFodWw=');
+
+    // Tests browser session storage
+    setBrowserSessionUser('Rahul');
+    expect(getBrowserSessionUser()).toEqual({ userId: 'cmFodWw=', username: 'rahul' });
+    clearBrowserSessionUser();
+    expect(getBrowserSessionUser()).toBeNull();
 
     vi.unstubAllGlobals();
   });

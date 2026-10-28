@@ -14,12 +14,16 @@ import {
   USERNAME_STORAGE_KEY,
   USER_THEME_STORAGE_KEY,
   buildUserProfile,
+  clearBrowserSessionUser,
   decodeBase64Username,
   encodeUsernameToBase64,
   getActiveUserId,
+  getBrowserSessionUser,
   getStoredAvatarTheme,
   getStoredUsername,
   normalizeUsername,
+  setBrowserSessionUser,
+  type BrowserSessionUser,
   type UserProfile,
 } from './user';
 import { dateOfDay, daysBetween } from './dates';
@@ -27,12 +31,16 @@ import { dateOfDay, daysBetween } from './dates';
 export {
   DEFAULT_USER_ID,
   buildUserProfile,
+  clearBrowserSessionUser,
   decodeBase64Username,
   encodeUsernameToBase64,
   getActiveUserId,
+  getBrowserSessionUser,
   getStoredAvatarTheme,
   getStoredUsername,
   normalizeUsername,
+  setBrowserSessionUser,
+  type BrowserSessionUser,
   type UserProfile,
 };
 
@@ -74,8 +82,12 @@ export function saveUsername(username: string, avatarTheme?: string): string {
 
   if (typeof window !== 'undefined') {
     try {
-      if (clean) window.localStorage.setItem(USERNAME_STORAGE_KEY, clean);
-      else window.localStorage.removeItem(USERNAME_STORAGE_KEY);
+      if (clean) {
+        window.localStorage.setItem(USERNAME_STORAGE_KEY, clean);
+        setBrowserSessionUser(clean, b64);
+      } else {
+        clearBrowserSessionUser();
+      }
       if (avatarTheme) window.localStorage.setItem(USER_THEME_STORAGE_KEY, avatarTheme);
 
       const raw = window.localStorage.getItem(CONFIG_STORAGE_KEY);
