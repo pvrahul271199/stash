@@ -1,6 +1,6 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
-import { CloseIcon, IconButton, PrimaryButton } from '../ui/Button';
+import { BackIcon, IconButton, PrimaryButton, SecondaryButton } from '../ui/Button';
 import { Chip } from '../ui/Chip';
 import { Keypad } from '../ui/Keypad';
 import { CategoryPicker } from './CategoryPicker';
@@ -17,8 +17,9 @@ import {
 import { PAYMENT_MODES, type Cycle, type Plan } from '@/db/schema';
 import { daysLeft, isBigSpend, todayAllowance } from '@/lib/budget';
 import { MAX_NAME } from '@/lib/categories';
+import { dateOfDay, formatShort, formatWithWeekday } from '@/lib/dates';
 import { chipLabels } from '@/lib/suggestions';
-import { num } from '@/lib/format';
+import { inr, num } from '@/lib/format';
 import { useToast } from '@/store/toast';
 
 const MAX_DIGITS = 7;
@@ -32,10 +33,13 @@ interface Pending {
 export function LogSpend({
   cycle,
   plan,
+  targetDay,
   onClose,
 }: {
   cycle: Cycle;
   plan: Plan;
+  /** Optional specific day (1..totalDays) to log into when adding from History. */
+  targetDay?: number;
   onClose: () => void;
 }) {
   const [digits, setDigits] = useState('');
@@ -44,7 +48,7 @@ export function LogSpend({
   const [eventMenuOpen, setEventMenuOpen] = useState(false);
   const [newEventName, setNewEventName] = useState('');
   const [eventErr, setEventErr] = useState<string | null>(null);
-  const [view, setView] = useState<'keypad' | 'picker' | 'big'>('keypad');
+  const [view, setView] = useState<'keypad' | 'picker' | 'big' | 'pastAdjust'>('keypad');
   const [pending, setPending] = useState<Pending | null>(null);
   const lastUsed = useLastUsedLabel();
   const lastPayment = useLastPayment();
@@ -75,18 +79,38 @@ export function LogSpend({
     setEventMenuOpen(false);
   }
 
-  async function persist(p: Pending, fromSavings: boolean) {
-    await addSpend(cycle, { amount, ...p, payment, note: note.trim() || null, fromSavings });
+  const effectiveDay = targetDay ?? cycle.currentDay;
+  const isPreviousDay = targetDay != null && targetDay < cycle.currentDay;
+  const targetIso = dateOfDay(cycle.startDate, effectiveDay);
+  const targetDateLabel = formatShort(targetIso);
+
+  async function persist(p: Pending, fromSavings: boolean, adjustPool = true) {
+    await addSpend(
+      cycle,
+      { amount, ...p, payment, note: note.trim() || null, fromSavings, adjustPool },
+      new Date(),
+      targetDay,
+    );
     navigator.vibrate?.(10);
-    toast(p.label === 'Sort later' ? `Saved ₹${num(amount)}` : `Saved ₹${num(amount)} for ${p.label}`);
+    const suffix = targetDay != null && targetDay !== cycle.currentDay ? ` on ${targetDateLabel} (Day ${targetDay})` : '';
+    toast(
+      p.label === 'Sort later'
+        ? `Saved ₹${num(amount)}${suffix}`
+        : `Saved ₹${num(amount)} for ${p.label}${suffix}`,
+    );
     onClose();
   }
 
-  /** Every save path goes through here so the big-spend rule always applies. */
+  /** Every save path goes through here so the past-day adjustment or big-spend rule always applies. */
   async function commit(p: Pending) {
     if (amount <= 0) {
       toast('Enter an amount first', 'warm');
       setView('keypad');
+      return;
+    }
+    if (isPreviousDay) {
+      setPending(p);
+      setView('pastAdjust');
       return;
     }
     if (isBigSpend(amount, todayAllowance(cycle), cycle)) {
@@ -94,7 +118,7 @@ export function LogSpend({
       setView('big');
       return;
     }
-    await persist(p, false);
+    await persist(p, false, true);
   }
 
   useEffect(() => {
@@ -141,10 +165,98 @@ export function LogSpend({
           daysLeft={daysLeft(cycle)}
           savingsSetAside={plan.savings}
           onBack={() => setView('keypad')}
-          onSpread={() => persist(pending, false)}
-          onSavings={() => persist(pending, true)}
+          onSpread={() => persist(pending, false, true)}
+          onSavings={() => persist(pending, true, true)}
         />
       )}
+
+      {view === 'pastAdjust' && pending && (() => {
+        const remDays = Math.max(1, daysLeft(cycle));
+        const currentDaily = todayAllowance(cycle);
+        const newPool = Math.max(0, cycle.pool - amount);
+        const newDaily = remDays > 0 ? newPool / remDays : 0;
+        const perDayDelta = Math.max(0, currentDaily - newDaily);
+        return (
+          <div className="flex h-full flex-col">
+            <div className="flex items-center justify-between">
+              <IconButton label="Back to keypad" onClick={() => setView('keypad')} className="-ml-3">
+                <BackIcon />
+              </IconButton>
+              <span className="rounded-full bg-tint px-3 py-1 text-[12px] font-medium text-ink">
+                Day {effectiveDay} · {formatWithWeekday(targetIso)}
+              </span>
+            </div>
+
+            <div className="mt-3 flex-1 overflow-y-auto">
+              <p className="text-[14px] text-soft">{pending.label}</p>
+              <p className="num mt-1 text-big text-ink">
+                <span className="text-faint">₹</span>
+                {amount.toLocaleString('en-IN')}
+              </p>
+
+              <h2 className="mt-5 text-question font-semibold text-ink">
+                Adjust the remaining month for this spend?
+              </h2>
+              <p className="mt-1.5 text-body text-soft">
+                You’re adding a transaction to a past day ({targetDateLabel}). Should this rebalance your{' '}
+                {remDays} remaining unfilled {remDays === 1 ? 'day' : 'days'}?
+              </p>
+
+              <div className="mt-5 rounded-note border border-ink bg-tint/50 p-4">
+                <div className="flex items-start gap-3">
+                  <span
+                    className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-ink text-white"
+                    aria-hidden="true"
+                  >
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.4"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <circle cx="12" cy="12" r="9" />
+                      <path d="M12 11v5" />
+                      <path d="M12 8h.01" />
+                    </svg>
+                  </span>
+                  <div className="min-w-0 flex-1 text-[13px] leading-relaxed text-soft">
+                    <p className="text-ink">
+                      <span className="font-semibold">If Yes:</span> Pool adjusts from{' '}
+                      <span className="num font-semibold">{inr(cycle.pool)}</span> to{' '}
+                      <span className="num font-semibold">{inr(newPool)}</span>, and your next {remDays}{' '}
+                      {remDays === 1 ? 'day becomes' : 'days become'}{' '}
+                      <span className="num font-semibold">{inr(newDaily)}/day</span> ({inr(perDayDelta)} less/day).
+                    </p>
+                    <div className="my-2.5 border-t border-line" />
+                    <p className="text-soft">
+                      <span className="font-semibold text-ink">If No:</span> Logs{' '}
+                      <span className="num font-semibold text-ink">{inr(amount)}</span> on{' '}
+                      <span className="font-medium text-ink">
+                        {targetDateLabel} (Day {effectiveDay})
+                      </span>{' '}
+                      while keeping your remaining days at{' '}
+                      <span className="num font-semibold text-ink">{inr(currentDaily)}/day</span>.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2 pt-2">
+              <PrimaryButton onClick={() => persist(pending, false, true)}>
+                Yes, adjust remaining days
+              </PrimaryButton>
+              <SecondaryButton onClick={() => persist(pending, false, false)}>
+                No, keep remaining days as is
+              </SecondaryButton>
+            </div>
+          </div>
+        );
+      })()}
 
       {view === 'keypad' && (
         <>
@@ -219,79 +331,104 @@ export function LogSpend({
             <span className="w-7 shrink-0" aria-hidden="true" />
 
             {eventMenuOpen && (
-              <div
-                role="region"
-                aria-label="Event switcher"
-                className="absolute left-1/2 top-full z-30 mt-1 w-60 -translate-x-1/2 rounded-2xl border border-line bg-white p-2 shadow-lg"
-              >
-                <div className="flex flex-wrap gap-1">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void endEvent();
-                      setEventMenuOpen(false);
-                    }}
-                    aria-pressed={!activeEvent}
-                    className={`h-6 min-h-0 rounded-full border px-2 text-[11px] font-medium ${
-                      !activeEvent
-                        ? 'border-ink bg-ink text-white'
-                        : 'border-line bg-tint/60 text-ink'
-                    }`}
-                  >
-                    No event
-                  </button>
-                  {events.map((ev) => {
-                    const isCurrent = ev.name === activeEvent;
-                    return (
+              <>
+                <div
+                  aria-hidden="true"
+                  onClick={() => setEventMenuOpen(false)}
+                  className="fixed inset-0 z-20"
+                />
+                <div
+                  role="region"
+                  aria-label="Event switcher"
+                  className="absolute left-1/2 top-full z-30 mt-2 w-[268px] -translate-x-1/2 rounded-note border border-ink/20 bg-white p-3 shadow-[0_12px_32px_-8px_rgba(30,27,75,0.16)]"
+                >
+                  <div className="flex items-center justify-between pb-2">
+                    <span className="text-[11px] font-semibold tracking-wide text-soft">Event tag</span>
+                    {activeEvent && (
                       <button
-                        key={ev.id}
                         type="button"
                         onClick={() => {
-                          void startEvent(ev.name);
+                          void endEvent();
                           setEventMenuOpen(false);
                         }}
-                        aria-pressed={isCurrent}
-                        className={`h-6 min-h-0 max-w-[130px] truncate rounded-full border px-2 text-[11px] font-medium ${
-                          isCurrent
-                            ? 'border-ink bg-ink text-white'
-                            : 'border-line bg-tint/60 text-ink'
-                        }`}
+                        className="min-h-0 text-[11px] font-medium text-faint hover:text-ink"
                       >
-                        {ev.name}
+                        Clear
                       </button>
-                    );
-                  })}
-                </div>
+                    )}
+                  </div>
 
-                <div className="mt-1.5 flex items-center gap-1">
-                  <input
-                    type="text"
-                    value={newEventName}
-                    onChange={(e) => {
-                      setNewEventName(e.target.value);
-                      setEventErr(null);
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        void handleQuickCreateEvent();
-                      }
-                    }}
-                    placeholder="New event..."
-                    aria-label="New event name"
-                    maxLength={MAX_NAME + 6}
-                    className="h-6 min-h-0 min-w-0 flex-1 rounded-full border border-line bg-tint/40 px-2.5 text-[11px] text-ink placeholder:text-faint"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => void handleQuickCreateEvent()}
-                    className="h-6 min-h-0 shrink-0 rounded-full bg-ink px-2.5 text-[11px] font-medium text-white"
-                  >
-                    Start
-                  </button>
+                  <div className="flex flex-wrap gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void endEvent();
+                        setEventMenuOpen(false);
+                      }}
+                      aria-pressed={!activeEvent}
+                      className={`h-7 min-h-0 rounded-full border px-2.5 text-[11px] font-medium transition-colors ${
+                        !activeEvent
+                          ? 'border-ink bg-ink text-white'
+                          : 'border-line bg-tint/50 text-soft hover:border-ink/40 hover:text-ink'
+                      }`}
+                    >
+                      None
+                    </button>
+                    {events.map((ev) => {
+                      const isCurrent = ev.name === activeEvent;
+                      return (
+                        <button
+                          key={ev.id}
+                          type="button"
+                          onClick={() => {
+                            void startEvent(ev.name);
+                            setEventMenuOpen(false);
+                          }}
+                          aria-pressed={isCurrent}
+                          className={`h-7 min-h-0 max-w-[150px] truncate rounded-full border px-2.5 text-[11px] font-medium transition-colors ${
+                            isCurrent
+                              ? 'border-ink bg-ink text-white'
+                              : 'border-line bg-tint/50 text-ink hover:border-ink/40'
+                          }`}
+                        >
+                          {ev.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="mt-2.5 border-t border-line pt-2.5">
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="text"
+                        value={newEventName}
+                        onChange={(e) => {
+                          setNewEventName(e.target.value);
+                          setEventErr(null);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            void handleQuickCreateEvent();
+                          }
+                        }}
+                        placeholder="Create new event…"
+                        aria-label="New event name"
+                        maxLength={MAX_NAME + 6}
+                        className="h-7 min-h-0 min-w-0 flex-1 rounded-full border border-line bg-tint/40 px-3 text-[11px] text-ink placeholder:text-faint focus:border-ink focus:bg-white focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void handleQuickCreateEvent()}
+                        className="h-7 min-h-0 shrink-0 rounded-full bg-ink px-3 text-[11px] font-semibold text-white transition-transform active:scale-95"
+                      >
+                        + Add
+                      </button>
+                    </div>
+                    {eventErr && <p className="mt-1 px-1 text-[10px] text-warm">{eventErr}</p>}
+                  </div>
                 </div>
-                {eventErr && <p className="mt-1 text-[10px] text-warm">{eventErr}</p>}
-              </div>
+              </>
             )}
           </div>
 
@@ -300,6 +437,11 @@ export function LogSpend({
             aria-live="polite"
             onClick={() => eventMenuOpen && setEventMenuOpen(false)}
           >
+            {targetDay != null && (
+              <span className="mb-1.5 inline-flex items-center gap-1.5 rounded-full bg-tint px-3 py-0.5 text-[11px] font-medium text-ink">
+                Day {targetDay} · {targetDateLabel}
+              </span>
+            )}
             <div className="num flex items-baseline justify-center" style={{ fontSize: size, lineHeight: 1.05 }}>
               <span className="mr-1 text-faint" aria-hidden="true">₹</span>
               <span className={amount === 0 ? 'text-faint' : 'text-ink'} aria-label={`Amount ${amount} rupees`}>

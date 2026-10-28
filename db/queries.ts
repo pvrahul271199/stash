@@ -236,6 +236,8 @@ export interface NewSpend {
   /** Optional short note for this spend. */
   note?: string | null;
   fromSavings?: boolean;
+  /** When adding to a previous day: whether to adjust the remaining month pool & unfilled days (default true). */
+  adjustPool?: boolean;
 }
 
 export interface SpendUpdate {
@@ -249,8 +251,13 @@ export interface SpendUpdate {
   fromSavings?: boolean;
 }
 
-/** Logs a spend on the cycle's current day. Spends after closing land on the next day. */
-export async function addSpend(cycle: Cycle, spend: NewSpend, now: Date = new Date()): Promise<Entry> {
+/** Logs a spend on the cycle's current day (or a specific `targetDay` when adding from History). */
+export async function addSpend(
+  cycle: Cycle,
+  spend: NewSpend,
+  now: Date = new Date(),
+  targetDay?: number,
+): Promise<Entry> {
   const db = getDB();
   const cats = await db.categories.toArray();
   const resolved =
@@ -261,11 +268,14 @@ export async function addSpend(cycle: Cycle, spend: NewSpend, now: Date = new Da
         : resolveLabel(spend.label, cats);
   const activeEvent = spend.event === undefined ? ((await db.meta.get('main'))?.activeEvent ?? null) : spend.event;
   const uid = getActiveUserId();
+  const dayToLog =
+    targetDay != null ? Math.min(Math.max(1, Math.round(targetDay)), cycle.totalDays) : cycle.currentDay;
+  const shouldAdjustPool = spend.adjustPool !== false;
   const entry: Entry = {
     id: crypto.randomUUID(),
     userId: uid,
     cycleId: cycle.id!,
-    day: cycle.currentDay,
+    day: dayToLog,
     amount: Math.round(spend.amount),
     label: spend.label,
     category: resolved.category,
@@ -274,21 +284,78 @@ export async function addSpend(cycle: Cycle, spend: NewSpend, now: Date = new Da
     payment: spend.payment?.trim() || null,
     note: spend.note?.trim() || null,
     fromSavings: !!spend.fromSavings,
+    adjustsPool: shouldAdjustPool,
     isEstimate: false,
     hour: now.getHours(),
     createdAt: now.getTime(),
   };
-  await db.transaction('rw', db.entries, db.meta, db.cycle, async () => {
+  await db.transaction('rw', db.entries, db.meta, db.cycle, db.days, async () => {
     await db.entries.add(entry);
     await db.meta.update('main', {
       lastUsedLabel: spend.label,
       ...(entry.payment ? { lastPayment: entry.payment } : {}),
     });
+    const c = await db.cycle.get(cycle.id!);
     if (entry.fromSavings) {
-      const c = await db.cycle.get(cycle.id!);
-      if (c) await db.cycle.update(c.id!, { fromSavingsTotal: c.fromSavingsTotal + entry.amount });
+      if (c) {
+        await db.cycle.update(c.id!, {
+          fromSavingsTotal: c.fromSavingsTotal + entry.amount,
+          userId: c.userId ?? uid,
+        });
+      }
+    } else {
+      // Always update the target day's spent total in db.days if that day is already closed/past
+      const dayRow = await db.days.get([cycle.id!, dayToLog]);
+      const isPastDay = c ? dayToLog < c.currentDay : false;
+      if (dayRow) {
+        await db.days.put({
+          ...dayRow,
+          userId: dayRow.userId ?? uid,
+          spent: dayRow.spent + entry.amount,
+        });
+      } else if (isPastDay && c) {
+        const dayEntries = await db.entries.where('[cycleId+day]').equals([cycle.id!, dayToLog]).toArray();
+        const totalForDay = dayEntries.filter((x) => !x.fromSavings).reduce((s, x) => s + x.amount, 0);
+        const fallbackAllowance = Math.max(1, Math.round(c.planAmount / Math.max(1, c.totalDays)));
+        await db.days.put({
+          cycleId: cycle.id!,
+          day: dayToLog,
+          userId: uid,
+          allowanceAtStart: fallbackAllowance,
+          spent: totalForDay,
+          status: 'closed',
+        });
+      }
+      // Only adjust the remaining month pool (and subsequent days' allowances) when shouldAdjustPool is true
+      if (c && (dayRow || isPastDay) && shouldAdjustPool) {
+        const subsequentDays = await db.days
+          .where('cycleId')
+          .equals(cycle.id!)
+          .filter((r) => r.day > dayToLog)
+          .toArray();
+        if (subsequentDays.length > 0) {
+          await db.days.bulkPut(
+            subsequentDays.map((r) => {
+              const remAtThatDay = Math.max(1, c.totalDays - r.day + 1);
+              const delta = Math.round(entry.amount / remAtThatDay);
+              return {
+                ...r,
+                userId: r.userId ?? uid,
+                allowanceAtStart: Math.max(0, r.allowanceAtStart - delta),
+              };
+            }),
+          );
+        }
+        await db.cycle.update(c.id!, {
+          pool: Math.max(0, c.pool - entry.amount),
+          userId: c.userId ?? uid,
+        });
+      }
     }
   });
+  if (supabaseSync.isEnabled()) {
+    void supabaseSync.push().catch(() => {});
+  }
   scheduleSync();
   return entry;
 }
@@ -320,33 +387,43 @@ export async function updateEntry(id: string, patch: SpendUpdate): Promise<Entry
     await db.entries.put(next);
     updated = next;
 
-    const oldPoolSpend = prev.fromSavings ? 0 : prev.amount;
-    const newPoolSpend = next.fromSavings ? 0 : next.amount;
+    const affectsPool = prev.adjustsPool !== false;
+    const oldPoolSpend = prev.fromSavings || !affectsPool ? 0 : prev.amount;
+    const newPoolSpend = next.fromSavings || !affectsPool ? 0 : next.amount;
     const poolDiff = newPoolSpend - oldPoolSpend; // positive = spent more from pool
+
+    const daySpendDiff = (next.fromSavings ? 0 : next.amount) - (prev.fromSavings ? 0 : prev.amount);
 
     const oldSav = prev.fromSavings ? prev.amount : 0;
     const newSav = next.fromSavings ? next.amount : 0;
     const savDiff = newSav - oldSav;
 
-    if (poolDiff !== 0 || savDiff !== 0) {
+    if (daySpendDiff !== 0 || poolDiff !== 0 || savDiff !== 0) {
       const c = await db.cycle.get(prev.cycleId);
       const dayRow = await db.days.get([prev.cycleId, prev.day]);
-      if (dayRow && poolDiff !== 0) {
+      const isPastDay = c ? prev.day < c.currentDay : false;
+      if (dayRow && daySpendDiff !== 0) {
         await db.days.put({
           ...dayRow,
-          spent: Math.max(0, dayRow.spent + poolDiff),
+          userId: dayRow.userId ?? getActiveUserId(),
+          spent: Math.max(0, dayRow.spent + daySpendDiff),
         });
       }
       if (c) {
         await db.cycle.update(c.id!, {
-          // If the day was already closed, its spend was already deducted from c.pool, so adjust c.pool
-          pool: dayRow ? Math.max(0, c.pool - poolDiff) : c.pool,
+          // If the day was already closed/past and the entry affects the pool, adjust c.pool
+          pool: (dayRow || isPastDay) && poolDiff !== 0 ? Math.max(0, c.pool - poolDiff) : c.pool,
           fromSavingsTotal: Math.max(0, c.fromSavingsTotal + savDiff),
         });
       }
     }
   });
-  if (updated) scheduleSync();
+  if (updated) {
+    if (supabaseSync.isEnabled()) {
+      void supabaseSync.push().catch(() => {});
+    }
+    scheduleSync();
+  }
   return updated;
 }
 
@@ -358,15 +435,24 @@ export async function removeEntry(id: string): Promise<void> {
     await db.entries.delete(id);
     const c = await db.cycle.get(e.cycleId);
     const dayRow = await db.days.get([e.cycleId, e.day]);
+    const isPastDay = c ? e.day < c.currentDay : false;
     if (e.fromSavings) {
       if (c) await db.cycle.update(c.id!, { fromSavingsTotal: Math.max(c.fromSavingsTotal - e.amount, 0) });
-    } else if (dayRow) {
-      // Removing a spend from an already-closed day refunds that amount back to the day & pool
-      await db.days.put({ ...dayRow, spent: Math.max(0, dayRow.spent - e.amount) });
-      if (c) await db.cycle.update(c.id!, { pool: c.pool + e.amount });
+    } else if (dayRow || isPastDay) {
+      // Removing a spend from an already-closed/past day updates that day's spent total,
+      // and refunds the pool if the spend originally adjusted the pool
+      if (dayRow) {
+        await db.days.put({ ...dayRow, spent: Math.max(0, dayRow.spent - e.amount) });
+      }
+      if (c && e.adjustsPool !== false) {
+        await db.cycle.update(c.id!, { pool: c.pool + e.amount });
+      }
     }
   });
-  void deleteRemoteEntry(id);
+  await deleteRemoteEntry(id);
+  if (supabaseSync.isEnabled()) {
+    void supabaseSync.push().catch(() => {});
+  }
   scheduleSync();
 }
 
@@ -384,7 +470,12 @@ export async function closeCurrentDay(cycleId: number): Promise<CloseResult | nu
     await db.cycle.update(cycleId, { currentDay: r.state.currentDay, pool: r.state.pool, userId: c.userId ?? uid });
     return r;
   });
-  if (res) scheduleSync();
+  if (res) {
+    if (supabaseSync.isEnabled()) {
+      void supabaseSync.push().catch(() => {});
+    }
+    scheduleSync();
+  }
   return res;
 }
 
@@ -448,6 +539,9 @@ export async function applyCatchUp(cycleId: number, total: number, gap: { from: 
     );
     await db.cycle.update(cycleId, { currentDay: r.state.currentDay, pool: r.state.pool, userId: c.userId ?? uid });
   });
+  if (supabaseSync.isEnabled()) {
+    void supabaseSync.push().catch(() => {});
+  }
   scheduleSync();
 }
 

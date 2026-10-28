@@ -522,6 +522,7 @@ export const supabaseSync: SyncService = {
         event: e.event ?? null,
         payment: e.payment ?? null,
         note: e.note ?? null,
+        adjustsPool: e.adjustsPool ?? true,
       },
     }));
 
@@ -583,6 +584,8 @@ export const supabaseSync: SyncService = {
       }
     };
 
+    // 1. Upsert parent tables first (stash_users, stash_plans, stash_cycles) so foreign keys on
+    //    stash_days(workspace_id, cycle_id) and stash_entries(workspace_id, cycle_id) are always satisfied.
     await Promise.all([
       pgRequest(config, 'stash_users?on_conflict=user_id', {
         method: 'POST',
@@ -591,6 +594,10 @@ export const supabaseSync: SyncService = {
       }).catch(() => undefined),
       upsertWithUserIdFallback(config, 'stash_plans?on_conflict=workspace_id,id', planRows),
       upsertWithUserIdFallback(config, 'stash_cycles?on_conflict=workspace_id,id', cycleRows),
+    ]);
+
+    // 2. Upsert child tables (stash_days, stash_entries, stash_categories, stash_events)
+    await Promise.all([
       upsertWithUserIdFallback(config, 'stash_days?on_conflict=workspace_id,cycle_id,day', dayRows).catch(
         () => undefined,
       ),
@@ -770,17 +777,28 @@ export const supabaseSync: SyncService = {
         }
 
         if (dayRows.length) {
+          // Reconcile each closed day's spent total against actual non-savings entries for that (cycleId, day)
+          const entrySpentByDay = new Map<string, number>();
+          for (const e of entryRows) {
+            if (!e.from_savings) {
+              const k = `${Number(e.cycle_id)}:${Number(e.day)}`;
+              entrySpentByDay.set(k, (entrySpentByDay.get(k) ?? 0) + Number(e.amount));
+            }
+          }
           await db.days.bulkPut(
-            dayRows.map(
-              (r): DayRow => ({
-                cycleId: Number(r.cycle_id),
-                day: Number(r.day),
+            dayRows.map((r): DayRow => {
+              const cid = Number(r.cycle_id);
+              const d = Number(r.day);
+              const actualSpent = entrySpentByDay.get(`${cid}:${d}`);
+              return {
+                cycleId: cid,
+                day: d,
                 userId: r.user_id || uid,
                 allowanceAtStart: Number(r.allowance_at_start),
-                spent: Number(r.spent),
+                spent: actualSpent !== undefined ? actualSpent : Number(r.spent),
                 status: r.status,
-              }),
-            ),
+              };
+            }),
           );
         }
 
@@ -804,6 +822,8 @@ export const supabaseSync: SyncService = {
                   r.payment_method ?? (typeof r.metadata?.payment === 'string' ? r.metadata.payment : null),
                 note: r.notes ?? (typeof r.metadata?.note === 'string' ? r.metadata.note : null),
                 fromSavings: Boolean(r.from_savings),
+                adjustsPool:
+                  typeof r.metadata?.adjustsPool === 'boolean' ? r.metadata.adjustsPool : true,
                 isEstimate: Boolean(r.is_estimate),
                 hour: Number(r.hour),
                 createdAt: Number(r.created_at),
@@ -1035,7 +1055,7 @@ export function scheduleSync(): void {
     void supabaseSync.push().catch(() => {
       /* stays queued in local Dexie until next online sync */
     });
-  }, 800);
+  }, 200);
 }
 
 /* ---------- Extensible Feature Store for Future Features ---------- */

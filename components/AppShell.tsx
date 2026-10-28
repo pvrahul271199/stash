@@ -177,7 +177,7 @@ export function AppShell() {
         <>
           <div className="flex min-h-0 flex-1 flex-col">
             {tab === 'today' && <TodayTab cycle={snap.cycle} plan={snap.plan} />}
-            {tab === 'history' && <HistoryTab activeCycle={snap.cycle} />}
+            {tab === 'history' && <HistoryTab activeCycle={snap.cycle} plan={snap.plan} />}
             {tab === 'insights' && <InsightsTab cycle={snap.cycle} plan={snap.plan} />}
             {tab === 'categories' && <CategoriesTab />}
           </div>

@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { addSpend, createPlanAndCycle, deleteAllData } from '@/db/queries';
+import { addSpend, closeCurrentDay, createPlanAndCycle, deleteAllData } from '@/db/queries';
 import { getDB } from '@/db/schema';
 import {
   decodeBase64Username,
@@ -87,6 +87,37 @@ describe('Supabase Sync & Scalable Feature Store', () => {
     const userRow = (userReq?.body as Array<Record<string, unknown>>)[0];
     expect(userRow.user_id).toBe('cmFodWw=');
     expect(userRow.username).toBe('rahul');
+
+    // Close Day 1 so we are on Day 2, then add a transaction to previous Day 1 from History
+    await closeCurrentDay(cycle!.id!);
+    const cycleDay2 = (await getDB().cycle.get(cycle!.id!))!;
+    expect(cycleDay2.currentDay).toBe(2);
+
+    requests.length = 0;
+    const prevDayEntry = await addSpend(
+      cycleDay2,
+      { amount: 150, label: 'Auto', category: 'Travel', payment: 'UPI' },
+      new Date(),
+      1,
+    );
+    expect(prevDayEntry.day).toBe(1);
+    expect(prevDayEntry.userId).toBe('cmFodWw=');
+
+    await supabaseSync.push();
+
+    const dayReqs = requests.filter((r) => r.url.includes('/rest/v1/stash_days'));
+    expect(dayReqs.length).toBeGreaterThan(0);
+    const lastDayBody = dayReqs[dayReqs.length - 1].body as Array<Record<string, unknown>>;
+    expect(lastDayBody[0]).toMatchObject({
+      user_id: 'cmFodWw=',
+      cycle_id: cycle!.id,
+      day: 1,
+      spent: 400, // 250 Lunch + 150 Auto
+    });
+
+    const cycleReqs = requests.filter((r) => r.url.includes('/rest/v1/stash_cycles'));
+    const lastCycleBody = cycleReqs[cycleReqs.length - 1].body as Array<Record<string, unknown>>;
+    expect(lastCycleBody[0].pool).toBe(cycleDay2.pool - 150);
 
     // Test extensible feature store
     await featureDataRepo.upsert('savings_goals', 'goal-1', {

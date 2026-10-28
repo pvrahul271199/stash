@@ -69,6 +69,8 @@ export interface Entry {
   /** Optional short note for this spend. */
   note?: string | null;
   fromSavings: boolean;
+  /** For past-day spends: whether this spend adjusted the remaining cycle pool (defaults to true). */
+  adjustsPool?: boolean;
   isEstimate: boolean;
   /** 0-23, device clock when logged. */
   hour: number;

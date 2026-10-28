@@ -391,6 +391,33 @@ describe('database queries', () => {
     const closedAfter = (await db.days.get([cycle.id!, 1]))!;
     expect(closedAfter.spent).toBe(450);
 
+    // Adding a forgotten transaction directly to Day 1 from History with adjustPool: true updates Day 1's spent total and pool
+    const cycleBeforeBackdate = (await db.cycle.get(cycle.id!))!;
+    const backdated = await addSpend(
+      cycleBeforeBackdate,
+      { amount: 150, label: 'Auto', category: 'Travel', payment: 'UPI', adjustPool: true },
+      new Date(),
+      1,
+    );
+    expect(backdated.day).toBe(1);
+    expect(backdated.adjustsPool).toBe(true);
+    const closedAfterBackdate = (await db.days.get([cycle.id!, 1]))!;
+    expect(closedAfterBackdate.spent).toBe(600);
+    const cycleAfterBackdate = (await db.cycle.get(cycle.id!))!;
+    expect(cycleAfterBackdate.pool).toBe(cycleBeforeBackdate.pool - 150);
+
+    // Adding a transaction to Day 1 with adjustPool: false updates Day 1's spent total WITHOUT changing the remaining month pool
+    const backdatedNoAdjust = await addSpend(
+      cycleAfterBackdate,
+      { amount: 200, label: 'Dinner', category: 'Food', payment: 'Cash', adjustPool: false },
+      new Date(),
+      1,
+    );
+    expect(backdatedNoAdjust.day).toBe(1);
+    expect(backdatedNoAdjust.adjustsPool).toBe(false);
+    expect((await db.days.get([cycle.id!, 1]))?.spent).toBe(800);
+    expect((await db.cycle.get(cycle.id!))?.pool).toBe(cycleAfterBackdate.pool);
+
     const cycles = await db.cycle.toArray();
     const allEntries = await db.entries.toArray();
     expect(searchEntries(allEntries, cycles, 'Updated lunch')).toHaveLength(1);

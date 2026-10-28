@@ -7,8 +7,9 @@ import {
   useCycleEntries,
   useDayRows,
 } from '@/db/queries';
-import type { Cycle, Entry } from '@/db/schema';
+import type { Cycle, Entry, Plan } from '@/db/schema';
 import { EditSpendSheet } from './EditSpendSheet';
+import { LogSpend } from './LogSpend';
 import {
   buildCalendar,
   compactINR,
@@ -25,7 +26,7 @@ import { inr } from '@/lib/format';
 
 const WEEKDAY_HEADERS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
-export function HistoryTab({ activeCycle }: { activeCycle: Cycle }) {
+export function HistoryTab({ activeCycle, plan }: { activeCycle: Cycle; plan?: Plan }) {
   const allCycles = useAllCycles() ?? [activeCycle];
   const [selectedCycleId, setSelectedCycleId] = useState<number>(activeCycle.id!);
   const [query, setQuery] = useState('');
@@ -39,6 +40,7 @@ export function HistoryTab({ activeCycle }: { activeCycle: Cycle }) {
   const defaultDay = Math.min(cycle.currentDay, cycle.totalDays);
   const [selectedDay, setSelectedDay] = useState<number>(defaultDay);
   const [editing, setEditing] = useState<Entry | null>(null);
+  const [addingForDay, setAddingForDay] = useState<number | null>(null);
 
   const activeDay = selectedDay >= 1 && selectedDay <= cycle.totalDays ? selectedDay : defaultDay;
 
@@ -212,7 +214,7 @@ export function HistoryTab({ activeCycle }: { activeCycle: Cycle }) {
                 <div key={wIdx} className="grid grid-cols-7 gap-1.5">
                   {week.map((cell) => {
                     if (cell.day == null) {
-                      return <div key={cell.iso} className="h-[54px] rounded-[10px]" aria-hidden="true" />;
+                      return <div key={cell.iso} className="h-[64px] rounded-[10px]" aria-hidden="true" />;
                     }
                     const d = cell.day;
                     const stat = totalsByDay.get(d);
@@ -224,17 +226,17 @@ export function HistoryTab({ activeCycle }: { activeCycle: Cycle }) {
                     const isOver = row ? spent > row.allowanceAtStart : false;
                     const hasData = Boolean(stat || row);
 
-                    let bg = 'border-line bg-white text-ink';
+                    let circleStyle = 'border border-line bg-white text-ink';
                     if (isSelected) {
-                      bg = 'border-ink bg-ink text-white';
+                      circleStyle = 'bg-ink text-white';
                     } else if (isFuture) {
-                      bg = 'border-line/60 bg-tint/30 text-faint';
+                      circleStyle = 'border border-line/60 bg-tint/30 text-faint';
                     } else if (row && isOver) {
-                      bg = 'border-warm/30 bg-warmBg text-ink';
+                      circleStyle = 'border border-warm/40 bg-warmBg text-ink';
                     } else if (row) {
-                      bg = 'border-good/30 bg-goodBg/60 text-ink';
+                      circleStyle = 'border border-good/40 bg-goodBg/70 text-ink';
                     } else if (isToday) {
-                      bg = 'border-ink bg-tint text-ink';
+                      circleStyle = 'border-2 border-ink bg-white text-ink';
                     }
 
                     return (
@@ -244,20 +246,29 @@ export function HistoryTab({ activeCycle }: { activeCycle: Cycle }) {
                         onClick={() => setSelectedDay(d)}
                         aria-pressed={isSelected}
                         aria-label={`Day ${d}, ${formatWithWeekday(cell.iso)}, spent ${inr(spent)}`}
-                        className={`flex h-[54px] min-h-0 flex-col items-center justify-between rounded-[10px] border px-1 py-1.5 text-center transition-colors ${bg}`}
+                        className={`flex h-[64px] min-h-0 flex-col items-center justify-between rounded-[10px] px-0.5 py-1 text-center transition-colors ${
+                          isSelected ? 'bg-tint/80 ring-1 ring-ink/20' : 'hover:bg-tint/40'
+                        }`}
                       >
-                        <span className={`text-[11px] font-semibold leading-none ${isSelected ? 'text-white/90' : 'text-soft'}`}>
-                          {cell.monthLabel ? `${cell.dom} ${cell.monthLabel}` : cell.dom}
+                        <span
+                          className={`text-[9px] font-medium leading-none ${
+                            isSelected || isToday ? 'font-semibold text-ink' : 'text-faint'
+                          }`}
+                        >
+                          Day {d}
                         </span>
                         <span
-                          className={`num text-[11px] font-semibold leading-none ${
-                            isSelected
-                              ? 'text-white'
-                              : hasData || isToday
-                                ? isOver
-                                  ? 'text-warm'
-                                  : 'text-ink'
-                                : 'text-faint'
+                          className={`num flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-semibold leading-none transition-colors ${circleStyle}`}
+                        >
+                          {cell.dom}
+                        </span>
+                        <span
+                          className={`num text-[10px] font-semibold leading-none ${
+                            hasData || isToday
+                              ? isOver
+                                ? 'text-warm'
+                                : 'text-ink'
+                              : 'text-faint'
                           }`}
                         >
                           {hasData || isToday ? compactINR(spent) : '—'}
@@ -360,11 +371,50 @@ export function HistoryTab({ activeCycle }: { activeCycle: Cycle }) {
                 ))}
               </ul>
             )}
+
+            <div className="mt-2 border-t border-line pt-3">
+              <button
+                type="button"
+                onClick={() => setAddingForDay(activeDay)}
+                aria-label={`Log for this day (${formatWithWeekday(activeDayIso)}, Day ${activeDay})`}
+                className="flex h-10 min-h-0 w-full items-center justify-center gap-1.5 rounded-key border border-line bg-tint/50 text-[13px] font-medium text-ink transition-colors hover:bg-tint active:scale-[0.99]"
+              >
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  aria-hidden="true"
+                >
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+                Log for this day ({formatShort(activeDayIso)})
+              </button>
+            </div>
           </section>
         </>
       )}
 
       {editing && <EditSpendSheet entry={editing} onClose={() => setEditing(null)} />}
+      {addingForDay != null && (
+        <LogSpend
+          cycle={cycle}
+          plan={
+            plan ?? {
+              income: cycle.planAmount,
+              bills: 0,
+              savings: 0,
+              monthLength: cycle.totalDays,
+              createdAt: 0,
+            }
+          }
+          targetDay={addingForDay}
+          onClose={() => setAddingForDay(null)}
+        />
+      )}
     </div>
   );
 }
