@@ -7,6 +7,7 @@ export interface UserRecord {
   username: string;
   displayName: string;
   avatarTheme: string;
+  currency?: string;
   createdAt: number;
   lastSeenAt?: number;
   updatedAt: number;
@@ -21,6 +22,7 @@ export interface Plan {
   savings: number;
   /** Days until next salary. */
   monthLength: number;
+  currency?: string;
   /** Optional itemised bills, e.g. Rent, Health EMI. Sum equals `bills`. */
   billItems?: { name: string; amount: number }[];
   /** Optional itemised savings, e.g. SIP, RD. Sum equals `savings`. */
@@ -113,6 +115,8 @@ export interface Meta {
   activeEvent?: string | null;
   /** Last payment mode used, so the next spend defaults to it. */
   lastPayment?: string | null;
+  /** Active display currency (e.g. 'INR', 'USD', 'EUR'). */
+  currency?: string | null;
 }
 
 export const PAYMENT_MODES = ['UPI', 'Card', 'Cash'] as const;

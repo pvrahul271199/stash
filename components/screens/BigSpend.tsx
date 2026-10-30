@@ -1,7 +1,8 @@
 'use client';
 import { BackIcon, IconButton, PrimaryButton, SecondaryButton } from '../ui/Button';
 import { Note } from '../ui/Chip';
-import { inr } from '@/lib/format';
+import { inr, num } from '@/lib/format';
+import { useCurrency } from '@/lib/currency';
 
 export function BigSpend({
   amount,
@@ -22,6 +23,8 @@ export function BigSpend({
   onSpread: () => void;
   onSavings: () => void;
 }) {
+  const { currency } = useCurrency();
+  const space = currency.symbol.length > 1 ? ' ' : '';
   const perDay = daysLeft > 1 ? amount / (daysLeft - 1) : amount;
   return (
     <div className="flex h-full flex-col">
@@ -31,8 +34,8 @@ export function BigSpend({
       <div className="mt-4 flex-1 overflow-y-auto">
         <p className="text-[14px] text-soft">{label}</p>
         <p className="num mt-1 text-big text-ink">
-          <span className="text-faint">₹</span>
-          {amount.toLocaleString('en-IN')}
+          <span className="text-faint">{currency.symbol}{space}</span>
+          {num(amount)}
         </p>
         <h2 className="mt-6 text-question font-semibold text-ink">That&apos;s a bigger one. How should it count?</h2>
         <p className="mt-2 text-body text-soft">

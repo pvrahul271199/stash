@@ -27,6 +27,8 @@ import {
   type UserProfile,
 } from './user';
 import { dateOfDay, daysBetween } from './dates';
+import { reportSyncProgress } from './syncState';
+import { getStoredCurrencyCode, setStoredCurrency } from './currency';
 
 export {
   DEFAULT_USER_ID,
@@ -238,6 +240,7 @@ interface DbUserRow {
   username: string;
   display_name: string;
   avatar_theme: string;
+  currency?: string;
   created_at: number;
   metadata?: Record<string, unknown>;
 }
@@ -250,6 +253,7 @@ interface DbPlanRow {
   bills: number;
   savings: number;
   month_length: number;
+  currency?: string;
   created_at: number;
   metadata?: Record<string, unknown>;
 }
@@ -437,30 +441,36 @@ export const supabaseSync: SyncService = {
     const config = getSupabaseConfig();
     if (!config) return;
 
-    const db = getDB();
-    const [plans, cycles, days, entries, categories, events] = await Promise.all([
-      db.plan.toArray(),
-      db.cycle.toArray(),
-      db.days.toArray(),
-      db.entries.toArray(),
-      db.categories.toArray(),
-      db.events.toArray(),
-    ]);
+    reportSyncProgress('syncing');
+
+    try {
+      const db = getDB();
+      const [plans, cycles, days, entries, categories, events] = await Promise.all([
+        db.plan.toArray(),
+        db.cycle.toArray(),
+        db.days.toArray(),
+        db.entries.toArray(),
+        db.categories.toArray(),
+        db.events.toArray(),
+      ]);
 
     const uid = config.userId;
     const ws = config.workspaceId;
     const username = decodeBase64Username(uid) || getStoredUsername() || DEFAULT_USER_ID;
     const avatarTheme = getStoredAvatarTheme();
+    const activeCurrency = getStoredCurrencyCode();
 
     const userRow: DbUserRow = {
       user_id: uid,
       username,
       display_name: username === DEFAULT_USER_ID ? 'Guest' : username,
       avatar_theme: avatarTheme,
+      currency: activeCurrency,
       created_at: Date.now(),
       metadata: {
         activeCycleId: cycles[cycles.length - 1]?.id ?? null,
         totalSpends: entries.length,
+        currency: activeCurrency,
       },
     };
 
@@ -474,10 +484,12 @@ export const supabaseSync: SyncService = {
         bills: p.bills,
         savings: p.savings,
         month_length: p.monthLength,
+        currency: p.currency || activeCurrency,
         created_at: p.createdAt,
         metadata: {
           userId: uid,
           username,
+          currency: p.currency || activeCurrency,
           billItems: p.billItems ?? [],
           savingsItems: p.savingsItems ?? [],
         },
@@ -633,7 +645,13 @@ export const supabaseSync: SyncService = {
     ]);
 
     setLastSyncedAt(Date.now());
-  },
+    reportSyncProgress('synced', null);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Sync failed';
+    reportSyncProgress('error', msg);
+    throw err;
+  }
+},
 
   /**
    * Pulls all rows for the active `user_id` from Supabase and hydrates local IndexedDB (Dexie).
@@ -737,6 +755,13 @@ export const supabaseSync: SyncService = {
     const resolvedUsername =
       userRows[0]?.username || decodeBase64Username(uid) || getStoredUsername() || DEFAULT_USER_ID;
     const resolvedTheme = userRows[0]?.avatar_theme || getStoredAvatarTheme() || DEFAULT_AVATAR_THEME;
+    const restoredCurrency =
+      planRows[0]?.currency ||
+      userRows[0]?.currency ||
+      (userRows[0]?.metadata?.currency as string | undefined);
+    if (restoredCurrency) {
+      setStoredCurrency(restoredCurrency);
+    }
 
     const db = getDB();
     await db.transaction(
@@ -756,11 +781,15 @@ export const supabaseSync: SyncService = {
           username: resolvedUsername,
           displayName: userRows[0]?.display_name || resolvedUsername,
           avatarTheme: resolvedTheme,
+          currency: restoredCurrency || getStoredCurrencyCode(),
           createdAt: Number(userRows[0]?.created_at ?? Date.now()),
           updatedAt: Date.now(),
         };
         await db.users.put(userRec);
-        await db.meta.update('main', { activeUserId: uid });
+        await db.meta.update('main', {
+          activeUserId: uid,
+          currency: restoredCurrency || getStoredCurrencyCode(),
+        });
 
         if (planRows.length) {
           await db.plan.bulkPut(
@@ -771,6 +800,7 @@ export const supabaseSync: SyncService = {
               bills: Number(r.bills),
               savings: Number(r.savings),
               monthLength: Number(r.month_length),
+              currency: r.currency || restoredCurrency || getStoredCurrencyCode(),
               createdAt: Number(r.created_at),
               billItems: Array.isArray(r.metadata?.billItems)
                 ? (r.metadata.billItems as { name: string; amount: number }[])
@@ -1087,6 +1117,7 @@ let syncTimer: ReturnType<typeof setTimeout> | null = null;
 
 export function scheduleSync(): void {
   if (typeof window === 'undefined' || !supabaseSync.isEnabled()) return;
+  reportSyncProgress('syncing');
   if (syncTimer) clearTimeout(syncTimer);
   syncTimer = setTimeout(() => {
     syncTimer = null;

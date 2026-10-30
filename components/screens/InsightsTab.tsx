@@ -24,6 +24,7 @@ import {
 import { compactINR } from '@/lib/history';
 import { dateOfDay, formatWithWeekday } from '@/lib/dates';
 import { inr } from '@/lib/format';
+import { useCurrency } from '@/lib/currency';
 import { colors, categoryRamp } from '@/theme/tokens';
 import { useUI } from '@/store/ui';
 
@@ -242,6 +243,8 @@ export function InsightsTab({ cycle, plan }: { cycle: Cycle | undefined; plan: P
   const fillPct = Math.min((summary.spentSoFar / cycle.planAmount) * 100, 100);
   const tryAgain = 'Close a few days to see this.';
   const topEventTotal = evList.reduce((m, e) => Math.max(m, e.total), 0);
+  const { currency } = useCurrency();
+  const space = currency.symbol.length > 1 ? ' ' : '';
 
   return (
     <div className="flex-1 overflow-y-auto px-6 pb-8 pt-6" style={{ overflowAnchor: 'none' }}>
@@ -251,8 +254,8 @@ export function InsightsTab({ cycle, plan }: { cycle: Cycle | undefined; plan: P
       <section className="mt-5" aria-label="Summary">
         <p className="text-[14px] text-soft">Spent this month so far</p>
         <p className="num text-big text-ink">
-          <span className="text-faint">₹</span>
-          {Math.round(summary.spentSoFar).toLocaleString('en-IN')}
+          <span className="text-faint">{currency.symbol}{space}</span>
+          {Math.round(summary.spentSoFar).toLocaleString(currency.locale)}
         </p>
         <p className="mt-1 text-[14px] text-soft">of {inr(cycle.planAmount)} to live on</p>
         <div

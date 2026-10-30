@@ -4,6 +4,7 @@ import { CloseIcon, IconButton, PrimaryButton } from '../ui/Button';
 import { removeEntry, updateEntry, useCategories, useEvents } from '@/db/queries';
 import { PAYMENT_MODES, type Entry } from '@/db/schema';
 import { num } from '@/lib/format';
+import { useCurrency } from '@/lib/currency';
 import { useToast } from '@/store/toast';
 
 export function EditSpendSheet({
@@ -16,6 +17,7 @@ export function EditSpendSheet({
   const cats = useCategories() ?? [];
   const events = useEvents() ?? [];
   const toast = useToast((s) => s.show);
+  const { currency } = useCurrency();
 
   const [amountRaw, setAmountRaw] = useState(String(entry.amount));
   const [label, setLabel] = useState(entry.label);
@@ -96,7 +98,7 @@ export function EditSpendSheet({
         {/* Amount & Label */}
         <div className="mt-3 grid grid-cols-2 gap-2.5">
           <label className="block">
-            <span className="text-[12px] font-medium text-soft">Amount (₹)</span>
+            <span className="text-[12px] font-medium text-soft">Amount ({currency.symbol})</span>
             <input
               value={amountRaw === '' ? '' : num(Number(amountRaw))}
               onChange={(e) =>

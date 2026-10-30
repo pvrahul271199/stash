@@ -27,11 +27,14 @@ create table if not exists public.stash_users (
   username text not null unique,          -- Normalized lowercase username (e.g. 'rahul')
   display_name text not null,
   avatar_theme text not null default 'Indigo',
+  currency text not null default 'INR',
   created_at bigint not null,
   last_seen_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   metadata jsonb not null default '{}'::jsonb
 );
+
+alter table public.stash_users add column if not exists currency text not null default 'INR';
 
 create index if not exists idx_stash_users_username on public.stash_users (username);
 

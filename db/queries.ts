@@ -29,6 +29,7 @@ import { addDays, calendarDay, dateOfDay, todayISO } from '@/lib/dates';
 import { DEFAULT_SAMPLE_PLAN, SAMPLE_DAYS, generateSampleSpends } from '@/lib/sample';
 import { buildCSV, type CsvRow } from '@/lib/csv';
 import { validateName } from '@/lib/categories';
+import { getStoredCurrencyCode } from '@/lib/currency';
 import {
   buildUserProfile,
   deleteRemoteCategory,
@@ -192,6 +193,7 @@ export async function ensureSeed(): Promise<void> {
     const profile = buildUserProfile(getStoredUsername(), getStoredAvatarTheme());
     await db.users.put({
       ...profile,
+      currency: getStoredCurrencyCode(),
       createdAt: existingUser?.createdAt ?? profile.createdAt,
       lastSeenAt: Date.now(),
     });
@@ -210,8 +212,9 @@ async function startCycle(p: PlanInput, startDate: string, addPlan: boolean): Pr
   const db = getDB();
   const s = initialCycleState(p);
   const uid = getActiveUserId();
+  const currency = getStoredCurrencyCode();
   await db.transaction('rw', db.plan, db.cycle, async () => {
-    if (addPlan) await db.plan.add({ ...p, userId: uid, createdAt: Date.now() });
+    if (addPlan) await db.plan.add({ ...p, userId: uid, currency, createdAt: Date.now() });
     await db.cycle.add({
       userId: uid,
       startDate,
@@ -611,16 +614,17 @@ async function reindexCategories() {
 export async function addCategory(name: string): Promise<string | null> {
   const db = getDB();
   const all = await db.categories.toArray();
-  const err = validateName(name, all.map((c) => c.name));
+  const trimmed = name.trim();
+  const err = validateName(trimmed, all.map((c) => c.name));
   if (err) return err;
   await db.categories.add({
     userId: getActiveUserId(),
-    name: name.trim(),
+    name: trimmed,
     sortOrder: all.length,
     isSystem: false,
     subcategories: [],
   });
-  await reindexCategories();
+  void reindexCategories();
   scheduleSync();
   return null;
 }
@@ -629,9 +633,10 @@ export async function addSubcategory(catId: number, name: string): Promise<strin
   const db = getDB();
   const c = await db.categories.get(catId);
   if (!c) return 'That category is gone.';
-  const err = validateName(name, c.subcategories);
+  const trimmed = name.trim();
+  const err = validateName(trimmed, c.subcategories);
   if (err) return err;
-  await db.categories.update(catId, { subcategories: [...c.subcategories, name.trim()] });
+  await db.categories.update(catId, { subcategories: [...c.subcategories, trimmed] });
   scheduleSync();
   return null;
 }
@@ -734,7 +739,6 @@ export async function startEvent(name: string, note?: string | null): Promise<st
     if (err) return err;
     eventName = trimmed;
   }
-  await ensureSeed();
   await db.meta.update('main', { activeEvent: eventName });
   return null;
 }

@@ -1,4 +1,5 @@
 import { addDays, dateOfDay, daysBetween, formatShort } from './dates';
+import { useCurrencyStore } from './currency';
 
 /** Minimal shapes so this stays pure and testable. */
 export interface HistoryEntry {
@@ -77,16 +78,27 @@ export function dayTotals(entries: HistoryEntry[]): Map<number, DayTotal> {
   return map;
 }
 
-/** "₹1.2k" style label that fits inside a calendar cell. */
+/** Compact currency label (e.g. "₹1.2k" or "$1.2k") that fits inside a calendar cell. */
 export function compactINR(n: number): string {
+  const info = useCurrencyStore.getState().currency;
+  const sym = info.symbol;
+  const space = sym.length > 1 ? ' ' : '';
   const r = Math.round(n);
-  if (r < 1000) return `₹${r}`;
-  if (r < 100000) {
-    const k = r / 1000;
-    return `₹${k >= 10 ? Math.round(k) : Math.round(k * 10) / 10}k`;
+  if (r < 1000) return `${sym}${space}${r}`;
+  if (info.code === 'INR') {
+    if (r < 100000) {
+      const k = r / 1000;
+      return `${sym}${space}${k >= 10 ? Math.round(k) : Math.round(k * 10) / 10}k`;
+    }
+    const l = r / 100000;
+    return `${sym}${space}${l >= 10 ? Math.round(l) : Math.round(l * 10) / 10}L`;
   }
-  const l = r / 100000;
-  return `₹${l >= 10 ? Math.round(l) : Math.round(l * 10) / 10}L`;
+  if (r < 1000000) {
+    const k = r / 1000;
+    return `${sym}${space}${k >= 10 ? Math.round(k) : Math.round(k * 10) / 10}k`;
+  }
+  const m = r / 1000000;
+  return `${sym}${space}${m >= 10 ? Math.round(m) : Math.round(m * 10) / 10}M`;
 }
 
 /* ---------- search ---------- */
@@ -108,7 +120,7 @@ export function searchEntries(entries: HistoryEntry[], cycles: HistoryCycle[], q
   const q = query.trim().toLowerCase();
   if (!q) return [];
   const words = q.split(/\s+/);
-  const amount = /^₹?\d+$/.test(q) ? Number(q.replace('₹', '')) : null;
+  const amount = /^[^\d]?\d+$/.test(q) ? Number(q.replace(/[^\d]/g, '')) : null;
   const startOf = new Map(cycles.filter((c) => c.id != null).map((c) => [c.id!, c.startDate]));
 
   const hits = entries.filter((e) => {

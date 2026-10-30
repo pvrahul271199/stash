@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { PrimaryButton, SecondaryButton } from '../ui/Button';
 import { Note } from '../ui/Chip';
 import { HugeNumber } from '../ui/HugeNumber';
+import { SyncStatusPill } from '../ui/SyncStatusPill';
 import { WeekRow, weekWindow, type WeekDay } from '../ui/WeekRow';
 import { LogSpend } from './LogSpend';
 import { CloseDay } from './CloseDay';
@@ -87,12 +88,9 @@ export function TodayTab({ cycle, plan }: { cycle: Cycle; plan: Plan }) {
             {formatWithWeekday(dateOfDay(cycle.startDate, cycle.currentDay))}, day {cycle.currentDay} of{' '}
             {cycle.totalDays}
           </p>
-          <button
-            onClick={() => setSheet('plan')}
-            className="rounded-full border border-line px-4 text-[14px] font-medium text-ink"
-          >
-            Plan
-          </button>
+          <div className="flex items-center gap-2">
+            <SyncStatusPill />
+          </div>
         </header>
 
         <p className="mt-8 text-[15px] text-soft">You can still spend today</p>

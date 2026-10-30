@@ -13,6 +13,7 @@ import { PlanScreen } from './screens/PlanScreen';
 import { CategoriesTab } from './screens/CategoriesTab';
 import { HistoryTab } from './screens/HistoryTab';
 import { InsightsTab } from './screens/InsightsTab';
+import { UserTab } from './screens/UserTab';
 import { PWAManager } from './pwa/PWAManager';
 import {
   applyCatchUp,
@@ -155,7 +156,8 @@ export function AppShell() {
         initial={draft ?? snap.plan ?? undefined}
         onExit={() => {
           setFlow('welcome');
-          setSheet('plan');
+          setSheet('none');
+          setTab('user');
         }}
         onDone={(p) => {
           setDraft(p);
@@ -199,6 +201,34 @@ export function AppShell() {
             {tab === 'history' && <HistoryTab activeCycle={snap.cycle} plan={snap.plan} />}
             {tab === 'insights' && <InsightsTab cycle={snap.cycle} plan={snap.plan} />}
             {tab === 'categories' && <CategoriesTab />}
+            {tab === 'user' && (
+              <UserTab
+                plan={snap.plan}
+                cycle={snap.cycle}
+                onChangePlan={() => {
+                  setDraft({
+                    income: snap.plan!.income,
+                    bills: snap.plan!.bills,
+                    savings: snap.plan!.savings,
+                    monthLength: snap.plan!.monthLength,
+                    billItems: snap.plan!.billItems,
+                    savingsItems: snap.plan!.savingsItems,
+                  });
+                  setFlow('changePlan');
+                }}
+                onSwitchUser={() => {
+                  clearBrowserSessionUser();
+                  setFlow('user');
+                }}
+                onSampleDone={() => setTab('insights')}
+                onDeleted={() => {
+                  clearBrowserSessionUser();
+                  setDraft(null);
+                  setFlow('welcome');
+                  setTab('today');
+                }}
+              />
+            )}
           </div>
           <TabBar tab={tab} onChange={setTab} />
           {sheet === 'plan' && (

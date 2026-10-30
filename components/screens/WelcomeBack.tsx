@@ -4,6 +4,7 @@ import { PrimaryButton, SecondaryButton } from '../ui/Button';
 import type { PendingCatchUp } from '@/db/queries';
 import { dateOfDay, formatShort } from '@/lib/dates';
 import { inr, num } from '@/lib/format';
+import { useCurrency } from '@/lib/currency';
 
 export function describeGap(p: Pick<PendingCatchUp, 'gap' | 'startDate'>, today: string): string {
   const n = p.gap.to - p.gap.from + 1;
@@ -26,6 +27,7 @@ export function WelcomeBack({
   today: string;
   onSubmit: (total: number) => void;
 }) {
+  const { currency } = useCurrency();
   const [raw, setRaw] = useState('');
   const n = pending.gap.to - pending.gap.from + 1;
   const yesterday = dateOfDay(pending.startDate, pending.gap.to);
@@ -41,7 +43,7 @@ export function WelcomeBack({
         <h1 className="mt-2 text-question font-semibold text-ink">{text}</h1>
         <p className="mt-3 text-body text-soft">Roughly how much did you spend? A guess is fine, or enter 0.</p>
         <label className="mt-8 flex items-baseline gap-2 border-b-2 border-ink pb-2">
-          <span className="num text-[44px] text-faint" aria-hidden="true">₹</span>
+          <span className="num text-[44px] text-faint" aria-hidden="true">{currency.symbol}</span>
           <span className="sr-only">Rough total spent</span>
           <input
             value={raw === '' ? '' : num(Number(raw))}

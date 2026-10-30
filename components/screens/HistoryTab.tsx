@@ -23,10 +23,12 @@ import {
   formatWithWeekday,
 } from '@/lib/dates';
 import { inr } from '@/lib/format';
+import { useCurrency } from '@/lib/currency';
 
 const WEEKDAY_HEADERS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 export function HistoryTab({ activeCycle, plan }: { activeCycle: Cycle; plan?: Plan }) {
+  const { currency } = useCurrency();
   const allCycles = useAllCycles() ?? [activeCycle];
   const [selectedCycleId, setSelectedCycleId] = useState<number>(activeCycle.id!);
   const [query, setQuery] = useState('');
@@ -91,7 +93,7 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: Cycle; plan?: P
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search spends, category, UPI, Card, event, or ₹…"
+          placeholder={`Search spends, category, UPI, Card, event, or ${currency.symbol}…`}
           aria-label="Search spends"
           className="h-11 w-full rounded-key border border-line bg-tint/40 pl-3.5 pr-9 text-[14px] text-ink placeholder:text-faint"
         />

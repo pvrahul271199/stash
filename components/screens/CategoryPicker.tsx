@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { BackIcon, IconButton } from '../ui/Button';
 import { addCategory, addSubcategory, useCategories } from '@/db/queries';
 import { num } from '@/lib/format';
+import { useCurrency } from '@/lib/currency';
 import { MAX_NAME } from '@/lib/categories';
 
 function InlineAdd({
@@ -58,8 +59,10 @@ export function CategoryPicker({
   onPick: (category: string, subcategory: string | null) => void;
 }) {
   const cats = useCategories() ?? [];
+  const { currency } = useCurrency();
   const [selId, setSelId] = useState<number | null>(null);
   const sel = cats.find((c) => c.id === selId) ?? null;
+  const space = currency.symbol.length > 1 ? ' ' : '';
 
   return (
     <div className="flex h-full flex-col">
@@ -68,7 +71,7 @@ export function CategoryPicker({
           <BackIcon />
         </IconButton>
         <span className="num text-[28px] text-ink">
-          <span className="text-faint">₹</span>
+          <span className="text-faint">{currency.symbol}{space}</span>
           {num(amount)}
         </span>
         <span className="w-11" aria-hidden="true" />
@@ -95,7 +98,15 @@ export function CategoryPicker({
                 </button>
               ))}
             </div>
-            <InlineAdd label="Need another category?" placeholder="e.g. Pets" onAdd={addCategory} />
+            <InlineAdd
+              label="Need another category?"
+              placeholder="e.g. Pets"
+              onAdd={async (n) => {
+                const err = await addCategory(n);
+                if (!err) onPick(n.trim(), null);
+                return err;
+              }}
+            />
           </>
         )}
 
@@ -121,7 +132,11 @@ export function CategoryPicker({
             <InlineAdd
               label={`Add a type to ${sel.name}`}
               placeholder="e.g. Snacks"
-              onAdd={(n) => addSubcategory(sel.id!, n)}
+              onAdd={async (n) => {
+                const err = await addSubcategory(sel.id!, n);
+                if (!err) onPick(sel.name, n.trim());
+                return err;
+              }}
             />
           </>
         )}

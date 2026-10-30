@@ -20,6 +20,7 @@ import { MAX_NAME } from '@/lib/categories';
 import { dateOfDay, formatShort, formatWithWeekday } from '@/lib/dates';
 import { chipLabels } from '@/lib/suggestions';
 import { inr, num } from '@/lib/format';
+import { useCurrency } from '@/lib/currency';
 import { useToast } from '@/store/toast';
 
 const MAX_DIGITS = 7;
@@ -59,6 +60,7 @@ export function LogSpend({
   const activeEvent = useActiveEvent();
   const events = useEvents() ?? [];
   const toast = useToast((s) => s.show);
+  const { currency } = useCurrency();
   const labels = chipLabels(new Date().getHours(), lastUsed);
   const amount = digits === '' ? 0 : Number(digits);
 
@@ -101,8 +103,8 @@ export function LogSpend({
       const suffix = targetDay != null && targetDay !== cycle.currentDay ? ` on ${targetDateLabel} (Day ${targetDay})` : '';
       toast(
         p.label === 'Sort later'
-          ? `Saved ₹${num(amount)}${suffix}`
-          : `Saved ₹${num(amount)} for ${p.label}${suffix}`,
+          ? `Saved ${inr(amount)}${suffix}`
+          : `Saved ${inr(amount)} for ${p.label}${suffix}`,
       );
       onClose();
     } catch {
@@ -202,8 +204,8 @@ export function LogSpend({
             <div className="mt-3 flex-1 overflow-y-auto">
               <p className="text-[14px] text-soft">{pending.label}</p>
               <p className="num mt-1 text-big text-ink">
-                <span className="text-faint">₹</span>
-                {amount.toLocaleString('en-IN')}
+                <span className="text-faint">{currency.symbol}{currency.symbol.length > 1 ? ' ' : ''}</span>
+                {num(amount)}
               </p>
 
               <h2 className="mt-5 text-question font-semibold text-ink">
@@ -455,8 +457,8 @@ export function LogSpend({
               </span>
             )}
             <div className="num flex items-baseline justify-center" style={{ fontSize: size, lineHeight: 1.05 }}>
-              <span className="mr-1 text-faint" aria-hidden="true">₹</span>
-              <span className={amount === 0 ? 'text-faint' : 'text-ink'} aria-label={`Amount ${amount} rupees`}>
+              <span className="mr-1 text-faint" aria-hidden="true">{currency.symbol}</span>
+              <span className={amount === 0 ? 'text-faint' : 'text-ink'} aria-label={`Amount ${amount} ${currency.code}`}>
                 {amount === 0 ? '0' : num(amount)}
               </span>
             </div>

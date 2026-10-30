@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { BackIcon, IconButton, PrimaryButton } from '../ui/Button';
 import { inr, num } from '@/lib/format';
+import { useCurrency } from '@/lib/currency';
 import { sumItems, type PlanInput, type PlanItem } from '@/lib/budget';
 
 type Draft = PlanInput;
@@ -28,9 +29,9 @@ function validate(step: number, d: Draft, raw: string): string | null {
   const v = raw === '' ? NaN : Number(raw);
   if (Number.isNaN(v)) return step === 1 || step === 2 ? 'Enter a number. 0 is fine.' : 'Enter a number first.';
   if (step === 0 && v <= 0) return 'This needs to be more than 0.';
-  if (step === 1 && v >= d.income) return `Bills need to be less than your income (₹${num(d.income)}).`;
+  if (step === 1 && v >= d.income) return `Bills need to be less than your income (${inr(d.income)}).`;
   if (step === 2 && d.bills + v >= d.income)
-    return `Bills and savings together need to be less than your income. You have ₹${num(d.income - d.bills)} after bills.`;
+    return `Bills and savings together need to be less than your income. You have ${inr(d.income - d.bills)} after bills.`;
   if (step === 3 && (v < 1 || v > 31 || !Number.isInteger(v))) return 'Pick a number from 1 to 31.';
   return null;
 }
@@ -57,6 +58,7 @@ export function Onboarding({
   const [error, setError] = useState<string | null>(null);
   const [itemName, setItemName] = useState('');
   const [itemAmt, setItemAmt] = useState('');
+  const { currency } = useCurrency();
   const ref = useRef<HTMLInputElement>(null);
   const amtRef = useRef<HTMLInputElement>(null);
   const s = STEPS[step];
@@ -171,7 +173,7 @@ export function Onboarding({
         <label className="mt-6 flex items-baseline gap-2 border-b-2 border-ink pb-2">
           {step < 3 && (
             <span className="num text-[44px] text-faint" aria-hidden="true">
-              ₹
+              {currency.symbol}
             </span>
           )}
           <span className="sr-only">{s.q}</span>
@@ -242,7 +244,7 @@ export function Onboarding({
                 onKeyDown={(e) => e.key === 'Enter' && addItem()}
                 inputMode="numeric"
                 pattern="[0-9]*"
-                placeholder="₹ Amount"
+                placeholder={`${currency.symbol} Amount`}
                 aria-label="Item amount"
                 className="num h-10 w-28 rounded-key border border-line bg-white px-3 text-[14px] text-ink placeholder:text-faint"
               />
