@@ -123,6 +123,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 export function InsightsTab({ cycle, plan }: { cycle: Cycle | undefined; plan: Plan | undefined }) {
+  const { currency } = useCurrency();
   const focus = useUI((s) => s.focusCategory);
   const toggleFocus = useUI((s) => s.toggleFocusCategory);
   const setFocus = useUI((s) => s.setFocusCategory);
@@ -243,7 +244,6 @@ export function InsightsTab({ cycle, plan }: { cycle: Cycle | undefined; plan: P
   const fillPct = Math.min((summary.spentSoFar / cycle.planAmount) * 100, 100);
   const tryAgain = 'Close a few days to see this.';
   const topEventTotal = evList.reduce((m, e) => Math.max(m, e.total), 0);
-  const { currency } = useCurrency();
   const space = currency.symbol.length > 1 ? ' ' : '';
 
   return (
