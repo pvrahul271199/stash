@@ -10,7 +10,6 @@ import { TodayTab } from './screens/TodayTab';
 import { WelcomeBack } from './screens/WelcomeBack';
 import { MonthEnd } from './screens/MonthEnd';
 import { PlanScreen } from './screens/PlanScreen';
-import { CategoriesTab } from './screens/CategoriesTab';
 import { HistoryTab } from './screens/HistoryTab';
 import { InsightsTab } from './screens/InsightsTab';
 import { UserTab } from './screens/UserTab';
@@ -200,7 +199,6 @@ export function AppShell() {
             {tab === 'today' && <TodayTab cycle={snap.cycle} plan={snap.plan} />}
             {tab === 'history' && <HistoryTab activeCycle={snap.cycle} plan={snap.plan} />}
             {tab === 'insights' && <InsightsTab cycle={snap.cycle} plan={snap.plan} />}
-            {tab === 'categories' && <CategoriesTab />}
             {tab === 'user' && (
               <UserTab
                 plan={snap.plan}

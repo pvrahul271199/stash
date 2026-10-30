@@ -104,27 +104,30 @@ test.describe('Stash E2E flows', () => {
     await expect(page.getByText(/day 4 of 30/)).toBeVisible();
   });
 
-  test('category add and remove', async ({ page }) => {
+  test('category add and remove in User section', async ({ page }) => {
     await page.goto('/');
     await page.getByRole('button', { name: 'Or explore with sample data first' }).click();
-    await page.getByRole('button', { name: 'Categories' }).click();
+    await page.getByRole('button', { name: 'User' }).click();
 
-    await expect(page.getByRole('heading', { name: 'Categories' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'User Profile & Plan' })).toBeVisible();
+
+    // Expand Categories & Types
+    await page.getByRole('button', { name: /Categories & Types/i }).click();
 
     // Add category "Pets"
-    await page.getByLabel('New category').fill('Pets');
-    await page.getByRole('button', { name: 'Add' }).click();
-    await expect(page.getByRole('button', { name: /Pets/ })).toBeVisible();
+    await page.getByPlaceholder('e.g. Pets, Hobbies').fill('Pets');
+    await page.getByRole('button', { name: 'Add' }).last().click();
+    await expect(page.getByText('Pets')).toBeVisible();
 
     // Expand Pets, add a type, then remove Pets
     await page.getByRole('button', { name: /Pets/ }).click();
-    await page.getByLabel('Add a type to Pets').fill('Vet');
+    await page.getByPlaceholder('Add a type to Pets').fill('Vet');
     await page.getByRole('button', { name: 'Add' }).first().click();
     await expect(page.getByText('Vet')).toBeVisible();
 
     await page.getByRole('button', { name: /Remove Pets/ }).click();
     await page.getByRole('alertdialog').getByRole('button', { name: 'Remove Pets' }).click();
-    await expect(page.getByRole('button', { name: /Pets/ })).toHaveCount(0);
+    await expect(page.getByText('Pets')).toHaveCount(0);
   });
 
   test('Insights interactions: switch views, focus a category from the donut, drag the chart', async ({ page }) => {

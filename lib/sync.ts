@@ -618,14 +618,29 @@ export const supabaseSync: SyncService = {
       }
     };
 
+    const pushUser = async () => {
+      try {
+        await pgRequest(config, 'stash_users?on_conflict=user_id', {
+          method: 'POST',
+          headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+          body: JSON.stringify([userRow]),
+        });
+      } catch {
+        // Fallback: If remote table does not yet have currency column (PGRST204),
+        // upsert without currency column; currency is still preserved in metadata JSONB.
+        const { currency: _omitCurrency, ...legacyUserRow } = userRow;
+        await pgRequest(config, 'stash_users?on_conflict=user_id', {
+          method: 'POST',
+          headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+          body: JSON.stringify([legacyUserRow]),
+        }).catch(() => undefined);
+      }
+    };
+
     // 1. Upsert parent tables first (stash_users, stash_plans, stash_cycles) so foreign keys on
     //    stash_days(workspace_id, cycle_id) and stash_entries(workspace_id, cycle_id) are always satisfied.
     await Promise.all([
-      pgRequest(config, 'stash_users?on_conflict=user_id', {
-        method: 'POST',
-        headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
-        body: JSON.stringify([userRow]),
-      }).catch(() => undefined),
+      pushUser(),
       upsertWithUserIdFallback(config, 'stash_plans?on_conflict=workspace_id,id', planRows),
       upsertWithUserIdFallback(config, 'stash_cycles?on_conflict=workspace_id,id', cycleRows),
     ]);

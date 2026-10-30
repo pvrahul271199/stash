@@ -80,7 +80,7 @@ export function PlanScreen({
             <div key={r.label} className="py-3.5">
               <div className="flex items-center justify-between">
                 <dt className="text-[15px] text-soft">{r.label}</dt>
-                <dd className="num text-[18px] text-ink">{r.value}</dd>
+                <dd className="num text-[16px] font-semibold text-ink">{r.value}</dd>
               </div>
               {r.items && r.items.length > 0 && (
                 <ul className="mt-1.5 flex flex-wrap gap-1.5">
@@ -89,7 +89,7 @@ export function PlanScreen({
                       key={`${it.name}-${i}`}
                       className="rounded-full bg-tint px-2.5 py-0.5 text-[12px] text-soft"
                     >
-                      {it.name} <span className="num text-ink">{inr(it.amount)}</span>
+                      {it.name} <span className="num font-medium text-ink">{inr(it.amount)}</span>
                     </li>
                   ))}
                 </ul>

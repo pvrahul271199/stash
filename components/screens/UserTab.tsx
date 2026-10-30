@@ -3,9 +3,20 @@ import { useState } from 'react';
 import { PrimaryButton, SecondaryButton } from '../ui/Button';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { SyncStatusPill } from '../ui/SyncStatusPill';
-import { deleteAllData, exportCSV, fillSample } from '@/db/queries';
-import type { Cycle, Plan } from '@/db/schema';
+import {
+  addCategory,
+  addSubcategory,
+  deleteAllData,
+  exportCSV,
+  fillSample,
+  removeCategory,
+  removeSubcategory,
+  useCategories,
+  useCategoryCounts,
+} from '@/db/queries';
+import type { Category, Cycle, Plan } from '@/db/schema';
 import { moneyToLiveOn } from '@/lib/budget';
+import { MAX_NAME } from '@/lib/categories';
 import { cycleEndDate, formatWithWeekday } from '@/lib/dates';
 import { inr } from '@/lib/format';
 import { useCurrency } from '@/lib/currency';
@@ -39,9 +50,21 @@ export function UserTab({
   const installEvent = usePWA((s) => s.installEvent);
   const setPWA = usePWA((s) => s.set);
   const { currency, setCurrency, currencies } = useCurrency();
+  const cats = useCategories() ?? [];
+  const catCounts = useCategoryCounts();
 
   const [confirm, setConfirm] = useState<'delete' | 'sample' | null>(null);
   const [username] = useState(() => getStoredUsername());
+
+  // Collapsible categories state
+  const [categoriesOpen, setCategoriesOpen] = useState(false);
+  const [openCatId, setOpenCatId] = useState<number | null>(null);
+  const [newCatName, setNewCatName] = useState('');
+  const [catErr, setCatErr] = useState<string | null>(null);
+  const [newTypeName, setNewTypeName] = useState('');
+  const [newTypeCatId, setNewTypeCatId] = useState<number | null>(null);
+  const [typeErr, setTypeErr] = useState<string | null>(null);
+  const [removingCat, setRemovingCat] = useState<Category | null>(null);
 
   const cleanUser = username.trim().toLowerCase();
   const userId = cleanUser ? encodeUsernameToBase64(cleanUser) : 'default';
@@ -78,7 +101,7 @@ export function UserTab({
   return (
     <div className="flex-1 overflow-y-auto px-6 pb-12 pt-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-question font-semibold text-ink">User Profile & Plan</h1>
+        <h1 className="text-[20px] font-semibold tracking-tight text-ink">User Profile & Plan</h1>
         <SyncStatusPill />
       </div>
 
@@ -107,7 +130,7 @@ export function UserTab({
           </div>
 
           <div className="min-w-0 flex-1">
-            <h2 className="truncate text-[17px] font-semibold text-ink">
+            <h2 className="truncate text-[16px] font-semibold text-ink">
               {cleanUser ? cleanUser.charAt(0).toUpperCase() + cleanUser.slice(1) : 'Guest User'}
             </h2>
             <p className="mt-0.5 truncate text-[12px] text-soft">
@@ -120,7 +143,7 @@ export function UserTab({
       {/* Currency Settings */}
       <section className="mt-6 rounded-note border border-line p-4" aria-label="Currency settings">
         <div className="flex items-center justify-between">
-          <h2 className="text-section font-semibold text-ink">Display currency</h2>
+          <h2 className="text-[16px] font-semibold text-ink">Display currency</h2>
           <div className="flex items-center gap-1.5 rounded-full bg-tint px-2.5 py-1">
             <span className="h-1.5 w-1.5 rounded-full bg-ink" aria-hidden="true" />
             {currency.symbol !== currency.code && (
@@ -166,10 +189,10 @@ export function UserTab({
         </div>
       </section>
 
-      {/* Budget Plan Section ("just modify the plan part") */}
+      {/* Budget Plan Section */}
       <section className="mt-6 rounded-note border border-line p-4" aria-label="Plan details">
         <div className="border-b border-line pb-3">
-          <h2 className="text-section font-semibold text-ink">Your budget plan</h2>
+          <h2 className="text-[16px] font-semibold text-ink">Your budget plan</h2>
           <p className="mt-0.5 text-[12px] text-soft">
             Active cycle allowance & fixed commitments.
           </p>
@@ -179,7 +202,7 @@ export function UserTab({
           {planRows.map((r) => (
             <div key={r.label} className="py-3">
               <div className="flex items-center justify-between">
-                <dt className="text-[14px] text-soft">{r.label}</dt>
+                <dt className="text-[15px] text-soft">{r.label}</dt>
                 <dd className="num text-[16px] font-semibold text-ink">{r.value}</dd>
               </div>
               {r.items && r.items.length > 0 && (
@@ -187,7 +210,7 @@ export function UserTab({
                   {r.items.map((it, i) => (
                     <li
                       key={`${it.name}-${i}`}
-                      className="rounded-full bg-tint px-2.5 py-0.5 text-[11px] text-soft"
+                      className="rounded-full bg-tint px-2.5 py-0.5 text-[12px] text-soft"
                     >
                       {it.name} <span className="num font-medium text-ink">{inr(it.amount)}</span>
                     </li>
@@ -209,6 +232,205 @@ export function UserTab({
         </div>
       </section>
 
+      {/* Categories & Spending Types (Collapsible inside User Tab) */}
+      <section className="mt-6 rounded-note border border-line p-4" aria-label="Categories and types">
+        <button
+          type="button"
+          onClick={() => setCategoriesOpen((o) => !o)}
+          className="flex w-full items-center justify-between text-left"
+          aria-expanded={categoriesOpen}
+        >
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-[16px] font-semibold text-ink">Categories & Types</h2>
+              <span className="rounded-full border border-line/80 bg-tint px-2 py-0.5 text-[11px] font-semibold text-ink">
+                {cats.length} categories
+              </span>
+            </div>
+            <p className="mt-0.5 text-[12px] text-soft">
+              Customize categories, tags, and sub-types.
+            </p>
+          </div>
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+            className={`text-faint transition-transform duration-200 ${
+              categoriesOpen ? 'rotate-180' : ''
+            }`}
+          >
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </button>
+
+        {categoriesOpen && (
+          <div className="mt-4 border-t border-line/70 pt-3">
+            <ul className="divide-y divide-line">
+              {cats.map((c) => (
+                <li key={c.id} className="py-2.5 first:pt-0 last:pb-0">
+                  <button
+                    type="button"
+                    onClick={() => setOpenCatId(openCatId === c.id ? null : c.id!)}
+                    aria-expanded={openCatId === c.id}
+                    className="flex w-full items-center justify-between text-left"
+                  >
+                    <span className="text-[15px] font-semibold text-ink">{c.name}</span>
+                    <span className="flex items-center gap-2 text-[12px] text-soft">
+                      {c.subcategories.length === 0
+                        ? 'No types'
+                        : `${c.subcategories.length} ${c.subcategories.length === 1 ? 'type' : 'types'}`}
+                      <svg
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
+                        className={`text-faint transition-transform duration-200 ${
+                          openCatId === c.id ? 'rotate-180' : ''
+                        }`}
+                      >
+                        <path d="M6 9l6 6 6-6" />
+                      </svg>
+                    </span>
+                  </button>
+
+                  {openCatId === c.id && (
+                    <div className="mt-3 rounded-key bg-tint/40 p-3">
+                      {c.subcategories.length > 0 && (
+                        <ul className="mb-3 flex flex-wrap gap-1.5">
+                          {c.subcategories.map((s) => (
+                            <li
+                              key={s}
+                              className="flex items-center gap-1 rounded-full border border-line bg-white pl-3 pr-1 py-0.5 text-[13px] font-medium text-ink"
+                            >
+                              <span>{s}</span>
+                              <button
+                                type="button"
+                                aria-label={`Remove ${s} from ${c.name}`}
+                                onClick={() => removeSubcategory(c.id!, s)}
+                                className="flex h-5 w-5 items-center justify-center rounded-full text-faint hover:text-ink text-[14px]"
+                              >
+                                ×
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+
+                      <div className="flex gap-2">
+                        <input
+                          value={newTypeCatId === c.id ? newTypeName : ''}
+                          onChange={(e) => {
+                            setNewTypeCatId(c.id!);
+                            setNewTypeName(e.target.value);
+                            setTypeErr(null);
+                          }}
+                          onKeyDown={async (e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              const err = await addSubcategory(c.id!, newTypeName);
+                              if (err) setTypeErr(err);
+                              else {
+                                setNewTypeName('');
+                                setTypeErr(null);
+                              }
+                            }
+                          }}
+                          placeholder={`Add a type to ${c.name}`}
+                          maxLength={MAX_NAME + 6}
+                          className="h-9 min-w-0 flex-1 rounded-key border border-line bg-white px-3 text-[13px] text-ink outline-none placeholder:text-faint"
+                        />
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const err = await addSubcategory(c.id!, newTypeName);
+                            if (err) setTypeErr(err);
+                            else {
+                              setNewTypeName('');
+                              setTypeErr(null);
+                            }
+                          }}
+                          className="h-9 rounded-key bg-ink px-3 text-[12px] font-semibold text-white"
+                        >
+                          Add
+                        </button>
+                      </div>
+                      {newTypeCatId === c.id && typeErr && (
+                        <p role="alert" className="mt-1 text-[11px] text-warm">{typeErr}</p>
+                      )}
+
+                      {!c.isSystem && (
+                        <button
+                          type="button"
+                          onClick={() => setRemovingCat(c)}
+                          className="mt-3 text-[12px] font-medium text-warm hover:underline"
+                        >
+                          Remove {c.name}
+                          {(catCounts[c.name] ?? 0) > 0 ? ` (${catCounts[c.name]} spends will move to Other)` : ''}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+
+            {/* Add new category */}
+            <div className="mt-4 border-t border-line/70 pt-3">
+              <p className="mb-2 text-[13px] font-semibold text-ink">Add a new category</p>
+              <div className="flex gap-2">
+                <input
+                  value={newCatName}
+                  onChange={(e) => {
+                    setNewCatName(e.target.value);
+                    setCatErr(null);
+                  }}
+                  onKeyDown={async (e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      const err = await addCategory(newCatName);
+                      if (err) setCatErr(err);
+                      else {
+                        setNewCatName('');
+                        setCatErr(null);
+                      }
+                    }
+                  }}
+                  placeholder="e.g. Pets, Hobbies"
+                  maxLength={MAX_NAME + 6}
+                  className="h-10 min-w-0 flex-1 rounded-key border border-line bg-white px-3 text-[14px] text-ink outline-none placeholder:text-faint"
+                />
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const err = await addCategory(newCatName);
+                    if (err) setCatErr(err);
+                    else {
+                      setNewCatName('');
+                      setCatErr(null);
+                    }
+                  }}
+                  className="h-10 rounded-key bg-ink px-4 text-[13px] font-semibold text-white"
+                >
+                  Add
+                </button>
+              </div>
+              {catErr && <p role="alert" className="mt-1 text-[12px] text-warm">{catErr}</p>}
+            </div>
+          </div>
+        )}
+      </section>
+
       {/* Account & Device Actions */}
       <section className="mt-6 flex flex-col gap-2" aria-label="Account management">
         <SecondaryButton onClick={doExport}>Export all spends to CSV</SecondaryButton>
@@ -223,6 +445,24 @@ export function UserTab({
           Delete all data on this device
         </button>
       </section>
+
+      {removingCat && (
+        <ConfirmDialog
+          title={`Remove ${removingCat.name}?`}
+          body={
+            (catCounts[removingCat.name] ?? 0) > 0
+              ? `${catCounts[removingCat.name]} ${catCounts[removingCat.name] === 1 ? 'spend' : 'spends'} will move to Other. Nothing is lost.`
+              : 'No spends use it, so nothing changes.'
+          }
+          confirmLabel={`Remove ${removingCat.name}`}
+          onCancel={() => setRemovingCat(null)}
+          onConfirm={async () => {
+            await removeCategory(removingCat.id!);
+            setRemovingCat(null);
+            setOpenCatId(null);
+          }}
+        />
+      )}
 
       {confirm === 'delete' && (
         <ConfirmDialog
