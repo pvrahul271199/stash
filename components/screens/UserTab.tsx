@@ -123,8 +123,12 @@ export function UserTab({
           <h2 className="text-section font-semibold text-ink">Display currency</h2>
           <div className="flex items-center gap-1.5 rounded-full bg-tint px-2.5 py-1">
             <span className="h-1.5 w-1.5 rounded-full bg-ink" aria-hidden="true" />
-            <span className="num text-[13px] font-semibold leading-none text-ink">{currency.symbol}</span>
+            {currency.symbol !== currency.code && (
+              <span className="num text-[13px] font-semibold leading-none text-ink">{currency.symbol}</span>
+            )}
             <span className="text-[11px] font-semibold uppercase tracking-wider text-soft leading-none">{currency.code}</span>
+            <span className="text-[11px] text-faint" aria-hidden="true">·</span>
+            <span className="text-[11px] font-medium text-ink leading-none">{currency.shortName}</span>
           </div>
         </div>
         <p className="mt-1 text-[12px] text-soft">
@@ -151,10 +155,10 @@ export function UserTab({
                 }`}
               >
                 <span className="text-[13px] font-semibold leading-tight">
-                  {c.symbol} {c.code}
+                  {c.symbol !== c.code ? `${c.symbol} ` : ''}{c.code}
                 </span>
                 <span className={`truncate text-[10px] ${isSel ? 'text-white/80' : 'text-soft'}`}>
-                  {c.name.split(' ')[0]}
+                  {c.shortName}
                 </span>
               </button>
             );

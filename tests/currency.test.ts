@@ -27,13 +27,20 @@ describe('Multi-currency engine', () => {
     setStoredCurrency('INR');
   });
 
-  it('supports major world currencies with correct symbols', () => {
+  it('supports major world currencies with correct symbols and short names', () => {
     const codes = SUPPORTED_CURRENCIES.map((c) => c.code);
     expect(codes).toContain('INR');
     expect(codes).toContain('USD');
     expect(codes).toContain('EUR');
     expect(codes).toContain('GBP');
     expect(codes).toContain('AED');
+
+    const aed = SUPPORTED_CURRENCIES.find((c) => c.code === 'AED');
+    expect(aed?.shortName).toBe('Dirham');
+    expect(aed?.name).toBe('UAE Dirham');
+
+    const inr = SUPPORTED_CURRENCIES.find((c) => c.code === 'INR');
+    expect(inr?.shortName).toBe('Rupee');
   });
 
   it('defaults to INR when no currency is stored', () => {

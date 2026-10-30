@@ -5,19 +5,20 @@ export interface CurrencyInfo {
   code: string;
   symbol: string;
   name: string;
+  shortName: string;
   locale: string;
 }
 
 export const SUPPORTED_CURRENCIES: CurrencyInfo[] = [
-  { code: 'INR', symbol: '₹', name: 'Indian Rupee', locale: 'en-IN' },
-  { code: 'USD', symbol: '$', name: 'US Dollar', locale: 'en-US' },
-  { code: 'EUR', symbol: '€', name: 'Euro', locale: 'de-DE' },
-  { code: 'GBP', symbol: '£', name: 'British Pound', locale: 'en-GB' },
-  { code: 'AED', symbol: 'AED', name: 'UAE Dirham', locale: 'en-AE' },
-  { code: 'CAD', symbol: 'C$', name: 'Canadian Dollar', locale: 'en-CA' },
-  { code: 'AUD', symbol: 'A$', name: 'Australian Dollar', locale: 'en-AU' },
-  { code: 'SGD', symbol: 'S$', name: 'Singapore Dollar', locale: 'en-SG' },
-  { code: 'JPY', symbol: '¥', name: 'Japanese Yen', locale: 'ja-JP' },
+  { code: 'INR', symbol: '₹', name: 'Indian Rupee', shortName: 'Rupee', locale: 'en-IN' },
+  { code: 'USD', symbol: '$', name: 'US Dollar', shortName: 'Dollar', locale: 'en-US' },
+  { code: 'EUR', symbol: '€', name: 'Euro', shortName: 'Euro', locale: 'de-DE' },
+  { code: 'GBP', symbol: '£', name: 'British Pound', shortName: 'Pound', locale: 'en-GB' },
+  { code: 'AED', symbol: 'AED', name: 'UAE Dirham', shortName: 'Dirham', locale: 'en-AE' },
+  { code: 'CAD', symbol: 'C$', name: 'Canadian Dollar', shortName: 'Dollar', locale: 'en-CA' },
+  { code: 'AUD', symbol: 'A$', name: 'Australian Dollar', shortName: 'Dollar', locale: 'en-AU' },
+  { code: 'SGD', symbol: 'S$', name: 'Singapore Dollar', shortName: 'Dollar', locale: 'en-SG' },
+  { code: 'JPY', symbol: '¥', name: 'Japanese Yen', shortName: 'Yen', locale: 'ja-JP' },
 ];
 
 export const CURRENCY_STORAGE_KEY = 'stash:currency-code';
