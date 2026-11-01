@@ -85,8 +85,10 @@ export function TodayTab({ cycle, plan }: { cycle: Cycle; plan: Plan }) {
         <IosHint />
         <header className="flex items-center justify-between">
           <p className="text-[14px] text-soft">
-            {formatWithWeekday(dateOfDay(cycle.startDate, cycle.currentDay))}, day {cycle.currentDay} of{' '}
-            {cycle.totalDays}
+            {formatWithWeekday(dateOfDay(cycle.startDate, cycle.currentDay))} ·{' '}
+            <span className="num font-semibold text-ink">
+              Day {cycle.currentDay}/{cycle.totalDays}
+            </span>
           </p>
           <div className="flex items-center gap-2">
             <SyncStatusPill />

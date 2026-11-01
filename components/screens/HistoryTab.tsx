@@ -491,7 +491,7 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: Cycle; plan?: P
                       ? `Daily allowance was ${inr(selectedRow.allowanceAtStart)}`
                       : selectedIso === today
                         ? 'Today (open)'
-                        : `Day ${activeDayNumber} of ${activeCycle.totalDays}`
+                        : `Day ${activeDayNumber}/${activeCycle.totalDays}`
                     : 'Historical date (outside active 30-day cycle)'}
                   {selectedStat?.fromSavings ? ` · +${inr(selectedStat.fromSavings)} from savings` : ''}
                 </p>
