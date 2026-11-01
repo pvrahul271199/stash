@@ -51,8 +51,6 @@ describe('Sync State Manager', () => {
     vi.mocked(getSupabaseConfig).mockReturnValue({
       url: 'https://test.supabase.co',
       anonKey: 'key',
-      workspaceId: 'ws',
-      userId: 'ws',
     });
 
     reportSyncProgress('syncing');

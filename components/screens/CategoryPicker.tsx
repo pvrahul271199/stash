@@ -60,7 +60,7 @@ export function CategoryPicker({
 }) {
   const cats = useCategories() ?? [];
   const { currency } = useCurrency();
-  const [selId, setSelId] = useState<number | null>(null);
+  const [selId, setSelId] = useState<string | null>(null);
   const sel = cats.find((c) => c.id === selId) ?? null;
   const space = currency.symbol.length > 1 ? ' ' : '';
 

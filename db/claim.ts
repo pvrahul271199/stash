@@ -5,7 +5,7 @@ type Counts = Record<string, number>;
 /**
  * Copies the guest DB into the new account's DB. Runs only when the target is empty,
  * the guest has a plan or spends, and the guest data is not sample data.
- * The guest copy is left in place (removed after the first successful push in the sync phase).
+ * The guest copy is removed after the first successful push (sync phase).
  * Login never calls this.
  */
 export async function claimGuestData(uid: string): Promise<{ claimed: boolean; counts: Counts }> {
@@ -15,36 +15,37 @@ export async function claimGuestData(uid: string): Promise<{ claimed: boolean; c
   try {
     await guest.open();
     const targetHasData =
-      (await target.plan.count()) + (await target.cycle.count()) + (await target.entries.count()) > 0;
+      (await target.plans.count()) + (await target.cycles.count()) + (await target.transactions.count()) > 0;
     if (targetHasData) return { claimed: false, counts: {} };
     const gMeta = await guest.meta.get('main');
     if (gMeta?.sampleLoaded) return { claimed: false, counts: {} };
-    const [plans, cycles, days, entries, events] = await Promise.all([
-      guest.plan.toArray(),
-      guest.cycle.toArray(),
-      guest.days.toArray(),
-      guest.entries.toArray(),
-      guest.events.toArray(),
+    const [plans, cycles, txns, rows, evts, cats] = await Promise.all([
+      guest.plans.toArray(),
+      guest.cycles.toArray(),
+      guest.transactions.toArray(),
+      guest.dayRows.toArray(),
+      guest.evts.toArray(),
+      guest.cats.toArray(),
     ]);
-    if (plans.length + entries.length === 0) return { claimed: false, counts: {} };
-    const categories = await guest.categories.toArray();
-    const own = <T extends { userId?: string }>(rows: T[]): T[] => rows.map((r) => ({ ...r, userId: uid }));
+    if (plans.length + txns.length === 0) return { claimed: false, counts: {} };
+    const now = Date.now();
+    const touch = <T extends { updatedAt: number }>(r: T[]): T[] => r.map((x) => ({ ...x, updatedAt: Math.max(x.updatedAt, now) }));
     await target.transaction(
       'rw',
-      [target.plan, target.cycle, target.days, target.entries, target.categories, target.events, target.meta],
+      [target.plans, target.cycles, target.transactions, target.dayRows, target.cats, target.evts, target.meta],
       async () => {
-        await target.categories.clear();
-        await target.plan.bulkPut(own(plans));
-        await target.cycle.bulkPut(own(cycles));
-        await target.days.bulkPut(own(days));
-        await target.entries.bulkPut(own(entries));
-        await target.categories.bulkPut(own(categories));
-        await target.events.bulkPut(own(events));
+        await target.cats.clear();
+        await target.plans.bulkPut(touch(plans));
+        await target.cycles.bulkPut(touch(cycles));
+        await target.transactions.bulkPut(touch(txns));
+        await target.dayRows.bulkPut(rows);
+        await target.cats.bulkPut(touch(cats));
+        await target.evts.bulkPut(touch(evts));
         await target.meta.put({
           id: 'main',
           lastUsedLabel: gMeta?.lastUsedLabel ?? null,
           lastPayment: gMeta?.lastPayment ?? null,
-          schemaVersion: gMeta?.schemaVersion ?? 4,
+          schemaVersion: gMeta?.schemaVersion ?? 6,
           activeUserId: uid,
           activeEvent: gMeta?.activeEvent ?? null,
           currency: gMeta?.currency ?? null,
@@ -53,7 +54,7 @@ export async function claimGuestData(uid: string): Promise<{ claimed: boolean; c
     );
     return {
       claimed: true,
-      counts: { plan: plans.length, cycle: cycles.length, days: days.length, entries: entries.length, events: events.length },
+      counts: { plans: plans.length, cycles: cycles.length, transactions: txns.length, events: evts.length },
     };
   } finally {
     guest.close();

@@ -119,8 +119,8 @@ describe('Dexie v4 -> v5 migration', () => {
     expect(cats[0].name).toBe('Food');
     const meta = await db.meta.get('main');
     expect((meta?.migrationReport as { pools: { legacyPool: number }[] }).pools[0].legacyPool).toBe(777);
-    // v4 data untouched
-    expect(await db.entries.count()).toBe(3);
+    // v4 tables are dropped by v6
+    expect(db.tables.map((t) => t.name)).not.toContain('entries');
     db.close();
   });
 });

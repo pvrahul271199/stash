@@ -2,7 +2,8 @@ import 'fake-indexeddb/auto';
 import Dexie from 'dexie';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { addSpend, createPlanAndCycle } from '@/db/queries';
-import { StashDB, getDB, openUserDB } from '@/db/schema';
+import { getDB, openUserDB } from '@/db/schema';
+import { LegacyStashDB } from '@/db/legacy';
 import { splitLegacyDB } from '@/db/migrate';
 
 const store = new Map<string, string>();
@@ -23,18 +24,18 @@ describe('per-user databases', () => {
   it('user A logs a spend, logs out, user B sees nothing; A gets it back', async () => {
     await openUserDB('uid-a');
     await createPlanAndCycle(plan, '2026-10-01');
-    const cycle = (await getDB().cycle.toArray())[0];
+    const cycle = (await getDB().cycles.toArray())[0];
     await addSpend(cycle, { amount: 250, label: 'Lunch', category: 'Food', subcategory: 'Lunch' });
-    expect(await getDB().entries.count()).toBe(1);
+    expect(await getDB().transactions.count()).toBe(1);
 
     await openUserDB('default'); // log out
-    expect(await getDB().entries.count()).toBe(0);
+    expect(await getDB().transactions.count()).toBe(0);
     await openUserDB('uid-b');
-    expect(await getDB().entries.count()).toBe(0);
-    expect(await getDB().cycle.count()).toBe(0);
+    expect(await getDB().transactions.count()).toBe(0);
+    expect(await getDB().cycles.count()).toBe(0);
 
     await openUserDB('uid-a');
-    expect(await getDB().entries.count()).toBe(1);
+    expect(await getDB().transactions.count()).toBe(1);
   });
 });
 
@@ -54,7 +55,7 @@ describe('legacy shared DB split', () => {
   });
 
   async function seedLegacy() {
-    const legacy = new StashDB('stash');
+    const legacy = new LegacyStashDB('stash');
     await legacy.open();
     const entry = (id: string, cycleId: number, userId?: string) => ({
       id, cycleId, day: 1, date: '2026-10-01', amount: 10, label: 'x', category: 'Food', subcategory: null,
@@ -82,10 +83,10 @@ describe('legacy shared DB split', () => {
     expect(r.targets['stash-legacy-b3RoZXI='].entries).toBe(1);
 
     const guest = await openUserDB('default');
-    expect((await guest.entries.toArray()).map((e) => e.id).sort()).toEqual(['e1', 'e3']);
+    expect((await guest.transactions.toArray()).map((e) => e.id).sort()).toEqual(['e1', 'e3']);
     expect((await guest.meta.get('main'))?.migratedFrom).toBe('stash');
 
-    const legacy = new StashDB('stash');
+    const legacy = new LegacyStashDB('stash');
     expect(await legacy.entries.count()).toBe(3);
     legacy.close();
   });
@@ -106,12 +107,12 @@ describe('claim guest data', () => {
     await Dexie.delete('stash-uid-old');
     await openUserDB('default');
     await createPlanAndCycle(plan, '2026-10-01');
-    const cycle = (await getDB().cycle.toArray())[0];
+    const cycle = (await getDB().cycles.toArray())[0];
     await addSpend(cycle, { amount: 90, label: 'Tea', category: 'Food', subcategory: null });
 
     const r = await claimGuestData('uid-new');
     expect(r.claimed).toBe(true);
-    expect(await getDB().entries.count()).toBe(1);
+    expect(await getDB().transactions.count()).toBe(1);
 
     // non-empty target is skipped
     await openUserDB('default');
@@ -119,6 +120,27 @@ describe('claim guest data', () => {
 
     // plain login (no claim call) leaves an account empty
     await openUserDB('uid-old');
-    expect(await getDB().entries.count()).toBe(0);
+    expect(await getDB().transactions.count()).toBe(0);
+  });
+});
+
+describe('day rows stay derived in one transaction', () => {
+  it('many transactions on one day sum correctly in dayRows, and remove restores the pool', async () => {
+    const { closeCurrentDay, removeEntry } = await import('@/db/queries');
+    await openUserDB('uid-rollup');
+    await createPlanAndCycle(plan, '2026-10-01');
+    const cycle = (await getDB().cycles.toArray())[0];
+    const ids: string[] = [];
+    for (let i = 1; i <= 25; i++) {
+      ids.push((await addSpend(cycle, { amount: i, label: 'x', category: 'Food' })).id);
+    }
+    await closeCurrentDay(cycle.id);
+    const row = await getDB().dayRows.get([cycle.id, 1]);
+    expect(row?.spent).toBe(325);
+    const after = (await getDB().cycles.get(cycle.id))!;
+    expect(after.pool).toBe(cycle.planAmount - 325);
+    await removeEntry(ids[24]);
+    expect((await getDB().dayRows.get([cycle.id, 1]))?.spent).toBe(300);
+    expect((await getDB().cycles.get(cycle.id))!.pool).toBe(cycle.planAmount - 300);
   });
 });

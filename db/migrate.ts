@@ -1,21 +1,10 @@
 import Dexie, { type Transaction } from 'dexie';
 import { rollupCycle } from '@/lib/budget';
 import { dateOfDay } from '@/lib/dates';
-import type {
-  Category,
-  CategoryV5,
-  Cycle,
-  CycleV5,
-  DayRow,
-  DayRowV5,
-  Entry,
-  EventV5,
-  PlanV5,
-  Plan,
-  StashEvent,
-  Txn,
-} from './schema';
-import { StashDB, SCHEMA_VERSION, dbNameFor, GUEST_UID, type Meta } from './schema';
+import type { Category, Cycle, DayRow, StashEvent, Txn, Plan } from './schema';
+import type { LegacyCategory, LegacyCycle, LegacyDayRow, LegacyEntry, LegacyEvent, LegacyPlan } from './legacy';
+import { SCHEMA_VERSION, dbNameFor, GUEST_UID, type Meta } from './schema';
+import { LegacyStashDB } from './legacy';
 import { encodeUsernameToBase64 } from '@/lib/user';
 
 export const LEGACY_DB_NAME = 'stash';
@@ -55,7 +44,7 @@ export async function splitLegacyDB(): Promise<LegacySplitReport> {
     return report;
   }
   report.skipped = false;
-  const legacy = new StashDB(LEGACY_DB_NAME);
+  const legacy = new LegacyStashDB(LEGACY_DB_NAME);
   try {
     await legacy.open();
     const [users, plans, cycles, days, entries, categories, events, metaRows] = await Promise.all([
@@ -106,7 +95,7 @@ export async function splitLegacyDB(): Promise<LegacySplitReport> {
 
     // Write every target before setting the flag; a failure leaves the flag unset and legacy untouched.
     for (const [key, b] of buckets) {
-      const target = new StashDB(dbNameFor(key));
+      const target = new LegacyStashDB(dbNameFor(key));
       try {
         await target.open();
         const done = await target.meta.get('main');
@@ -126,7 +115,7 @@ export async function splitLegacyDB(): Promise<LegacySplitReport> {
             const meta: Meta = {
               ...(base ?? { id: 'main', lastUsedLabel: null }),
               id: 'main',
-              schemaVersion: SCHEMA_VERSION,
+              schemaVersion: 4,
               activeUserId: null,
               migratedFrom: LEGACY_DB_NAME,
             };
@@ -166,12 +155,12 @@ export interface V5MigrationReport {
 }
 
 export interface V4Rows {
-  plan: Plan[];
-  cycle: Cycle[];
-  days: DayRow[];
-  entries: Entry[];
-  categories: Category[];
-  events: StashEvent[];
+  plan: LegacyPlan[];
+  cycle: LegacyCycle[];
+  days: LegacyDayRow[];
+  entries: LegacyEntry[];
+  categories: LegacyCategory[];
+  events: LegacyEvent[];
 }
 
 /** Pure v4 -> v5 transform. Derived pool wins; the old value is kept in the report. */
@@ -180,7 +169,7 @@ export function transformV4(rows: V4Rows, newId: () => string = () => crypto.ran
     plans: 0, cycles: 0, transactions: 0, categories: 0, events: 0,
     droppedDuplicates: 0, detached: 0, pools: [],
   };
-  const plans: PlanV5[] = rows.plan.map((p) => ({
+  const plans: Plan[] = rows.plan.map((p) => ({
     id: newId(), updatedAt: p.createdAt, createdAt: p.createdAt,
     income: p.income, bills: p.bills, savings: p.savings, monthLength: p.monthLength,
     currency: p.currency, billItems: p.billItems, savingsItems: p.savingsItems,
@@ -190,7 +179,7 @@ export function transformV4(rows: V4Rows, newId: () => string = () => crypto.ran
   for (const d of rows.days) {
     if (d.status === 'estimated') estimatedByCycle.set(d.cycleId, [...(estimatedByCycle.get(d.cycleId) ?? []), d.day]);
   }
-  const cycles: CycleV5[] = rows.cycle.map((c) => {
+  const cycles: Cycle[] = rows.cycle.map((c) => {
     const id = newId();
     if (c.id != null) cycleIds.set(c.id, id);
     return {
@@ -225,7 +214,7 @@ export function transformV4(rows: V4Rows, newId: () => string = () => crypto.ran
       adjustsPool: e.adjustsPool !== false, isEstimate: e.isEstimate, hour: e.hour,
     });
   }
-  const dayRows: DayRowV5[] = [];
+  const dayRows: DayRow[] = [];
   for (const c of cycles) {
     const old = rows.cycle.find((x) => cycleIds.get(x.id ?? -1) === c.id);
     const r = rollupCycle(c, transactions.filter((t) => t.cycleId === c.id));
@@ -234,10 +223,10 @@ export function transformV4(rows: V4Rows, newId: () => string = () => crypto.ran
     c.fromSavingsTotal = r.fromSavingsTotal;
     for (const d of r.days) dayRows.push({ cycleId: c.id, day: d.day, allowanceAtStart: d.allowanceAtStart, spent: d.spent, status: d.status });
   }
-  const categories: CategoryV5[] = rows.categories.map((c) => ({
+  const categories: Category[] = rows.categories.map((c) => ({
     id: newId(), updatedAt: 0, name: c.name, sortOrder: c.sortOrder, isSystem: c.isSystem, subcategories: c.subcategories,
   }));
-  const events: EventV5[] = rows.events.map((e) => ({
+  const events: StashEvent[] = rows.events.map((e) => ({
     id: newId(), updatedAt: e.createdAt, name: e.name, note: e.note ?? null, categories: e.categories, createdAt: e.createdAt,
   }));
   report.plans = plans.length;
@@ -273,7 +262,7 @@ export async function migrateV4ToV5(tx: Transaction): Promise<void> {
   await tx.table('meta').put({
     ...(meta ?? { id: 'main', lastUsedLabel: null }),
     id: 'main',
-    schemaVersion: 5,
+    schemaVersion: SCHEMA_VERSION,
     migrationReport: out.report,
   });
 }

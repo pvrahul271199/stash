@@ -56,20 +56,6 @@ export function AppShell() {
   useEffect(() => {
     initAuth()
       .then(() => ensureSeed())
-      .then(async () => {
-        if (supabaseSync.isEnabled()) {
-          const localEntries = await getDB().entries.count();
-          const localCycles = await getDB().cycle.count();
-          if (localEntries === 0 || localCycles === 0) {
-            const pulled = await supabaseSync.pull().catch(() => false);
-            if (!pulled && localCycles > 0) {
-              await supabaseSync.push().catch(() => {});
-            }
-          } else {
-            await supabaseSync.push().catch(() => {});
-          }
-        }
-      })
       .then(() => runSync())
       .then(() => setReady(true));
   }, [runSync]);

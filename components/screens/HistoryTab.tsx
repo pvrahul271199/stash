@@ -11,16 +11,20 @@ import type { Cycle, Entry, Plan } from '@/db/schema';
 import { EditSpendSheet } from './EditSpendSheet';
 import { LogSpend } from './LogSpend';
 import {
-  buildCalendar,
+  buildMonthCalendar,
   compactINR,
-  dayTotals,
+  dayTotalsByDate,
   searchEntries,
 } from '@/lib/history';
 import {
+  MONTHS,
   cycleEndDate,
   dateOfDay,
+  daysBetween,
+  formatMonthYear,
   formatShort,
   formatWithWeekday,
+  todayISO,
 } from '@/lib/dates';
 import { inr } from '@/lib/format';
 import { useCurrency } from '@/lib/currency';
@@ -30,45 +34,63 @@ const WEEKDAY_HEADERS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 export function HistoryTab({ activeCycle, plan }: { activeCycle: Cycle; plan?: Plan }) {
   const { currency } = useCurrency();
   const allCycles = useAllCycles() ?? [activeCycle];
-  const [selectedCycleId, setSelectedCycleId] = useState<number>(activeCycle.id!);
+  const [selectedCycleId, setSelectedCycleId] = useState<string>(activeCycle.id);
   const [query, setQuery] = useState('');
   const isSearching = query.trim().length > 0;
-  const allEntries = useAllEntries(isSearching) ?? [];
+  const allEntries = useAllEntries(true) ?? [];
   const cycle = allCycles.find((c) => c.id === selectedCycleId) ?? activeCycle;
 
   const cycleEntries = useCycleEntries(cycle.id) ?? [];
-  const dayRows = useDayRows(cycle.id) ?? [];
+  const dayRows = useDayRows(activeCycle.id) ?? [];
 
-  const defaultDay = Math.min(cycle.currentDay, cycle.totalDays);
-  const [selectedDay, setSelectedDay] = useState<number>(defaultDay);
+  const today = todayISO();
+  const [viewYear, setViewYear] = useState<number>(() => Number(today.slice(0, 4)));
+  const [viewMonth, setViewMonth] = useState<number>(() => Number(today.slice(5, 7))); // 1-12
+  const [selectedIso, setSelectedIso] = useState<string>(() => today);
+  const [pickerOpen, setPickerOpen] = useState(false);
+
   const [editing, setEditing] = useState<Entry | null>(null);
-  const [addingForDay, setAddingForDay] = useState<number | null>(null);
+  const [addingForDate, setAddingForDate] = useState<string | null>(null);
 
-  const activeDay = selectedDay >= 1 && selectedDay <= cycle.totalDays ? selectedDay : defaultDay;
-
-  const weeks = useMemo(
-    () => buildCalendar(cycle.startDate, cycle.totalDays),
-    [cycle.startDate, cycle.totalDays],
+  const monthWeeks = useMemo(
+    () => buildMonthCalendar(viewYear, viewMonth, activeCycle, today),
+    [viewYear, viewMonth, activeCycle, today],
   );
-  const totalsByDay = useMemo(() => dayTotals(cycleEntries), [cycleEntries]);
-  const rowByDay = useMemo(() => new Map(dayRows.map((r) => [r.day, r])), [dayRows]);
 
-  const activeDayStat = totalsByDay.get(activeDay);
-  const activeDayRow = rowByDay.get(activeDay);
-  const activeDayIso = dateOfDay(cycle.startDate, activeDay);
+  const totalsByDate = useMemo(
+    () => dayTotalsByDate(allEntries, activeCycle),
+    [allEntries, activeCycle],
+  );
 
-  const dayEntries = useMemo(() => {
+  const rowByDate = useMemo(() => {
+    const map = new Map<string, (typeof dayRows)[0]>();
+    for (const r of dayRows) {
+      const iso = dateOfDay(activeCycle.startDate, r.day);
+      map.set(iso, r);
+    }
+    return map;
+  }, [dayRows, activeCycle.startDate]);
+
+  const offsetFromActive = daysBetween(activeCycle.startDate, selectedIso);
+  const isWithinActiveCycle = offsetFromActive >= 0 && offsetFromActive < activeCycle.totalDays;
+  const activeDayNumber = isWithinActiveCycle ? offsetFromActive + 1 : null;
+
+  const selectedStat = totalsByDate.get(selectedIso);
+  const selectedRow = rowByDate.get(selectedIso);
+  const selectedSpent = selectedStat?.spent ?? selectedRow?.spent ?? 0;
+
+  const selectedDateEntries = useMemo(() => {
     const seen = new Set<string>();
-    return cycleEntries
+    return allEntries
       .filter((e) => {
         if (seen.has(e.id)) return false;
+        const entryIso = e.date || (e.cycleId === activeCycle.id ? dateOfDay(activeCycle.startDate, e.day) : null);
+        if (entryIso !== selectedIso) return false;
         seen.add(e.id);
-        if (e.day !== activeDay) return false;
-        if (e.date && e.date !== activeDayIso) return false;
         return true;
       })
       .sort((a, b) => b.createdAt - a.createdAt);
-  }, [cycleEntries, activeDay, activeDayIso]);
+  }, [allEntries, selectedIso, activeCycle]);
 
   const searchResults = useMemo(
     () => (query.trim() ? searchEntries(allEntries, allCycles, query) : []),
@@ -109,7 +131,7 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: Cycle; plan?: P
         )}
       </div>
 
-      {/* Cycle switcher (when user has multiple cycles or wants to see cycle range) */}
+      {/* Cycle switcher pills */}
       {!query.trim() && (
         <div className="no-scrollbar -mx-6 mt-3 overflow-x-auto px-6 touch-pan-x" role="group" aria-label="Cycles">
           <div className="flex w-max gap-2 pb-1">
@@ -123,11 +145,13 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: Cycle; plan?: P
                   type="button"
                   aria-pressed={isSel}
                   onClick={() => {
-                    setSelectedCycleId(c.id!);
-                    setSelectedDay(Math.min(c.currentDay, c.totalDays));
+                    setSelectedCycleId(c.id);
+                    setViewYear(Number(c.startDate.slice(0, 4)));
+                    setViewMonth(Number(c.startDate.slice(5, 7)));
+                    setSelectedIso(c.startDate);
                   }}
-                  className={`min-h-[36px] rounded-full border px-3.5 text-[13px] font-medium ${
-                    isSel ? 'border-ink bg-ink text-white' : 'border-line bg-white text-ink'
+                  className={`min-h-[36px] rounded-full border px-3.5 text-[13px] font-medium transition-colors ${
+                    isSel ? 'border-ink bg-ink text-white' : 'border-line bg-white text-ink hover:bg-tint/50'
                   }`}
                 >
                   {startLbl} – {endLbl}
@@ -206,30 +230,150 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: Cycle; plan?: P
         </section>
       ) : (
         <>
-          {/* Interactive Calendar View */}
-          <section className="mt-4" aria-label="Spending calendar">
-            <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-semibold text-faint">
+          {/* Calendar Month & Year Navigation Header with Floating Overlay Picker */}
+          <div className="relative mt-5">
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => setPickerOpen((o) => !o)}
+                aria-expanded={pickerOpen}
+                aria-label="Select month and year"
+                className="group -ml-1 flex items-center gap-1.5 rounded-lg px-1.5 py-1 text-left transition-colors hover:bg-tint/60 active:scale-[0.99]"
+              >
+                <span className="text-[18px] font-semibold tracking-tight text-ink">
+                  {formatMonthYear(viewYear, viewMonth)}
+                </span>
+                <span
+                  className={`flex h-5 w-5 items-center justify-center rounded-full text-soft transition-transform duration-200 ${
+                    pickerOpen ? 'rotate-180 text-ink' : 'group-hover:text-ink'
+                  }`}
+                  aria-hidden="true"
+                >
+                  <svg
+                    width="13"
+                    height="13"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="m6 9 6 6 6-6" />
+                  </svg>
+                </span>
+              </button>
+            </div>
+
+            {/* Quick Month & Year Picker Floating Overlay */}
+            {pickerOpen && (
+              <>
+                {/* Backdrop so tapping anywhere outside closes the overlay */}
+                <div
+                  className="fixed inset-0 z-20"
+                  onClick={() => setPickerOpen(false)}
+                  aria-hidden="true"
+                />
+
+                <div
+                  role="region"
+                  aria-label="Month and year picker"
+                  className="absolute left-0 right-0 top-full z-30 mt-2 rounded-card border border-line bg-white/95 p-4 shadow-[0_18px_45px_-12px_rgba(30,27,75,0.24)] backdrop-blur-md transition-all"
+                >
+                  <div className="flex items-center justify-between border-b border-line pb-3">
+                    <span className="text-[12px] font-semibold text-soft">Choose Month & Year</span>
+                    <div className="flex items-center rounded-full border border-line bg-white p-0.5 shadow-xs">
+                      <button
+                        type="button"
+                        onClick={() => setViewYear((y) => y - 1)}
+                        aria-label="Previous year"
+                        className="flex h-6 w-6 items-center justify-center rounded-full text-ink transition-all hover:bg-tint active:scale-90"
+                      >
+                        <svg
+                          width="12"
+                          height="12"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2.4"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          aria-hidden="true"
+                        >
+                          <path d="m15 18-6-6 6-6" />
+                        </svg>
+                      </button>
+                      <span className="num px-2.5 text-[13px] font-semibold text-ink">{viewYear}</span>
+                      <button
+                        type="button"
+                        onClick={() => setViewYear((y) => y + 1)}
+                        aria-label="Next year"
+                        className="flex h-6 w-6 items-center justify-center rounded-full text-ink transition-all hover:bg-tint active:scale-90"
+                      >
+                        <svg
+                          width="12"
+                          height="12"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2.4"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          aria-hidden="true"
+                        >
+                          <path d="m9 18 6-6-6-6" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                  <div className="mt-3 grid grid-cols-4 gap-2">
+                    {MONTHS.map((mName, idx) => {
+                      const mNum = idx + 1;
+                      const isCurrent = mNum === viewMonth;
+                      return (
+                        <button
+                          key={mName}
+                          type="button"
+                          onClick={() => {
+                            setViewMonth(mNum);
+                            setPickerOpen(false);
+                          }}
+                          className={`rounded-key py-2.5 text-[12px] font-medium transition-all ${
+                            isCurrent
+                              ? 'bg-ink font-semibold text-white shadow-xs'
+                              : 'border border-line/60 bg-white text-ink hover:bg-tint active:scale-95'
+                          }`}
+                        >
+                          {mName}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Interactive Spending Calendar */}
+          <div role="table" aria-label="Spending calendar" className="mt-3">
+            <div role="row" className="grid grid-cols-7 gap-1 text-center text-[11px] font-semibold text-faint">
               {WEEKDAY_HEADERS.map((d) => (
-                <span key={d} className="py-1">
+                <span key={d} role="columnheader" className="py-1">
                   {d}
                 </span>
               ))}
             </div>
 
             <div className="mt-1 flex flex-col gap-1.5">
-              {weeks.map((week, wIdx) => (
-                <div key={wIdx} className="grid grid-cols-7 gap-1.5">
+              {monthWeeks.map((week, wIdx) => (
+                <div key={wIdx} role="row" className="grid grid-cols-7 gap-1.5">
                   {week.map((cell) => {
-                    if (cell.day == null) {
-                      return <div key={cell.iso} className="h-[64px] rounded-[10px]" aria-hidden="true" />;
-                    }
-                    const d = cell.day;
-                    const stat = totalsByDay.get(d);
-                    const row = rowByDay.get(d);
+                    const stat = totalsByDate.get(cell.iso);
+                    const row = rowByDate.get(cell.iso);
                     const spent = stat?.spent ?? row?.spent ?? 0;
-                    const isSelected = d === activeDay;
-                    const isToday = cycle.id === activeCycle.id && d === cycle.currentDay;
-                    const isFuture = cycle.id === activeCycle.id && d > cycle.currentDay;
+                    const isSelected = cell.iso === selectedIso;
+                    const isToday = cell.isToday;
+                    const isFuture = cell.iso > today;
                     const isOver = row ? spent > row.allowanceAtStart : false;
                     const hasData = Boolean(stat || row);
 
@@ -246,23 +390,28 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: Cycle; plan?: P
                       circleStyle = 'border-2 border-ink bg-white text-ink';
                     }
 
+                    const ariaLabel = cell.isWithinActiveCycle
+                      ? `Day ${cell.dayInCycle}, ${formatWithWeekday(cell.iso)}, spent ${inr(spent)}`
+                      : `${formatWithWeekday(cell.iso)}, spent ${inr(spent)}`;
+
                     return (
                       <button
                         key={cell.iso}
                         type="button"
-                        onClick={() => setSelectedDay(d)}
+                        role="cell"
+                        onClick={() => setSelectedIso(cell.iso)}
                         aria-pressed={isSelected}
-                        aria-label={`Day ${d}, ${formatWithWeekday(cell.iso)}, spent ${inr(spent)}`}
-                        className={`flex h-[64px] min-h-0 flex-col items-center justify-between rounded-[10px] px-0.5 py-1 text-center transition-colors ${
-                          isSelected ? 'bg-tint/80 ring-1 ring-ink/20' : 'hover:bg-tint/40'
-                        }`}
+                        aria-label={ariaLabel}
+                        className={`flex h-[66px] min-h-0 flex-col items-center justify-between rounded-[10px] px-0.5 py-1 text-center transition-colors ${
+                          !cell.isCurrentMonth ? 'opacity-40' : ''
+                        } ${isSelected ? 'bg-tint/80 ring-1 ring-ink/20' : 'hover:bg-tint/40'}`}
                       >
                         <span
                           className={`text-[9px] font-medium leading-none ${
                             isSelected || isToday ? 'font-semibold text-ink' : 'text-faint'
                           }`}
                         >
-                          Day {d}
+                          {cell.isWithinActiveCycle ? `Day ${cell.dayInCycle}` : isToday ? 'Today' : ''}
                         </span>
                         <span
                           className={`num flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-semibold leading-none transition-colors ${circleStyle}`}
@@ -278,7 +427,7 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: Cycle; plan?: P
                               : 'text-faint'
                           }`}
                         >
-                          {hasData || isToday ? compactINR(spent) : '—'}
+                          {hasData || isToday ? compactINR(spent) : cell.isCurrentMonth ? '—' : ''}
                         </span>
                       </button>
                     );
@@ -289,43 +438,44 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: Cycle; plan?: P
 
             <div className="mt-2.5 flex items-center justify-center gap-4 text-[11px] text-soft">
               <span className="flex items-center gap-1.5">
-                <span className="h-2.5 w-2.5 rounded-full bg-goodBg border border-good/40" /> On plan
+                <span className="h-2.5 w-2.5 rounded-full border border-good/40 bg-goodBg" /> On plan
               </span>
               <span className="flex items-center gap-1.5">
-                <span className="h-2.5 w-2.5 rounded-full bg-warmBg border border-warm/40" /> Over day limit
+                <span className="h-2.5 w-2.5 rounded-full border border-warm/40 bg-warmBg" /> Over day limit
               </span>
               <span className="flex items-center gap-1.5">
                 <span className="h-2.5 w-2.5 rounded-full bg-ink" /> Selected
               </span>
             </div>
-          </section>
+          </div>
 
-          {/* Selected Day Detail */}
+          {/* Selected Date Detail Card */}
           <section className="mt-6 rounded-note border border-line p-4" aria-label="Selected day details">
             <div className="flex items-baseline justify-between border-b border-line pb-3">
               <div>
                 <h2 className="text-[16px] font-semibold text-ink">
-                  {formatWithWeekday(activeDayIso)} · Day {activeDay}
+                  {formatWithWeekday(selectedIso)}
+                  {isWithinActiveCycle ? ` · Day ${activeDayNumber}` : ''}
                 </h2>
                 <p className="mt-0.5 text-[12px] text-soft">
-                  {activeDayRow
-                    ? `Daily allowance was ${inr(activeDayRow.allowanceAtStart)}`
-                    : cycle.id === activeCycle.id && activeDay === cycle.currentDay
-                      ? 'Today (open)'
-                      : 'Not closed yet'}
-                  {activeDayStat?.fromSavings ? ` · +${inr(activeDayStat.fromSavings)} from savings` : ''}
+                  {isWithinActiveCycle
+                    ? selectedRow
+                      ? `Daily allowance was ${inr(selectedRow.allowanceAtStart)}`
+                      : selectedIso === today
+                        ? 'Today (open)'
+                        : `Day ${activeDayNumber} of ${activeCycle.totalDays}`
+                    : 'Historical date (outside active 30-day cycle)'}
+                  {selectedStat?.fromSavings ? ` · +${inr(selectedStat.fromSavings)} from savings` : ''}
                 </p>
               </div>
-              <p className="num text-[22px] font-semibold text-ink">
-                {inr(activeDayStat?.spent ?? activeDayRow?.spent ?? 0)}
-              </p>
+              <p className="num text-[22px] font-semibold text-ink">{inr(selectedSpent)}</p>
             </div>
 
-            {dayEntries.length === 0 ? (
-              <p className="py-4 text-[14px] text-soft">No spends logged on this day.</p>
+            {selectedDateEntries.length === 0 ? (
+              <p className="py-4 text-[14px] text-soft">No spends logged on this date.</p>
             ) : (
               <ul className="divide-y divide-line">
-                {dayEntries.map((e) => (
+                {selectedDateEntries.map((e) => (
                   <li key={e.id} className="flex items-center justify-between gap-2 py-3">
                     <button
                       type="button"
@@ -382,8 +532,8 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: Cycle; plan?: P
             <div className="mt-2 border-t border-line pt-3">
               <button
                 type="button"
-                onClick={() => setAddingForDay(activeDay)}
-                aria-label={`Log for this day (${formatWithWeekday(activeDayIso)}, Day ${activeDay})`}
+                onClick={() => setAddingForDate(selectedIso)}
+                aria-label={`Log for this date (${formatShort(selectedIso)})`}
                 className="flex h-10 min-h-0 w-full items-center justify-center gap-1.5 rounded-key border border-line bg-tint/50 text-[13px] font-medium text-ink transition-colors hover:bg-tint active:scale-[0.99]"
               >
                 <svg
@@ -398,7 +548,7 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: Cycle; plan?: P
                 >
                   <path d="M12 5v14M5 12h14" />
                 </svg>
-                Log for this day ({formatShort(activeDayIso)})
+                Log for this date ({formatShort(selectedIso)})
               </button>
             </div>
           </section>
@@ -406,20 +556,22 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: Cycle; plan?: P
       )}
 
       {editing && <EditSpendSheet entry={editing} onClose={() => setEditing(null)} />}
-      {addingForDay != null && (
+      {addingForDate && (
         <LogSpend
-          cycle={cycle}
+          cycle={activeCycle}
           plan={
             plan ?? {
-              income: cycle.planAmount,
+              income: activeCycle.planAmount,
               bills: 0,
               savings: 0,
-              monthLength: cycle.totalDays,
+              monthLength: activeCycle.totalDays,
               createdAt: 0,
+              id: '',
+              updatedAt: 0,
             }
           }
-          targetDay={addingForDay}
-          onClose={() => setAddingForDay(null)}
+          targetDate={addingForDate}
+          onClose={() => setAddingForDate(null)}
         />
       )}
     </div>

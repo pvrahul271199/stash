@@ -1,10 +1,10 @@
-import { addDays, dateOfDay, daysBetween, formatShort } from './dates';
+import { addDays, dateOfDay, daysBetween, formatShort, todayISO } from './dates';
 import { useCurrencyStore } from './currency';
 
 /** Minimal shapes so this stays pure and testable. */
 export interface HistoryEntry {
   id: string;
-  cycleId: number;
+  cycleId: string;
   day: number;
   amount: number;
   label: string;
@@ -19,7 +19,7 @@ export interface HistoryEntry {
 }
 
 export interface HistoryCycle {
-  id?: number;
+  id?: string;
   startDate: string;
   totalDays: number;
 }
@@ -59,6 +59,85 @@ export function buildCalendar(startDate: string, totalDays: number): CalendarCel
   return weeks;
 }
 
+export interface MonthCalendarCell {
+  iso: string;
+  year: number;
+  month: number;
+  dom: number;
+  isCurrentMonth: boolean;
+  isToday: boolean;
+  dayInCycle: number | null;
+  isWithinActiveCycle: boolean;
+}
+
+/** Builds a full Mon-Sun month grid for any given year and month (1-12). */
+export function buildMonthCalendar(
+  year: number,
+  month: number,
+  activeCycle?: HistoryCycle | null,
+  today: string = todayISO(),
+): MonthCalendarCell[][] {
+  const paddedMonth = String(month).padStart(2, '0');
+  const firstOfMonthIso = `${year}-${paddedMonth}-01`;
+
+  const [y, m, d] = [year, month, 1];
+  const firstWd = new Date(Date.UTC(y, m - 1, d)).getUTCDay(); // 0 = Sun
+  const lead = (firstWd + 6) % 7; // days back to Monday
+
+  const gridStart = addDays(firstOfMonthIso, -lead);
+
+  // Total days in this month
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const lastOfMonthIso = `${year}-${paddedMonth}-${String(daysInMonth).padStart(2, '0')}`;
+
+  const lastWd = new Date(Date.UTC(year, month - 1, daysInMonth)).getUTCDay();
+  const trail = 7 - ((lastWd + 6) % 7) - 1;
+  const gridEnd = addDays(lastOfMonthIso, trail >= 0 ? trail : 0);
+
+  const totalCells = daysBetween(gridStart, gridEnd) + 1;
+  const numWeeks = Math.ceil(totalCells / 7);
+
+  const weeks: MonthCalendarCell[][] = [];
+
+  for (let w = 0; w < numWeeks; w++) {
+    const week: MonthCalendarCell[] = [];
+    for (let c = 0; c < 7; c++) {
+      const idx = w * 7 + c;
+      const iso = addDays(gridStart, idx);
+      const cellYear = Number(iso.slice(0, 4));
+      const cellMonth = Number(iso.slice(5, 7));
+      const cellDom = Number(iso.slice(8, 10));
+      const isCurrentMonth = cellYear === year && cellMonth === month;
+      const isToday = iso === today;
+
+      let dayInCycle: number | null = null;
+      let isWithinActiveCycle = false;
+
+      if (activeCycle && activeCycle.startDate) {
+        const offset = daysBetween(activeCycle.startDate, iso);
+        if (offset >= 0 && offset < activeCycle.totalDays) {
+          dayInCycle = offset + 1;
+          isWithinActiveCycle = true;
+        }
+      }
+
+      week.push({
+        iso,
+        year: cellYear,
+        month: cellMonth,
+        dom: cellDom,
+        isCurrentMonth,
+        isToday,
+        dayInCycle,
+        isWithinActiveCycle,
+      });
+    }
+    weeks.push(week);
+  }
+
+  return weeks;
+}
+
 export interface DayTotal {
   /** Spent from the daily pool (excludes from-savings). */
   spent: number;
@@ -74,6 +153,23 @@ export function dayTotals(entries: HistoryEntry[]): Map<number, DayTotal> {
     else t.spent += e.amount;
     t.count += 1;
     map.set(e.day, t);
+  }
+  return map;
+}
+
+export function dayTotalsByDate(
+  entries: (HistoryEntry & { date?: string })[],
+  cycle?: HistoryCycle | null,
+): Map<string, DayTotal> {
+  const map = new Map<string, DayTotal>();
+  for (const e of entries) {
+    const iso = e.date || (cycle ? dateOfDay(cycle.startDate, e.day) : null);
+    if (!iso) continue;
+    const t = map.get(iso) ?? { spent: 0, fromSavings: 0, count: 0 };
+    if (e.fromSavings) t.fromSavings += e.amount;
+    else t.spent += e.amount;
+    t.count += 1;
+    map.set(iso, t);
   }
   return map;
 }
@@ -105,7 +201,7 @@ export function compactINR(n: number): string {
 
 export interface SearchGroup {
   iso: string;
-  cycleId: number;
+  cycleId: string;
   day: number;
   total: number;
   entries: HistoryEntry[];

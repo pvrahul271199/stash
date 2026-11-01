@@ -155,7 +155,7 @@ export function CategoriesTab() {
   const events = useEvents() ?? [];
   const counts = useCategoryCounts();
   const eventCounts = useEventCounts();
-  const [openId, setOpenId] = useState<number | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
   const [removing, setRemoving] = useState<Category | null>(null);
   const [removingEvent, setRemovingEvent] = useState<StashEvent | null>(null);
 

@@ -71,11 +71,11 @@ export function UserTab({
 
   // Collapsible categories state
   const [categoriesOpen, setCategoriesOpen] = useState(false);
-  const [openCatId, setOpenCatId] = useState<number | null>(null);
+  const [openCatId, setOpenCatId] = useState<string | null>(null);
   const [newCatName, setNewCatName] = useState('');
   const [catErr, setCatErr] = useState<string | null>(null);
   const [newTypeName, setNewTypeName] = useState('');
-  const [newTypeCatId, setNewTypeCatId] = useState<number | null>(null);
+  const [newTypeCatId, setNewTypeCatId] = useState<string | null>(null);
   const [typeErr, setTypeErr] = useState<string | null>(null);
   const [removingCat, setRemovingCat] = useState<Category | null>(null);
   const [newEventName, setNewEventName] = useState('');
