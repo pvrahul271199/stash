@@ -28,6 +28,13 @@ begin
   return new;
 end $$;
 
+create or replace function public.stash_set_profile_updated()
+returns trigger language plpgsql as $$
+begin
+  new.updated_at := now();
+  return new;
+end $$;
+
 -- ---------- profiles ----------
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
