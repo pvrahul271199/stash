@@ -96,9 +96,11 @@ export function LogSpend({
       ? (isTargetDateWithinCycle ? offsetFromCycle! + 1 : null)
       : (targetDay ?? cycle.currentDay);
 
-  const isPreviousDay = isOutsideActiveCycle
+  /** Any day inside the cycle other than today: ask whether to spread it over the remaining days. */
+  const isOtherDay = isOutsideActiveCycle
     ? false
-    : (effectiveDay != null && effectiveDay < cycle.currentDay);
+    : (effectiveDay != null && effectiveDay !== cycle.currentDay);
+  const isFutureDay = isOtherDay && effectiveDay != null && effectiveDay > cycle.currentDay;
 
   const targetIso = targetDate ?? (effectiveDay != null ? dateOfDay(cycle.startDate, effectiveDay) : todayISO());
   const targetDateLabel = formatShort(targetIso);
@@ -154,7 +156,7 @@ export function LogSpend({
       await persist(p, false, false);
       return;
     }
-    if (isPreviousDay) {
+    if (isOtherDay) {
       setPending(p);
       setView('pastAdjust');
       return;
@@ -241,12 +243,19 @@ export function LogSpend({
               </p>
 
               <h2 className="mt-5 text-question font-semibold text-ink">
-                Adjust the remaining month for this spend?
+                Adjust your daily limit for the other days?
               </h2>
               <p className="mt-1.5 text-body text-soft">
-                You’re adding a transaction to a past day ({targetDateLabel}). Should this rebalance your{' '}
-                {remDays} remaining unfilled {remDays === 1 ? 'day' : 'days'}?
+                You’re adding a spend to {isFutureDay ? 'an upcoming' : 'a past'} day ({targetDateLabel}). Should it
+                be spread across your {remDays} remaining {remDays === 1 ? 'day' : 'days'}?
               </p>
+
+              <div className="mt-4 flex items-center justify-between rounded-note border border-line px-4 py-3">
+                <span className="text-[13px] text-soft">Daily limit</span>
+                <span className="num text-[15px] font-semibold text-ink">
+                  {inr(currentDaily)} <span className="px-1 text-faint">→</span> {inr(newDaily)}
+                </span>
+              </div>
 
               <div className="mt-5 rounded-note border border-ink bg-tint/50 p-4">
                 <div className="flex items-start gap-3">
@@ -294,10 +303,10 @@ export function LogSpend({
 
             <div className="flex flex-col gap-2 pt-2">
               <PrimaryButton disabled={saving} onClick={() => persist(pending, false, true)}>
-                {saving ? 'Saving…' : 'Yes, adjust remaining days'}
+                {saving ? 'Saving…' : 'Yes, adjust the other days'}
               </PrimaryButton>
               <SecondaryButton disabled={saving} onClick={() => persist(pending, false, false)}>
-                {saving ? 'Saving…' : 'No, keep remaining days as is'}
+                {saving ? 'Saving…' : 'No, just log it'}
               </SecondaryButton>
             </div>
           </div>

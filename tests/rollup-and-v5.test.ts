@@ -55,7 +55,8 @@ describe('rollupCycle', () => {
     const added = [tx('2026-10-01', 70)];
     expect(rollupCycle({ ...cyc, currentDay: 3 }, added).pool).toBe(930);
     expect(rollupCycle({ ...cyc, currentDay: 3 }, [{ ...added[0], deletedAt: 1 }])).toEqual(base);
-    expect(rollupCycle({ ...cyc, currentDay: 2 }, [tx('2026-10-05', 99), tx('2027-01-01', 5)]).pool).toBe(1000);
+    // day-5 spend is ahead of today (spread over remaining days); the out-of-range date is ignored
+    expect(rollupCycle({ ...cyc, currentDay: 2 }, [tx('2026-10-05', 99), tx('2027-01-01', 5)]).pool).toBe(901);
   });
 
   it('marks estimated days and allows negative pool', () => {
@@ -122,5 +123,22 @@ describe('Dexie v4 -> v5 migration', () => {
     // v4 tables are dropped by v6
     expect(db.tables.map((t) => t.name)).not.toContain('entries');
     db.close();
+  });
+});
+
+describe('spread over remaining days', () => {
+  const c = { startDate: '2026-10-01', totalDays: 30, planAmount: 30000, currentDay: 5 };
+  it('an upcoming-day spend lowers the pool now; a past-day spend does too; "no" leaves it alone', () => {
+    const base = rollupCycle(c, []);
+    expect(base.pool).toBe(30000);
+    // 2500 on day 10 (future), spread: 25 days left (day 5..30 = 26 incl. today) 
+    const future = rollupCycle(c, [{ txnDate: '2026-10-10', amount: 2500, fromSavings: false, adjustsPool: true }]);
+    expect(future.pool).toBe(27500);
+    const noAdjust = rollupCycle(c, [{ txnDate: '2026-10-10', amount: 2500, fromSavings: false, adjustsPool: false }]);
+    expect(noAdjust.pool).toBe(30000);
+    const past = rollupCycle(c, [{ txnDate: '2026-10-02', amount: 2500, fromSavings: false, adjustsPool: true }]);
+    expect(past.pool).toBe(27500);
+    // today's own spends never touch the pool
+    expect(rollupCycle(c, [{ txnDate: '2026-10-05', amount: 700, fromSavings: false, adjustsPool: true }]).pool).toBe(30000);
   });
 });

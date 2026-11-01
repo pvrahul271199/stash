@@ -348,5 +348,11 @@ export function rollupCycle(
     days.push({ ...r.record, spent: row.spent });
     state = r.state;
   }
-  return { days, pool: state.pool, fromSavingsTotal };
+  // Spends logged ahead of time on an upcoming day that the user chose to spread over the
+  // remaining days: they lower the pool now. Once that day becomes today it counts as normal.
+  let pool = state.pool;
+  for (const [d, row] of perDay) {
+    if (d > c.currentDay && d <= c.totalDays) pool -= row.poolSpent;
+  }
+  return { days, pool, fromSavingsTotal };
 }
