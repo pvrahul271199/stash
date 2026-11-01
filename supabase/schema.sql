@@ -239,23 +239,13 @@ create policy feature_data_own on public.feature_data for all
   using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 -- ============================================================================
--- CUTOVER (run once, after this file): park the old username-keyed tables.
--- Old rows cannot be tied to an auth user, so they are kept but sealed off.
+-- CUTOVER (run once): the old username-keyed tables and their data are dropped.
 -- ============================================================================
-do $$
-declare t text; pol record;
-begin
-  foreach t in array array['stash_users','stash_plans','stash_cycles','stash_days','stash_entries','stash_categories','stash_events','stash_feature_data']
-  loop
-    if to_regclass('public.' || t) is not null and to_regclass('public.legacy_' || t) is null then
-      execute format('alter table public.%I rename to %I', t, 'legacy_' || t);
-    end if;
-    if to_regclass('public.legacy_' || t) is not null then
-      execute format('alter table public.%I enable row level security', 'legacy_' || t);
-      for pol in select policyname from pg_policies where schemaname = 'public' and tablename = 'legacy_' || t loop
-        execute format('drop policy %I on public.%I', pol.policyname, 'legacy_' || t);
-      end loop;
-      execute format('revoke all on public.%I from anon, authenticated', 'legacy_' || t);
-    end if;
-  end loop;
-end $$;
+drop table if exists
+  public.stash_users, public.stash_plans, public.stash_cycles, public.stash_days,
+  public.stash_entries, public.stash_categories, public.stash_events, public.stash_feature_data,
+  public.legacy_stash_users, public.legacy_stash_plans, public.legacy_stash_cycles, public.legacy_stash_days,
+  public.legacy_stash_entries, public.legacy_stash_categories, public.legacy_stash_events,
+  public.legacy_stash_feature_data
+cascade;
+drop function if exists public.stash_set_updated_at() cascade;
