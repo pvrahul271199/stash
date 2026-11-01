@@ -18,6 +18,7 @@ function stubWindow(session?: object) {
   const store = new Map<string, string>();
   if (session) store.set('stash:auth', JSON.stringify(session));
   vi.stubGlobal('window', {
+    addEventListener: () => {},
     localStorage: {
       getItem: (k: string) => store.get(k) ?? null,
       setItem: (k: string, v: string) => store.set(k, v),

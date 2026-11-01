@@ -1,5 +1,6 @@
 import Dexie, { type Table } from 'dexie';
 import { useSyncExternalStore } from 'react';
+import { migrateV4ToV5 } from './migrate';
 
 export interface UserRecord {
   /** Primary key: Base64-encoded username (e.g. "cmFodWw="). */
@@ -116,6 +117,8 @@ export interface Meta {
   activeEvent?: string | null;
   /** Last payment mode used, so the next spend defaults to it. */
   lastPayment?: string | null;
+  /** Result of the v4 -> v5 data migration (old vs derived pool, counts). */
+  migrationReport?: unknown;
   /** True once sample data was loaded; sample data is never claimed into an account. */
   sampleLoaded?: boolean;
   /** Set on a DB created from the legacy shared `stash` DB. */
@@ -124,10 +127,87 @@ export interface Meta {
   currency?: string | null;
 }
 
+/* ---------- v5 tables (uuid ids, soft delete, derived day rows) ---------- */
+
+export interface Syncable {
+  id: string;
+  /** Client ms of the last local change (LWW + dirty tracking). */
+  updatedAt: number;
+  /** Tombstone ms; reads must ignore rows where this is set. */
+  deletedAt?: number | null;
+}
+
+export interface PlanV5 extends Syncable {
+  income: number;
+  bills: number;
+  savings: number;
+  monthLength: number;
+  currency?: string;
+  billItems?: { name: string; amount: number }[];
+  savingsItems?: { name: string; amount: number }[];
+  createdAt: number;
+}
+
+export interface CycleV5 extends Syncable {
+  startDate: string;
+  totalDays: number;
+  planAmount: number;
+  /** Cursor: first unclosed day. */
+  currentDay: number;
+  /** Cache written by recompute. */
+  pool: number;
+  /** Cache written by recompute. */
+  fromSavingsTotal: number;
+  leftoverMoved: boolean;
+  /** Closed days that were back-filled with a rough total. */
+  estimatedDays: number[];
+}
+
+export interface Txn extends Syncable {
+  cycleId: string | null;
+  /** Calendar date yyyy-mm-dd; the day is derived via dayOfTxn. */
+  txnDate: string;
+  amount: number;
+  type: string;
+  subtype: string | null;
+  label: string;
+  event: string | null;
+  payment: string | null;
+  note: string | null;
+  fromSavings: boolean;
+  adjustsPool: boolean;
+  isEstimate: boolean;
+  hour: number;
+  createdAt: number;
+}
+
+/** Derived from transactions by recompute; never synced. */
+export interface DayRowV5 {
+  cycleId: string;
+  day: number;
+  allowanceAtStart: number;
+  spent: number;
+  status: 'closed' | 'estimated';
+}
+
+export interface CategoryV5 extends Syncable {
+  name: string;
+  sortOrder: number;
+  isSystem: boolean;
+  subcategories: string[];
+}
+
+export interface EventV5 extends Syncable {
+  name: string;
+  note: string | null;
+  categories: string[];
+  createdAt: number;
+}
+
 export const PAYMENT_MODES = ['UPI', 'Card', 'Cash'] as const;
 export type PaymentMode = (typeof PAYMENT_MODES)[number];
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 export class StashDB extends Dexie {
   users!: Table<UserRecord, string>;
@@ -138,6 +218,13 @@ export class StashDB extends Dexie {
   categories!: Table<Category, number>;
   events!: Table<StashEvent, number>;
   meta!: Table<Meta, string>;
+  // v5
+  plans!: Table<PlanV5, string>;
+  cycles!: Table<CycleV5, string>;
+  transactions!: Table<Txn, string>;
+  dayRows!: Table<DayRowV5, [string, number]>;
+  cats!: Table<CategoryV5, string>;
+  evts!: Table<EventV5, string>;
 
   constructor(name = dbNameFor(GUEST_UID)) {
     super(name);
@@ -180,6 +267,17 @@ export class StashDB extends Dexie {
       events: '++id, userId, name, createdAt',
       meta: 'id',
     });
+    // v5 is additive: the v4 tables stay until the queries move over (v6).
+    this.version(5)
+      .stores({
+        plans: 'id, updatedAt',
+        cycles: 'id, startDate, updatedAt',
+        transactions: 'id, cycleId, txnDate, [cycleId+txnDate], type, event, updatedAt',
+        dayRows: '[cycleId+day], cycleId',
+        cats: 'id, name, updatedAt',
+        evts: 'id, name, updatedAt',
+      })
+      .upgrade((tx) => migrateV4ToV5(tx));
   }
 }
 

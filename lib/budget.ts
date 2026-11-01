@@ -2,6 +2,7 @@
  *  Nothing here touches the database, so everything is unit-testable. */
 
 import { inr } from './format';
+import { daysBetween } from './dates';
 
 export interface CycleState {
   currentDay: number;
@@ -284,4 +285,68 @@ export function projection(
       ? `At your current pace you'd finish the month with about ${inr(diff)} left.`
       : `At your current pace you'd use about ${inr(-diff)} more than planned. Your daily amount is already adjusting for this.`;
   return { projected, diff, message };
+}
+
+/* ---------- rollup (derived state from transactions) ---------- */
+
+export interface RollupCycle {
+  startDate: string;
+  totalDays: number;
+  planAmount: number;
+  /** First unclosed day (cursor). Days below it are closed. */
+  currentDay: number;
+  /** Closed days that were back-filled with a rough total. */
+  estimatedDays?: number[];
+}
+
+export interface RollupTxn {
+  txnDate: string;
+  amount: number;
+  fromSavings: boolean;
+  /** Past-day spends only: false means the spend did not rebalance the pool. */
+  adjustsPool?: boolean | null;
+  deletedAt?: number | null;
+}
+
+/** 1-based cycle day for a calendar date; 0 when the date is outside the cycle. */
+export function dayOfTxn(c: Pick<RollupCycle, 'startDate' | 'totalDays'>, txnDate: string): number {
+  const diff = daysBetween(c.startDate, txnDate);
+  return diff >= 0 && diff < c.totalDays ? diff + 1 : 0;
+}
+
+/**
+ * Pure, order-independent derivation of a cycle's closed-day rows, pool and
+ * fromSavings total from its live transactions. Replays `closeDay` for every
+ * closed day, so it matches the incremental math and heals any drift.
+ */
+export function rollupCycle(
+  c: RollupCycle,
+  txns: RollupTxn[],
+): { days: DayRecord[]; pool: number; fromSavingsTotal: number } {
+  const perDay = new Map<number, { spent: number; poolSpent: number }>();
+  let fromSavingsTotal = 0;
+  for (const t of txns) {
+    if (t.deletedAt != null) continue;
+    if (t.fromSavings) {
+      fromSavingsTotal += t.amount;
+      continue;
+    }
+    const d = dayOfTxn(c, t.txnDate);
+    if (d === 0) continue;
+    const row = perDay.get(d) ?? { spent: 0, poolSpent: 0 };
+    row.spent += t.amount;
+    if (t.adjustsPool !== false) row.poolSpent += t.amount;
+    perDay.set(d, row);
+  }
+  const estimated = new Set(c.estimatedDays ?? []);
+  let state: CycleState = { currentDay: 1, totalDays: c.totalDays, pool: c.planAmount, fromSavingsTotal: 0 };
+  const days: DayRecord[] = [];
+  const lastClosed = Math.min(c.currentDay - 1, c.totalDays);
+  for (let d = 1; d <= lastClosed; d++) {
+    const row = perDay.get(d) ?? { spent: 0, poolSpent: 0 };
+    const r = closeDay(state, row.poolSpent, estimated.has(d) ? 'estimated' : 'closed');
+    days.push({ ...r.record, spent: row.spent });
+    state = r.state;
+  }
+  return { days, pool: state.pool, fromSavingsTotal };
 }

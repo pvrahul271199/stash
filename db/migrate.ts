@@ -1,4 +1,20 @@
-import Dexie from 'dexie';
+import Dexie, { type Transaction } from 'dexie';
+import { rollupCycle } from '@/lib/budget';
+import { dateOfDay } from '@/lib/dates';
+import type {
+  Category,
+  CategoryV5,
+  Cycle,
+  CycleV5,
+  DayRow,
+  DayRowV5,
+  Entry,
+  EventV5,
+  PlanV5,
+  Plan,
+  StashEvent,
+  Txn,
+} from './schema';
 import { StashDB, SCHEMA_VERSION, dbNameFor, GUEST_UID, type Meta } from './schema';
 import { encodeUsernameToBase64 } from '@/lib/user';
 
@@ -134,6 +150,132 @@ export async function splitLegacyDB(): Promise<LegacySplitReport> {
   } finally {
     legacy.close();
   }
+}
+
+export interface V5MigrationReport {
+  plans: number;
+  cycles: number;
+  transactions: number;
+  categories: number;
+  events: number;
+  droppedDuplicates: number;
+  /** Spends whose cycle no longer exists; kept with cycleId null. */
+  detached: number;
+  /** Per cycle: stored pool vs the pool derived from transactions. */
+  pools: { cycleId: string; legacyPool: number; derivedPool: number }[];
+}
+
+export interface V4Rows {
+  plan: Plan[];
+  cycle: Cycle[];
+  days: DayRow[];
+  entries: Entry[];
+  categories: Category[];
+  events: StashEvent[];
+}
+
+/** Pure v4 -> v5 transform. Derived pool wins; the old value is kept in the report. */
+export function transformV4(rows: V4Rows, newId: () => string = () => crypto.randomUUID()) {
+  const report: V5MigrationReport = {
+    plans: 0, cycles: 0, transactions: 0, categories: 0, events: 0,
+    droppedDuplicates: 0, detached: 0, pools: [],
+  };
+  const plans: PlanV5[] = rows.plan.map((p) => ({
+    id: newId(), updatedAt: p.createdAt, createdAt: p.createdAt,
+    income: p.income, bills: p.bills, savings: p.savings, monthLength: p.monthLength,
+    currency: p.currency, billItems: p.billItems, savingsItems: p.savingsItems,
+  }));
+  const cycleIds = new Map<number, string>();
+  const estimatedByCycle = new Map<number, number[]>();
+  for (const d of rows.days) {
+    if (d.status === 'estimated') estimatedByCycle.set(d.cycleId, [...(estimatedByCycle.get(d.cycleId) ?? []), d.day]);
+  }
+  const cycles: CycleV5[] = rows.cycle.map((c) => {
+    const id = newId();
+    if (c.id != null) cycleIds.set(c.id, id);
+    return {
+      id, updatedAt: Date.parse(c.startDate) || 0, startDate: c.startDate, totalDays: c.totalDays,
+      planAmount: c.planAmount, currentDay: c.currentDay, pool: c.pool,
+      fromSavingsTotal: c.fromSavingsTotal, leftoverMoved: c.leftoverMoved,
+      estimatedDays: (estimatedByCycle.get(c.id ?? -1) ?? []).sort((a, b) => a - b),
+    };
+  });
+  const cycleByOld = new Map(rows.cycle.map((c) => [c.id, c]));
+  const seen = new Set<string>();
+  const transactions: Txn[] = [];
+  for (const e of rows.entries) {
+    if (seen.has(e.id)) {
+      report.droppedDuplicates++;
+      continue;
+    }
+    seen.add(e.id);
+    const oldCycle = cycleByOld.get(e.cycleId);
+    const mapped = cycleIds.get(e.cycleId) ?? null;
+    if (!mapped) report.detached++;
+    const txnDate = e.date ?? (oldCycle && e.day > 0 ? dateOfDay(oldCycle.startDate, e.day) : null);
+    if (!txnDate) {
+      report.detached++;
+      continue;
+    }
+    transactions.push({
+      id: e.id, updatedAt: e.createdAt, createdAt: e.createdAt,
+      cycleId: e.day === 0 ? null : mapped, txnDate, amount: e.amount,
+      type: e.category, subtype: e.subcategory, label: e.label, event: e.event ?? null,
+      payment: e.payment ?? null, note: e.note ?? null, fromSavings: e.fromSavings,
+      adjustsPool: e.adjustsPool !== false, isEstimate: e.isEstimate, hour: e.hour,
+    });
+  }
+  const dayRows: DayRowV5[] = [];
+  for (const c of cycles) {
+    const old = rows.cycle.find((x) => cycleIds.get(x.id ?? -1) === c.id);
+    const r = rollupCycle(c, transactions.filter((t) => t.cycleId === c.id));
+    report.pools.push({ cycleId: c.id, legacyPool: old?.pool ?? c.pool, derivedPool: r.pool });
+    c.pool = r.pool;
+    c.fromSavingsTotal = r.fromSavingsTotal;
+    for (const d of r.days) dayRows.push({ cycleId: c.id, day: d.day, allowanceAtStart: d.allowanceAtStart, spent: d.spent, status: d.status });
+  }
+  const categories: CategoryV5[] = rows.categories.map((c) => ({
+    id: newId(), updatedAt: 0, name: c.name, sortOrder: c.sortOrder, isSystem: c.isSystem, subcategories: c.subcategories,
+  }));
+  const events: EventV5[] = rows.events.map((e) => ({
+    id: newId(), updatedAt: e.createdAt, name: e.name, note: e.note ?? null, categories: e.categories, createdAt: e.createdAt,
+  }));
+  report.plans = plans.length;
+  report.cycles = cycles.length;
+  report.transactions = transactions.length;
+  report.categories = categories.length;
+  report.events = events.length;
+  return { plans, cycles, transactions, dayRows, categories, events, report };
+}
+
+/**
+ * Dexie upgrade body (runs once per DB inside the upgrade transaction).
+ * Re-runnable: v5 tables are replaced from the v4 tables each time.
+ */
+export async function migrateV4ToV5(tx: Transaction): Promise<void> {
+  const rows: V4Rows = {
+    plan: await tx.table('plan').toArray(),
+    cycle: await tx.table('cycle').toArray(),
+    days: await tx.table('days').toArray(),
+    entries: await tx.table('entries').toArray(),
+    categories: await tx.table('categories').toArray(),
+    events: await tx.table('events').toArray(),
+  };
+  const out = transformV4(rows);
+  await Promise.all(['plans', 'cycles', 'transactions', 'dayRows', 'cats', 'evts'].map((t) => tx.table(t).clear()));
+  await tx.table('plans').bulkPut(out.plans);
+  await tx.table('cycles').bulkPut(out.cycles);
+  await tx.table('transactions').bulkPut(out.transactions);
+  await tx.table('dayRows').bulkPut(out.dayRows);
+  await tx.table('cats').bulkPut(out.categories);
+  await tx.table('evts').bulkPut(out.events);
+  const meta = await tx.table('meta').get('main');
+  await tx.table('meta').put({
+    ...(meta ?? { id: 'main', lastUsedLabel: null }),
+    id: 'main',
+    schemaVersion: 5,
+    migrationReport: out.report,
+  });
 }
 
 /** Boot step: must resolve before the first `openUserDB`. */
