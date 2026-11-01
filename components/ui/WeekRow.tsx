@@ -26,11 +26,9 @@ export function WeekRow({ days, startDate }: { days: WeekDay[]; startDate: strin
         const wd = weekdayShort(weekdayOfDay(startDate, d.day));
         const isToday = d.status === 'today';
         const style =
-          d.status === 'closed'
+          d.status === 'closed' || d.status === 'estimated'
             ? 'bg-ink text-white'
-            : d.status === 'estimated'
-              ? 'border border-dashed border-faint bg-tint text-soft'
-              : isToday
+            : isToday
                 ? 'border-2 border-ink bg-white text-ink'
                 : 'border border-line bg-white text-faint';
         return (
