@@ -1,3 +1,4 @@
+import { defaultCategoryId } from './queries';
 import { StashDB, dbNameFor, GUEST_UID, openUserDB } from './schema';
 
 type Counts = Record<string, number>;
@@ -29,6 +30,13 @@ export async function claimGuestData(uid: string): Promise<{ claimed: boolean; c
     ]);
     if (plans.length + txns.length === 0) return { claimed: false, counts: {} };
     const now = Date.now();
+    // Guest default-category ids are derived from 'default'; re-derive them for this account
+    // so two accounts never share a server primary key.
+    const remappedCats = await Promise.all(
+      cats.map(async (c) =>
+        c.id === (await defaultCategoryId(GUEST_UID, c.name)) ? { ...c, id: await defaultCategoryId(uid, c.name) } : c,
+      ),
+    );
     const touch = <T extends { updatedAt: number }>(r: T[]): T[] => r.map((x) => ({ ...x, updatedAt: Math.max(x.updatedAt, now) }));
     await target.transaction(
       'rw',
@@ -39,7 +47,7 @@ export async function claimGuestData(uid: string): Promise<{ claimed: boolean; c
         await target.cycles.bulkPut(touch(cycles));
         await target.transactions.bulkPut(touch(txns));
         await target.dayRows.bulkPut(rows);
-        await target.cats.bulkPut(touch(cats));
+        await target.cats.bulkPut(touch(remappedCats));
         await target.evts.bulkPut(touch(evts));
         await target.meta.put({
           id: 'main',

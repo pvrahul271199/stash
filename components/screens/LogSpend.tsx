@@ -17,7 +17,7 @@ import {
 import { PAYMENT_MODES, type Cycle, type Plan } from '@/db/schema';
 import { daysLeft, isBigSpend, todayAllowance } from '@/lib/budget';
 import { MAX_NAME } from '@/lib/categories';
-import { dateOfDay, formatShort, formatWithWeekday } from '@/lib/dates';
+import { dateOfDay, daysBetween, formatShort, formatWithWeekday, todayISO } from '@/lib/dates';
 import { chipLabels } from '@/lib/suggestions';
 import { inr, num } from '@/lib/format';
 import { useCurrency } from '@/lib/currency';
@@ -35,12 +35,15 @@ export function LogSpend({
   cycle,
   plan,
   targetDay,
+  targetDate,
   onClose,
 }: {
   cycle: Cycle;
   plan: Plan;
   /** Optional specific day (1..totalDays) to log into when adding from History. */
   targetDay?: number;
+  /** Optional specific ISO date (yyyy-mm-dd) to log into from calendar. */
+  targetDate?: string;
   onClose: () => void;
 }) {
   const [digits, setDigits] = useState('');
@@ -83,9 +86,21 @@ export function LogSpend({
     setEventMenuOpen(false);
   }
 
-  const effectiveDay = targetDay ?? cycle.currentDay;
-  const isPreviousDay = targetDay != null && targetDay < cycle.currentDay;
-  const targetIso = dateOfDay(cycle.startDate, effectiveDay);
+  const offsetFromCycle = targetDate ? daysBetween(cycle.startDate, targetDate) : null;
+  const isTargetDateWithinCycle =
+    offsetFromCycle != null && offsetFromCycle >= 0 && offsetFromCycle < cycle.totalDays;
+  const isOutsideActiveCycle = targetDate != null && !isTargetDateWithinCycle;
+
+  const effectiveDay =
+    targetDate != null
+      ? (isTargetDateWithinCycle ? offsetFromCycle! + 1 : null)
+      : (targetDay ?? cycle.currentDay);
+
+  const isPreviousDay = isOutsideActiveCycle
+    ? false
+    : (effectiveDay != null && effectiveDay < cycle.currentDay);
+
+  const targetIso = targetDate ?? (effectiveDay != null ? dateOfDay(cycle.startDate, effectiveDay) : todayISO());
   const targetDateLabel = formatShort(targetIso);
 
   async function persist(p: Pending, fromSavings: boolean, adjustPool = true) {
@@ -95,12 +110,24 @@ export function LogSpend({
     try {
       await addSpend(
         cycle,
-        { amount, ...p, payment, note: note.trim() || null, fromSavings, adjustPool },
+        {
+          amount,
+          ...p,
+          payment,
+          note: note.trim() || null,
+          fromSavings,
+          adjustPool: isOutsideActiveCycle ? false : adjustPool,
+        },
         new Date(),
-        targetDay,
+        effectiveDay ?? undefined,
+        targetDate,
       );
       navigator.vibrate?.(10);
-      const suffix = targetDay != null && targetDay !== cycle.currentDay ? ` on ${targetDateLabel} (Day ${targetDay})` : '';
+      const suffix = isOutsideActiveCycle
+        ? ` on ${targetDateLabel}`
+        : (effectiveDay != null && effectiveDay !== cycle.currentDay
+            ? ` on ${targetDateLabel} (Day ${effectiveDay})`
+            : '');
       toast(
         p.label === 'Sort later'
           ? `Saved ${inr(amount)}${suffix}`
@@ -120,6 +147,11 @@ export function LogSpend({
     if (amount <= 0) {
       toast('Enter an amount first', 'warm');
       setView('keypad');
+      return;
+    }
+    if (isOutsideActiveCycle) {
+      // Historical spend outside 30-day range: records directly without pool adjustment
+      await persist(p, false, false);
       return;
     }
     if (isPreviousDay) {
@@ -299,7 +331,7 @@ export function LogSpend({
                 }}
                 aria-expanded={eventMenuOpen}
                 aria-label={activeEvent ? `Logging in ${activeEvent}. Tap to switch event` : 'Choose an event'}
-                className={`inline-flex h-7 min-h-0 max-w-[170px] items-center gap-1 rounded-full border px-2.5 text-[11px] font-medium transition-colors ${
+                className={`inline-flex h-8 min-h-0 max-w-[190px] items-center gap-1.5 rounded-full border pl-2.5 pr-2 text-[12px] font-medium transition-colors ${
                   activeEvent
                     ? 'border-ink bg-ink text-white'
                     : 'border-line bg-tint/70 text-soft'
@@ -321,9 +353,20 @@ export function LogSpend({
                   <path d="M8 3v4M16 3v4M3.5 10h17" />
                 </svg>
                 <span className="truncate">{activeEvent ? activeEvent : 'No event'}</span>
-                <span className="shrink-0 text-[9px] opacity-75" aria-hidden="true">
-                  {eventMenuOpen ? '▴' : '▾'}
-                </span>
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className={`shrink-0 transition-transform duration-200 ${eventMenuOpen ? 'rotate-180' : ''}`}
+                  aria-hidden="true"
+                >
+                  <path d="m6 9 6 6 6-6" />
+                </svg>
               </button>
 
               {activeEvent && (
@@ -451,11 +494,15 @@ export function LogSpend({
             aria-live="polite"
             onClick={() => eventMenuOpen && setEventMenuOpen(false)}
           >
-            {targetDay != null && (
+            {isOutsideActiveCycle ? (
               <span className="mb-1.5 inline-flex items-center gap-1.5 rounded-full bg-tint px-3 py-0.5 text-[11px] font-medium text-ink">
-                Day {targetDay} · {targetDateLabel}
+                {targetDateLabel} · Historical date
               </span>
-            )}
+            ) : targetDay != null || (targetDate != null && effectiveDay != null && effectiveDay !== cycle.currentDay) ? (
+              <span className="mb-1.5 inline-flex items-center gap-1.5 rounded-full bg-tint px-3 py-0.5 text-[11px] font-medium text-ink">
+                Day {effectiveDay} · {targetDateLabel}
+              </span>
+            ) : null}
             <div className="num flex items-baseline justify-center" style={{ fontSize: size, lineHeight: 1.05 }}>
               <span className="mr-1 text-faint" aria-hidden="true">{currency.symbol}</span>
               <span className={amount === 0 ? 'text-faint' : 'text-ink'} aria-label={`Amount ${amount} ${currency.code}`}>

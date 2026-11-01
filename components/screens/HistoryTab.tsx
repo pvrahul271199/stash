@@ -133,7 +133,9 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: Cycle; plan?: P
 
       {/* Cycle switcher pills */}
       {!query.trim() && (
-        <div className="no-scrollbar -mx-6 mt-3 overflow-x-auto px-6 touch-pan-x" role="group" aria-label="Cycles">
+        <div className="mt-5">
+          <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">Cycle</p>
+        <div className="no-scrollbar -mx-6 overflow-x-auto px-6 touch-pan-x" role="group" aria-label="Cycles">
           <div className="flex w-max gap-2 pb-1">
             {allCycles.map((c, idx) => {
               const isSel = c.id === cycle.id;
@@ -160,6 +162,7 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: Cycle; plan?: P
               );
             })}
           </div>
+        </div>
         </div>
       )}
 
@@ -231,14 +234,29 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: Cycle; plan?: P
       ) : (
         <>
           {/* Calendar Month & Year Navigation Header with Floating Overlay Picker */}
-          <div className="relative mt-5">
-            <div className="flex items-center justify-between">
+          <div className="relative mt-4">
+            <div className="flex items-center justify-between rounded-note border border-line bg-tint/50 px-1.5 py-1">
+              <button
+                type="button"
+                aria-label="Previous month"
+                onClick={() => {
+                  if (viewMonth === 1) {
+                    setViewMonth(12);
+                    setViewYear((y) => y - 1);
+                  } else setViewMonth((m) => m - 1);
+                }}
+                className="flex h-9 w-9 min-h-0 items-center justify-center rounded-full text-soft transition-colors hover:bg-white hover:text-ink active:scale-90"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="m15 18-6-6 6-6" />
+                </svg>
+              </button>
               <button
                 type="button"
                 onClick={() => setPickerOpen((o) => !o)}
                 aria-expanded={pickerOpen}
                 aria-label="Select month and year"
-                className="group -ml-1 flex items-center gap-1.5 rounded-lg px-1.5 py-1 text-left transition-colors hover:bg-tint/60 active:scale-[0.99]"
+                className="group flex items-center gap-1.5 rounded-full px-3 py-1.5 transition-colors hover:bg-white active:scale-[0.99]"
               >
                 <span className="text-[18px] font-semibold tracking-tight text-ink">
                   {formatMonthYear(viewYear, viewMonth)}
@@ -262,6 +280,21 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: Cycle; plan?: P
                     <path d="m6 9 6 6 6-6" />
                   </svg>
                 </span>
+              </button>
+              <button
+                type="button"
+                aria-label="Next month"
+                onClick={() => {
+                  if (viewMonth === 12) {
+                    setViewMonth(1);
+                    setViewYear((y) => y + 1);
+                  } else setViewMonth((m) => m + 1);
+                }}
+                className="flex h-9 w-9 min-h-0 items-center justify-center rounded-full text-soft transition-colors hover:bg-white hover:text-ink active:scale-90"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="m9 18 6-6-6-6" />
+                </svg>
               </button>
             </div>
 

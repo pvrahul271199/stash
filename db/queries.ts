@@ -4,6 +4,7 @@ import {
   DEFAULT_CATEGORIES,
   SCHEMA_VERSION,
   getDB,
+  getActiveDBUid,
   useActiveUid,
   type Category,
   type Cycle,
@@ -41,6 +42,15 @@ import { requestSync } from '@/lib/sync';
 /* ---------- helpers ---------- */
 
 const uuid = () => crypto.randomUUID();
+
+/** Stable per-user id for a default category, so every device seeds the same rows (no duplicates after sync). */
+export async function defaultCategoryId(uid: string, name: string): Promise<string> {
+  const bytes = new Uint8Array(await crypto.subtle.digest('SHA-1', new TextEncoder().encode(`stash:${uid}:${name}`)));
+  bytes[6] = (bytes[6] & 0x0f) | 0x50;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const h = Array.from(bytes.slice(0, 16), (b) => b.toString(16).padStart(2, '0')).join('');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
+}
 const alive = <T extends { deletedAt?: number | null }>(r: T) => r.deletedAt == null;
 
 /** Live query that re-runs when the active per-user DB switches. */
@@ -240,13 +250,14 @@ export function useEventCounts(): Record<string, number> {
 export async function ensureSeed(): Promise<void> {
   const db = getDB();
   const uid = getActiveUserId();
+  const defaultIds = await Promise.all(DEFAULT_CATEGORIES.map((c) => defaultCategoryId(getActiveDBUid(), c.name)));
   await db.transaction('rw', [db.cats, db.meta, db.users], async () => {
     if ((await db.cats.count()) === 0) {
-      const now = Date.now();
-      await db.cats.bulkAdd(
+      // updatedAt 1: pushed once, but any later edit/delete from another device wins (LWW).
+      await db.cats.bulkPut(
         DEFAULT_CATEGORIES.map((c, i) => ({
-          id: uuid(),
-          updatedAt: now,
+          id: defaultIds[i],
+          updatedAt: 1,
           name: c.name,
           sortOrder: i,
           isSystem: c.name === 'Other',

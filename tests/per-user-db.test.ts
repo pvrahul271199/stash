@@ -144,3 +144,23 @@ describe('day rows stay derived in one transaction', () => {
     expect((await getDB().cycles.get(cycle.id))!.pool).toBe(cycle.planAmount - 300);
   });
 });
+
+describe('default categories', () => {
+  it('seeds the same ids on every device for a user, and different ids per user', async () => {
+    const { ensureSeed } = await import('@/db/queries');
+    await Dexie.delete('stash-cat-a');
+    await Dexie.delete('stash-cat-b');
+    await openUserDB('cat-a');
+    await ensureSeed();
+    const a1 = (await getDB().cats.toArray()).map((c) => c.id).sort();
+    expect(a1.length).toBeGreaterThanOrEqual(8);
+    await openUserDB('cat-b');
+    await ensureSeed();
+    const b = (await getDB().cats.toArray()).map((c) => c.id);
+    expect(b.some((id) => a1.includes(id))).toBe(false);
+    await Dexie.delete('stash-cat-a');
+    await openUserDB('cat-a');
+    await ensureSeed();
+    expect((await getDB().cats.toArray()).map((c) => c.id).sort()).toEqual(a1);
+  });
+});
