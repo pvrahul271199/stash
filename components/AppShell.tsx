@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Toast } from './ui/Toast';
 import { TabBar, type Tab } from './ui/TabBar';
 import { Welcome } from './screens/Welcome';
-import { UserScreen } from './screens/UserScreen';
+import { AuthScreen } from './screens/AuthScreen';
 import { Onboarding } from './screens/Onboarding';
 import { PlanSummary } from './screens/PlanSummary';
 import { TodayTab } from './screens/TodayTab';
@@ -20,22 +20,19 @@ import {
   ensureSeed,
   fillSample,
   syncCalendar,
+  updateActivePlan,
   useSnapshot,
   type PendingCatchUp,
 } from '@/db/queries';
 import { isCycleOver, isPlanValid, type PlanInput } from '@/lib/budget';
 import { todayISO } from '@/lib/dates';
-import {
-  clearBrowserSessionUser,
-  getBrowserSessionUser,
-  setBrowserSessionUser,
-  supabaseSync,
-} from '@/lib/sync';
+import { supabaseSync } from '@/lib/sync';
 import { getDB } from '@/db/schema';
+import { initAuth, logOut, useAuth } from '@/lib/auth';
 import { useUI } from '@/store/ui';
 import { useToast } from '@/store/toast';
 
-type Flow = 'welcome' | 'user' | 'onboarding' | 'summary' | 'changePlan' | 'changeSummary';
+type Flow = 'welcome' | 'auth' | 'onboarding' | 'summary' | 'changePlan' | 'changeSummary';
 
 export function AppShell() {
   const snap = useSnapshot();
@@ -49,15 +46,7 @@ export function AppShell() {
   const [busy, setBusy] = useState(false);
   const [catchUpGap, setCatchUpGap] = useState<PendingCatchUp | null>(null);
 
-  // ============================================================================
-  // TEMPORARY DIRECT ENTRY VIA BROWSER SESSION
-  // NOTE [FUTURE_AUTH_MIGRATION]:
-  // Stores the active user in browser session. If a username/session is present,
-  // the user is admitted directly into the app (restoring their workspace from
-  // Supabase if needed) without re-prompting.
-  // This will be replaced by Supabase Auth (OAuth/magic link/passkeys) in the future.
-  // ============================================================================
-  const sessionUser = getBrowserSessionUser();
+  const auth = useAuth();
 
   const runSync = useCallback(async () => {
     const gap = await syncCalendar(todayISO());
@@ -65,7 +54,8 @@ export function AppShell() {
   }, []);
 
   useEffect(() => {
-    ensureSeed()
+    initAuth()
+      .then(() => ensureSeed())
       .then(async () => {
         if (supabaseSync.isEnabled()) {
           const localEntries = await getDB().entries.count();
@@ -122,30 +112,20 @@ export function AppShell() {
   let body: React.ReactNode = null;
   if (!ready || !snap) {
     body = <div className="h-full" aria-busy="true" />;
-  } else if (flow === 'user') {
+  } else if (flow === 'auth') {
     body = (
-      <UserScreen
-        busy={busy}
-        onBack={() => {
+      <AuthScreen
+        onBack={() => setFlow('welcome')}
+        onDone={async (mode, username) => {
+          if (mode === 'login') {
+            await runSync();
+            setFlow('welcome');
+            setTab('today');
+            toast(`Welcome back, ${username}!`);
+            return;
+          }
           setFlow('welcome');
-        }}
-        onContinue={async (username) => {
-          if (username) {
-            setBrowserSessionUser(username);
-          }
-          if (username && supabaseSync.isEnabled()) {
-            setBusy(true);
-            const restored = await supabaseSync.pull().catch(() => false);
-            setBusy(false);
-            if (restored) {
-              await runSync();
-              setFlow('welcome');
-              setTab('today');
-              toast(`Welcome back, ${username}! Restored your data.`);
-              return;
-            }
-          }
-          setFlow('onboarding');
+          toast(`Account created. Welcome, ${username}!`);
         }}
       />
     );
@@ -168,11 +148,22 @@ export function AppShell() {
     body = (
       <PlanSummary
         plan={draft}
+        activeCycle={snap.cycle}
         busy={busy}
         onBack={() => setFlow('changePlan')}
         onStart={async () => {
-          await start();
+          if (!draft || !isPlanValid(draft)) return;
+          setBusy(true);
+          if (snap.cycle) {
+            await updateActivePlan(draft);
+          } else {
+            await createPlanAndCycle(draft);
+          }
+          setBusy(false);
+          setFlow('welcome');
           setSheet('none');
+          setTab('today');
+          toast('Plan updated. Remaining days adjusted.');
         }}
       />
     );
@@ -215,13 +206,16 @@ export function AppShell() {
                   setFlow('changePlan');
                 }}
                 onSwitchUser={() => {
-                  clearBrowserSessionUser();
-                  setFlow('user');
+                  void logOut().then(() => {
+                    setDraft(null);
+                    setFlow('welcome');
+                    setTab('today');
+                  });
                 }}
+                onLogIn={() => setFlow('auth')}
                 onSampleDone={() => setTab('insights')}
                 onDeleted={() => {
-                  clearBrowserSessionUser();
-                  setDraft(null);
+                    setDraft(null);
                   setFlow('welcome');
                   setTab('today');
                 }}
@@ -235,9 +229,16 @@ export function AppShell() {
               cycle={snap.cycle}
               onClose={() => setSheet('none')}
               onSwitchUser={() => {
-                clearBrowserSessionUser();
                 setSheet('none');
-                setFlow('user');
+                if (auth.status === 'signedIn') {
+                  void logOut().then(() => {
+                    setDraft(null);
+                    setFlow('welcome');
+                    setTab('today');
+                  });
+                } else {
+                  setFlow('auth');
+                }
               }}
               onChangePlan={() => {
                 setDraft({
@@ -256,7 +257,6 @@ export function AppShell() {
                 setTab('insights');
               }}
               onDeleted={() => {
-                clearBrowserSessionUser();
                 setSheet('none');
                 setDraft(null);
                 setFlow('welcome');
@@ -268,15 +268,11 @@ export function AppShell() {
       );
     }
   } else if (flow === 'welcome') {
-    // If a browser session/username is already present, bypass Welcome directly
-    if (sessionUser && !snap.cycle) {
+    if (auth.status === 'signedIn' && !snap.cycle) {
       body = (
         <Onboarding
           initial={draft ?? undefined}
-          onExit={() => {
-            clearBrowserSessionUser();
-            setFlow('welcome');
-          }}
+          onExit={() => void logOut()}
           onDone={(p) => {
             setDraft(p);
             setFlow('summary');
@@ -286,7 +282,8 @@ export function AppShell() {
     } else {
       body = (
         <Welcome
-          onStart={() => setFlow('user')}
+          onStart={() => setFlow('onboarding')}
+          onAccount={() => setFlow('auth')}
           onSample={handleSample}
         />
       );
@@ -295,7 +292,7 @@ export function AppShell() {
     body = (
       <Onboarding
         initial={draft ?? undefined}
-        onExit={() => setFlow('user')}
+        onExit={() => setFlow('welcome')}
         onDone={(p) => {
           setDraft(p);
           setFlow('summary');

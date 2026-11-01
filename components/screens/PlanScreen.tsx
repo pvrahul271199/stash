@@ -100,7 +100,7 @@ export function PlanScreen({
 
         <div className="mt-6 flex flex-col gap-2">
           <PrimaryButton onClick={onChangePlan}>Change my plan</PrimaryButton>
-          {onSwitchUser && <SecondaryButton onClick={onSwitchUser}>Switch user</SecondaryButton>}
+          {onSwitchUser && <SecondaryButton onClick={onSwitchUser}>Log out or log in</SecondaryButton>}
           {installEvent && <SecondaryButton onClick={install}>Install Stash</SecondaryButton>}
           <SecondaryButton onClick={() => setConfirm('sample')}>Fill with a sample month</SecondaryButton>
           <SecondaryButton onClick={doExport}>Export to CSV</SecondaryButton>

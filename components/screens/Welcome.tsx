@@ -3,9 +3,11 @@ import { PrimaryButton, GhostButton } from '../ui/Button';
 
 export function Welcome({
   onStart,
+  onAccount,
   onSample,
 }: {
   onStart: () => void;
+  onAccount: () => void;
   onSample: () => void;
 }) {
   return (
@@ -21,8 +23,9 @@ export function Welcome({
         </p>
       </div>
       <div className="flex flex-col gap-1">
-        <PrimaryButton onClick={onStart}>Set up my month</PrimaryButton>
+        <PrimaryButton onClick={onStart}>Try without an account</PrimaryButton>
         <p className="mb-2 mt-2 text-center text-[14px] text-soft">Takes about a minute</p>
+        <GhostButton onClick={onAccount}>Sign up or log in</GhostButton>
         <GhostButton onClick={onSample}>Or explore with sample data first</GhostButton>
       </div>
     </main>

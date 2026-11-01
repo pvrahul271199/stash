@@ -4,6 +4,8 @@
  * and local profile state persistence.
  */
 
+import { getAuth } from './auth';
+
 export interface UserProfile {
   /** Deterministic Base64-encoded user identifier (e.g. "cmFodWw=" for "rahul"). */
   userId: string;
@@ -17,110 +19,9 @@ export interface UserProfile {
   updatedAt: number;
 }
 
-export const USERNAME_STORAGE_KEY = 'stash:username';
 export const USER_THEME_STORAGE_KEY = 'stash:user-theme';
 export const DEFAULT_USER_ID = 'default';
 export const DEFAULT_AVATAR_THEME = 'Indigo';
-
-// ============================================================================
-// TEMPORARY SESSION MANAGEMENT
-// NOTE [FUTURE_AUTH_MIGRATION]:
-// Stores the active username and user_id in the browser session (sessionStorage
-// with localStorage fallback) to let returning users directly into the app.
-// This entire block will be replaced by Supabase Auth (magic link / OAuth /
-// passkeys via supabase.auth.getSession()) once authentication is added.
-// ============================================================================
-export const SESSION_USER_ID_KEY = 'stash:session-user-id';
-export const SESSION_USERNAME_KEY = 'stash:session-username';
-
-export interface BrowserSessionUser {
-  userId: string;
-  username: string;
-}
-
-/**
- * Reads the active user from browser session.
- * If present, the user is granted direct access without seeing Welcome/Login prompts.
- */
-export function getBrowserSessionUser(): BrowserSessionUser | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    // Check sessionStorage first
-    const sUid = window.sessionStorage?.getItem(SESSION_USER_ID_KEY)?.trim();
-    const sName = window.sessionStorage?.getItem(SESSION_USERNAME_KEY)?.trim();
-    if (sUid && sName && sName !== DEFAULT_USER_ID) {
-      return { userId: sUid, username: sName };
-    }
-
-    // Fall back to persistent localStorage
-    const storedUsername = getStoredUsername();
-    if (storedUsername && storedUsername !== DEFAULT_USER_ID) {
-      const uid = encodeUsernameToBase64(storedUsername);
-      try {
-        window.sessionStorage?.setItem(SESSION_USER_ID_KEY, uid);
-        window.sessionStorage?.setItem(SESSION_USERNAME_KEY, storedUsername);
-      } catch {
-        /* best-effort */
-      }
-      return { userId: uid, username: storedUsername };
-    }
-  } catch {
-    /* ignore storage access restrictions */
-  }
-  return null;
-}
-
-/**
- * Stores the active user in browser session to bypass Welcome screens.
- * 
- * NOTE [FUTURE_AUTH_MIGRATION]: Will be replaced by supabase.auth session handling in future.
- */
-export function setBrowserSessionUser(username: string, userId?: string): void {
-  if (typeof window === 'undefined') return;
-  const clean = normalizeUsername(username);
-  if (!clean || clean === DEFAULT_USER_ID) {
-    clearBrowserSessionUser();
-    return;
-  }
-  const uid = userId || encodeUsernameToBase64(clean);
-  try {
-    window.sessionStorage?.setItem(SESSION_USER_ID_KEY, uid);
-    window.sessionStorage?.setItem(SESSION_USERNAME_KEY, clean);
-    window.localStorage?.setItem(USERNAME_STORAGE_KEY, clean);
-  } catch {
-    /* ignore */
-  }
-}
-
-/**
- * Clears the active browser session.
- * 
- * NOTE [FUTURE_AUTH_MIGRATION]: Will be replaced by supabase.auth.signOut() in future.
- */
-export function clearBrowserSessionUser(): void {
-  if (typeof window === 'undefined') return;
-  try {
-    window.sessionStorage?.removeItem(SESSION_USER_ID_KEY);
-    window.sessionStorage?.removeItem(SESSION_USERNAME_KEY);
-    window.localStorage?.removeItem(USERNAME_STORAGE_KEY);
-
-    const rawConfig = window.localStorage?.getItem('stash:supabase-config');
-    if (rawConfig) {
-      const parsed = JSON.parse(rawConfig) as { url?: string; anonKey?: string };
-      window.localStorage.setItem(
-        'stash:supabase-config',
-        JSON.stringify({
-          url: parsed.url ?? '',
-          anonKey: parsed.anonKey ?? '',
-          userId: DEFAULT_USER_ID,
-          workspaceId: DEFAULT_USER_ID,
-        }),
-      );
-    }
-  } catch {
-    /* ignore */
-  }
-}
 
 /** Normalizes raw input into a clean lowercase username. */
 export function normalizeUsername(raw: string): string {
@@ -158,41 +59,14 @@ export function decodeBase64Username(b64: string): string | null {
   }
 }
 
-/** Reads the currently stored human-readable username. */
+/** Username of the signed-in account ('' for guest). */
 export function getStoredUsername(): string {
-  if (typeof window === 'undefined') return '';
-  try {
-    const direct = window.localStorage.getItem(USERNAME_STORAGE_KEY);
-    if (direct) return normalizeUsername(direct);
-    const rawConfig = window.localStorage.getItem('stash:supabase-config');
-    if (rawConfig) {
-      const parsed = JSON.parse(rawConfig) as { userId?: string; workspaceId?: string };
-      const id = parsed.userId || parsed.workspaceId;
-      if (id) return decodeBase64Username(id) ?? '';
-    }
-  } catch {
-    /* ignore storage access errors */
-  }
-  return '';
+  return getAuth().username ?? '';
 }
 
-/** Returns the active Base64 `user_id` to stamp on every transaction and entity. */
+/** Auth uid of the signed-in account, or 'default' for the guest. */
 export function getActiveUserId(): string {
-  const username = getStoredUsername();
-  if (username) return encodeUsernameToBase64(username);
-  if (typeof window !== 'undefined') {
-    try {
-      const rawConfig = window.localStorage.getItem('stash:supabase-config');
-      if (rawConfig) {
-        const parsed = JSON.parse(rawConfig) as { userId?: string; workspaceId?: string };
-        const id = (parsed.userId || parsed.workspaceId)?.trim();
-        if (id) return id;
-      }
-    } catch {
-      /* ignore */
-    }
-  }
-  return process.env.NEXT_PUBLIC_STASH_WORKSPACE_ID?.trim() || DEFAULT_USER_ID;
+  return getAuth().uid ?? DEFAULT_USER_ID;
 }
 
 export function getStoredAvatarTheme(): string {
@@ -207,7 +81,7 @@ export function getStoredAvatarTheme(): string {
 /** Builds a normalized `UserProfile` entity for the active user. */
 export function buildUserProfile(username: string, avatarTheme = getStoredAvatarTheme()): UserProfile {
   const clean = normalizeUsername(username);
-  const userId = clean ? encodeUsernameToBase64(clean) : DEFAULT_USER_ID;
+  const userId = getActiveUserId();
   const now = Date.now();
   return {
     userId,

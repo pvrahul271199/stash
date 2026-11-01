@@ -11,19 +11,14 @@ import {
 import {
   DEFAULT_AVATAR_THEME,
   DEFAULT_USER_ID,
-  USERNAME_STORAGE_KEY,
   USER_THEME_STORAGE_KEY,
   buildUserProfile,
-  clearBrowserSessionUser,
   decodeBase64Username,
   encodeUsernameToBase64,
   getActiveUserId,
-  getBrowserSessionUser,
   getStoredAvatarTheme,
   getStoredUsername,
   normalizeUsername,
-  setBrowserSessionUser,
-  type BrowserSessionUser,
   type UserProfile,
 } from './user';
 import { dateOfDay, daysBetween } from './dates';
@@ -33,16 +28,12 @@ import { getStoredCurrencyCode, setStoredCurrency } from './currency';
 export {
   DEFAULT_USER_ID,
   buildUserProfile,
-  clearBrowserSessionUser,
   decodeBase64Username,
   encodeUsernameToBase64,
   getActiveUserId,
-  getBrowserSessionUser,
   getStoredAvatarTheme,
   getStoredUsername,
   normalizeUsername,
-  setBrowserSessionUser,
-  type BrowserSessionUser,
   type UserProfile,
 };
 
@@ -84,12 +75,6 @@ export function saveUsername(username: string, avatarTheme?: string): string {
 
   if (typeof window !== 'undefined') {
     try {
-      if (clean) {
-        window.localStorage.setItem(USERNAME_STORAGE_KEY, clean);
-        setBrowserSessionUser(clean, b64);
-      } else {
-        clearBrowserSessionUser();
-      }
       if (avatarTheme) window.localStorage.setItem(USER_THEME_STORAGE_KEY, avatarTheme);
 
       const raw = window.localStorage.getItem(CONFIG_STORAGE_KEY);
@@ -133,7 +118,7 @@ export function getSupabaseConfig(): SupabaseConfig | null {
 
   if (typeof window !== 'undefined') {
     try {
-      const storedUser = window.localStorage.getItem(USERNAME_STORAGE_KEY)?.trim();
+      const storedUser = getStoredUsername();
       const userB64 = storedUser ? encodeUsernameToBase64(storedUser) : '';
       const raw = window.localStorage.getItem(CONFIG_STORAGE_KEY);
       if (raw) {
@@ -430,7 +415,8 @@ async function upsertWithUserIdFallback<T extends { user_id?: string }>(
 
 export const supabaseSync: SyncService = {
   isEnabled(): boolean {
-    return getSupabaseConfig() !== null;
+    // Disabled until the auth-aware sync engine lands (PLAN phase 5).
+    return false;
   },
 
   /**
@@ -441,6 +427,7 @@ export const supabaseSync: SyncService = {
     const config = getSupabaseConfig();
     if (!config) return;
 
+    const startPushTime = Date.now();
     reportSyncProgress('syncing');
 
     try {
@@ -658,6 +645,12 @@ export const supabaseSync: SyncService = {
         () => undefined,
       ),
     ]);
+
+    // Ensure the syncing state is clearly perceptible to the user
+    const elapsed = Date.now() - startPushTime;
+    if (elapsed < 500) {
+      await new Promise((resolve) => setTimeout(resolve, 500 - elapsed));
+    }
 
     setLastSyncedAt(Date.now());
     reportSyncProgress('synced', null);
@@ -1013,6 +1006,25 @@ export async function deleteRemoteEvent(eventId: number): Promise<void> {
   }
 }
 
+export async function deleteRemoteCycle(cycleId: number): Promise<void> {
+  const config = getSupabaseConfig();
+  if (!config) return;
+  const uid = encodeURIComponent(config.userId);
+  try {
+    await pgRequest(config, `stash_cycles?or=(user_id.eq.${uid},workspace_id.eq.${uid})&id=eq.${cycleId}`, {
+      method: 'DELETE',
+    });
+  } catch {
+    try {
+      await pgRequest(config, `stash_cycles?workspace_id=eq.${uid}&id=eq.${cycleId}`, {
+        method: 'DELETE',
+      });
+    } catch {
+      /* offline best-effort */
+    }
+  }
+}
+
 export async function clearRemoteWorkspace(): Promise<void> {
   const config = getSupabaseConfig();
   if (!config) return;
@@ -1130,16 +1142,37 @@ export async function checkUsernameInCloud(username: string): Promise<RemoteStat
 
 let syncTimer: ReturnType<typeof setTimeout> | null = null;
 
-export function scheduleSync(): void {
-  if (typeof window === 'undefined' || !supabaseSync.isEnabled()) return;
+export function scheduleSync(immediate: boolean = true): void {
+  if (typeof window === 'undefined') return;
   reportSyncProgress('syncing');
+
+  if (!supabaseSync.isEnabled()) {
+    if (syncTimer) clearTimeout(syncTimer);
+    syncTimer = setTimeout(() => {
+      syncTimer = null;
+      reportSyncProgress('local_only');
+    }, 600);
+    return;
+  }
+
+  if (immediate) {
+    if (syncTimer) clearTimeout(syncTimer);
+    syncTimer = null;
+    void supabaseSync.push().catch(() => {});
+    return;
+  }
+
   if (syncTimer) clearTimeout(syncTimer);
   syncTimer = setTimeout(() => {
     syncTimer = null;
-    void supabaseSync.push().catch(() => {
-      /* stays queued in local Dexie until next online sync */
-    });
-  }, 200);
+    void supabaseSync.push().catch(() => {});
+  }, 150);
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('stash:currency-change', () => {
+    scheduleSync(true);
+  });
 }
 
 /* ---------- Extensible Feature Store for Future Features ---------- */

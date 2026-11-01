@@ -195,3 +195,8 @@ export function getDB(): StashDB {
   if (!_db) _db = new StashDB();
   return _db;
 }
+
+/** Phase-1 shim: single shared DB. Replaced by per-user DBs in phase 2. */
+export async function openUserDB(_uid: string): Promise<StashDB> {
+  return getDB();
+}

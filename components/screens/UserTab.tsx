@@ -5,22 +5,28 @@ import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { SyncStatusPill } from '../ui/SyncStatusPill';
 import {
   addCategory,
+  addEvent,
   addSubcategory,
   deleteAllData,
   exportCSV,
   fillSample,
+  mergeAccidentalCycle,
   removeCategory,
+  removeEvent,
   removeSubcategory,
+  useCanMergeCycle,
   useCategories,
   useCategoryCounts,
+  useEventCounts,
+  useEvents,
 } from '@/db/queries';
-import type { Category, Cycle, Plan } from '@/db/schema';
+import type { Category, Cycle, Plan, StashEvent } from '@/db/schema';
 import { moneyToLiveOn } from '@/lib/budget';
 import { MAX_NAME } from '@/lib/categories';
 import { cycleEndDate, formatWithWeekday } from '@/lib/dates';
 import { inr } from '@/lib/format';
 import { useCurrency } from '@/lib/currency';
-import { encodeUsernameToBase64, getStoredUsername } from '@/lib/sync';
+import { useAuth } from '@/lib/auth';
 import { useToast } from '@/store/toast';
 import { usePWA } from '@/store/pwa';
 
@@ -36,6 +42,7 @@ export function UserTab({
   cycle,
   onChangePlan,
   onSwitchUser,
+  onLogIn,
   onSampleDone,
   onDeleted,
 }: {
@@ -43,6 +50,7 @@ export function UserTab({
   cycle: Cycle;
   onChangePlan: () => void;
   onSwitchUser: () => void;
+  onLogIn: () => void;
   onSampleDone: () => void;
   onDeleted: () => void;
 }) {
@@ -52,9 +60,14 @@ export function UserTab({
   const { currency, setCurrency, currencies } = useCurrency();
   const cats = useCategories() ?? [];
   const catCounts = useCategoryCounts();
+  const events = useEvents() ?? [];
+  const eventCounts = useEventCounts();
 
+  const canMerge = useCanMergeCycle();
+  const [merging, setMerging] = useState(false);
   const [confirm, setConfirm] = useState<'delete' | 'sample' | null>(null);
-  const [username] = useState(() => getStoredUsername());
+  const auth = useAuth();
+  const username = auth.username ?? '';
 
   // Collapsible categories state
   const [categoriesOpen, setCategoriesOpen] = useState(false);
@@ -65,9 +78,13 @@ export function UserTab({
   const [newTypeCatId, setNewTypeCatId] = useState<number | null>(null);
   const [typeErr, setTypeErr] = useState<string | null>(null);
   const [removingCat, setRemovingCat] = useState<Category | null>(null);
+  const [newEventName, setNewEventName] = useState('');
+  const [newEventNote, setNewEventNote] = useState('');
+  const [eventErr, setEventErr] = useState<string | null>(null);
+  const [removingEvent, setRemovingEvent] = useState<StashEvent | null>(null);
 
   const cleanUser = username.trim().toLowerCase();
-  const userId = cleanUser ? encodeUsernameToBase64(cleanUser) : 'default';
+  const userId = auth.uid ?? 'default';
 
   const planRows: { label: string; value: string; items?: { name: string; amount: number }[] }[] = [
     { label: 'Monthly income', value: inr(plan.income) },
@@ -139,6 +156,39 @@ export function UserTab({
           </div>
         </div>
       </section>
+
+      {/* Accidental Cycle Merge Recovery Card */}
+      {canMerge && (
+        <section
+          className="mt-5 rounded-note border border-amber-300/80 bg-amber-50/80 p-4"
+          aria-label="Restore previous cycle"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-[14px] font-semibold text-amber-900">
+                Accidental restarted month detected
+              </p>
+              <p className="mt-1 text-[12px] leading-relaxed text-amber-800">
+                You have earlier logs from your previous month. Click below to merge your latest
+                changes back into your original month without restarting the 30-day timeline.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            disabled={merging}
+            onClick={async () => {
+              setMerging(true);
+              const res = await mergeAccidentalCycle();
+              setMerging(false);
+              toast(res.message);
+            }}
+            className="mt-3 flex h-9 items-center justify-center rounded-btn bg-amber-900 px-4 text-[13px] font-semibold text-white shadow-sm transition-transform active:scale-[0.99] hover:bg-amber-950"
+          >
+            {merging ? 'Restoring…' : 'Restore original month & merge logs'}
+          </button>
+        </section>
+      )}
 
       {/* Currency Settings */}
       <section className="mt-6 rounded-note border border-line p-4" aria-label="Currency settings">
@@ -241,12 +291,7 @@ export function UserTab({
           aria-expanded={categoriesOpen}
         >
           <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-[16px] font-semibold text-ink">Categories & Types</h2>
-              <span className="rounded-full border border-line/80 bg-tint px-2 py-0.5 text-[11px] font-semibold text-ink">
-                {cats.length} categories
-              </span>
-            </div>
+            <h2 className="text-[16px] font-semibold text-ink">Categories & Types</h2>
             <p className="mt-0.5 text-[12px] text-soft">
               Customize categories, tags, and sub-types.
             </p>
@@ -427,6 +472,84 @@ export function UserTab({
               </div>
               {catErr && <p role="alert" className="mt-1 text-[12px] text-warm">{catErr}</p>}
             </div>
+
+            {/* Events section */}
+            <div className="mt-6 border-t border-line/70 pt-4" aria-label="Events">
+              <h3 className="text-[14px] font-semibold text-ink">Events</h3>
+              <p className="mt-0.5 text-[12px] text-soft">
+                Track spends for trips, occasions, or special goals.
+              </p>
+
+              {events.length === 0 ? (
+                <p className="mt-2.5 text-[12px] text-soft">No events created yet.</p>
+              ) : (
+                <ul className="mt-3 divide-y divide-line rounded-key border border-line/70 bg-tint/30 px-3">
+                  {events.map((ev) => (
+                    <li key={ev.id} className="flex min-h-[44px] items-center justify-between gap-3 py-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-[14px] font-semibold text-ink">{ev.name}</p>
+                        <p className="truncate text-[11px] text-soft">
+                          {(eventCounts[ev.name] ?? 0)} {(eventCounts[ev.name] ?? 0) === 1 ? 'spend' : 'spends'}
+                          {ev.note ? ` · ${ev.note}` : ''}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setRemovingEvent(ev)}
+                        className="shrink-0 text-[12px] font-medium text-warm hover:underline"
+                      >
+                        Remove
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {/* Add new event */}
+              <div className="mt-3">
+                <p className="mb-1.5 text-[12px] font-semibold text-ink">Add a new event</p>
+                <div className="flex gap-2">
+                  <input
+                    value={newEventName}
+                    onChange={(e) => {
+                      setNewEventName(e.target.value);
+                      setEventErr(null);
+                    }}
+                    onKeyDown={async (e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        const err = await addEvent(newEventName, [], newEventNote || null);
+                        if (err) setEventErr(err);
+                        else {
+                          setNewEventName('');
+                          setNewEventNote('');
+                          setEventErr(null);
+                        }
+                      }
+                    }}
+                    placeholder="e.g. Vacation, Wedding"
+                    maxLength={MAX_NAME + 6}
+                    className="h-10 min-w-0 flex-1 rounded-key border border-line bg-white px-3 text-[14px] text-ink outline-none placeholder:text-faint"
+                  />
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const err = await addEvent(newEventName, [], newEventNote || null);
+                      if (err) setEventErr(err);
+                      else {
+                        setNewEventName('');
+                        setNewEventNote('');
+                        setEventErr(null);
+                      }
+                    }}
+                    className="h-10 rounded-key bg-ink px-4 text-[13px] font-semibold text-white"
+                  >
+                    Add
+                  </button>
+                </div>
+                {eventErr && <p role="alert" className="mt-1 text-[12px] text-warm">{eventErr}</p>}
+              </div>
+            </div>
           </div>
         )}
       </section>
@@ -434,7 +557,11 @@ export function UserTab({
       {/* Account & Device Actions */}
       <section className="mt-6 flex flex-col gap-2" aria-label="Account management">
         <SecondaryButton onClick={doExport}>Export all spends to CSV</SecondaryButton>
-        <SecondaryButton onClick={onSwitchUser}>Switch user profile</SecondaryButton>
+        {auth.status === 'signedIn' ? (
+          <SecondaryButton onClick={onSwitchUser}>Log out</SecondaryButton>
+        ) : (
+          <SecondaryButton onClick={onLogIn}>Sign up or log in (guest data is not backed up)</SecondaryButton>
+        )}
         {installEvent && <SecondaryButton onClick={install}>Install Stash as PWA</SecondaryButton>}
         <SecondaryButton onClick={() => setConfirm('sample')}>Fill with a sample month</SecondaryButton>
         <button
@@ -460,6 +587,23 @@ export function UserTab({
             await removeCategory(removingCat.id!);
             setRemovingCat(null);
             setOpenCatId(null);
+          }}
+        />
+      )}
+
+      {removingEvent && (
+        <ConfirmDialog
+          title={`Remove ${removingEvent.name}?`}
+          body={
+            (eventCounts[removingEvent.name] ?? 0) > 0
+              ? `${eventCounts[removingEvent.name]} ${eventCounts[removingEvent.name] === 1 ? 'spend stays' : 'spends stay'} as they are, just without the event tag.`
+              : 'No spends are tagged with this event.'
+          }
+          confirmLabel={`Remove ${removingEvent.name}`}
+          onCancel={() => setRemovingEvent(null)}
+          onConfirm={async () => {
+            await removeEvent(removingEvent.id!);
+            setRemovingEvent(null);
           }}
         />
       )}
