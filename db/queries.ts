@@ -4,7 +4,6 @@ import {
   DEFAULT_CATEGORIES,
   SCHEMA_VERSION,
   getDB,
-  getActiveDBUid,
   useActiveUid,
   type Category,
   type Cycle,
@@ -34,7 +33,7 @@ import { resolveLabel } from '@/lib/suggestions';
 import { addDays, calendarDay, dateOfDay, daysBetween, todayISO } from '@/lib/dates';
 import { DEFAULT_SAMPLE_PLAN, SAMPLE_DAYS, generateSampleSpends } from '@/lib/sample';
 import { buildCSV, type CsvRow } from '@/lib/csv';
-import { validateName } from '@/lib/categories';
+import { resolveCategories, validateName, type ResolvedCategory } from '@/lib/categories';
 import { getStoredCurrencyCode } from '@/lib/currency';
 import { buildUserProfile, getActiveUserId, getStoredAvatarTheme, getStoredUsername } from '@/lib/user';
 import { requestSync } from '@/lib/sync';
@@ -43,14 +42,6 @@ import { requestSync } from '@/lib/sync';
 
 const uuid = () => crypto.randomUUID();
 
-/** Stable per-user id for a default category, so every device seeds the same rows (no duplicates after sync). */
-export async function defaultCategoryId(uid: string, name: string): Promise<string> {
-  const bytes = new Uint8Array(await crypto.subtle.digest('SHA-1', new TextEncoder().encode(`stash:${uid}:${name}`)));
-  bytes[6] = (bytes[6] & 0x0f) | 0x50;
-  bytes[8] = (bytes[8] & 0x3f) | 0x80;
-  const h = Array.from(bytes.slice(0, 16), (b) => b.toString(16).padStart(2, '0')).join('');
-  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
-}
 const alive = <T extends { deletedAt?: number | null }>(r: T) => r.deletedAt == null;
 
 /** Live query that re-runs when the active per-user DB switches. */
@@ -105,6 +96,11 @@ export async function recompute(db: StashDB, cycleId: string): Promise<void> {
   if (c.pool !== r.pool || c.fromSavingsTotal !== r.fromSavingsTotal) {
     await db.cycles.update(cycleId, { pool: r.pool, fromSavingsTotal: r.fromSavingsTotal });
   }
+}
+
+/** Defaults + this user's overrides, resolved. */
+export async function loadCategories(db: StashDB = getDB()): Promise<ResolvedCategory[]> {
+  return resolveCategories(DEFAULT_CATEGORIES, await db.cats.toArray());
 }
 
 async function latestPlan(db: StashDB): Promise<Plan | undefined> {
@@ -199,7 +195,7 @@ export function useActiveEvent(): string | null {
 }
 
 export function useCategories(): Category[] | undefined {
-  return useLiveQuery(async () => (await getDB().cats.toArray()).filter(alive).sort((a, b) => a.sortOrder - b.sortOrder), []);
+  return useLiveQuery(async () => loadCategories(), []);
 }
 
 export function useEvents(): StashEvent[] | undefined {
@@ -250,21 +246,7 @@ export function useEventCounts(): Record<string, number> {
 export async function ensureSeed(): Promise<void> {
   const db = getDB();
   const uid = getActiveUserId();
-  const defaultIds = await Promise.all(DEFAULT_CATEGORIES.map((c) => defaultCategoryId(getActiveDBUid(), c.name)));
-  await db.transaction('rw', [db.cats, db.meta, db.users], async () => {
-    if ((await db.cats.count()) === 0) {
-      // updatedAt 1: pushed once, but any later edit/delete from another device wins (LWW).
-      await db.cats.bulkPut(
-        DEFAULT_CATEGORIES.map((c, i) => ({
-          id: defaultIds[i],
-          updatedAt: 1,
-          name: c.name,
-          sortOrder: i,
-          isSystem: c.name === 'Other',
-          subcategories: c.subcategories,
-        })),
-      );
-    }
+  await db.transaction('rw', [db.meta, db.users], async () => {
     const existingMeta = await db.meta.get('main');
     if (!existingMeta) {
       await db.meta.put({ id: 'main', lastUsedLabel: null, activeUserId: uid, schemaVersion: SCHEMA_VERSION });
@@ -457,7 +439,7 @@ export async function addSpend(
   targetDate?: string,
 ): Promise<Entry> {
   const db = getDB();
-  const cats = (await db.cats.toArray()).filter(alive);
+  const cats = await loadCategories(db);
   const resolved =
     spend.category != null
       ? { category: spend.category, subcategory: spend.subcategory ?? null }
@@ -680,45 +662,62 @@ export async function moveLeftoverToSavings(cycleId: string): Promise<void> {
   }
 }
 
-/* ---------- categories ---------- */
+/* ---------- categories ----------
+ * Defaults are shared (DEFAULT_CATEGORIES, stored once). A user's `cats` rows hold only
+ * what differs: categories they created, defaults they removed, subcategories added/removed. */
 
-async function reindexCategories() {
-  const db = getDB();
-  const all = (await db.cats.toArray()).filter(alive);
-  all.sort((a, b) => Number(a.isSystem) - Number(b.isSystem) || a.sortOrder - b.sortOrder);
-  const now = Date.now();
-  await Promise.all(
-    all.map((c, i) => (c.sortOrder === i ? null : db.cats.update(c.id, { sortOrder: i, updatedAt: now }))),
-  );
+/** The user's override row for a default category, created on first change. */
+async function overrideFor(db: StashDB, baseId: string, now: number) {
+  const rows = (await db.cats.where('baseId').equals(baseId).toArray()).sort((a, b) => b.updatedAt - a.updatedAt);
+  if (rows[0]) return rows[0];
+  const d = DEFAULT_CATEGORIES.find((x) => x.key === baseId)!;
+  const row = {
+    id: uuid(), updatedAt: now, name: d.name, sortOrder: 0, isSystem: !!d.isSystem,
+    subcategories: [] as string[], baseId, subAdded: [] as string[], subRemoved: [] as string[],
+  };
+  await db.cats.add(row);
+  return row;
 }
 
 export async function addCategory(name: string): Promise<string | null> {
   const db = getDB();
-  const all = (await db.cats.toArray()).filter(alive);
+  const all = await loadCategories(db);
   const trimmed = name.trim();
   const err = validateName(trimmed, all.map((c) => c.name));
   if (err) return err;
   await db.cats.add({
-    id: uuid(),
-    updatedAt: Date.now(),
-    name: trimmed,
-    sortOrder: all.length,
-    isSystem: false,
-    subcategories: [],
+    id: uuid(), updatedAt: Date.now(), name: trimmed, sortOrder: all.length, isSystem: false,
+    subcategories: [], baseId: null, subAdded: [], subRemoved: [],
   });
-  await reindexCategories();
   requestSync();
   return null;
 }
 
 export async function addSubcategory(catId: string, name: string): Promise<string | null> {
   const db = getDB();
-  const c = await db.cats.get(catId);
-  if (!c || c.deletedAt != null) return 'That category is gone.';
+  const c = (await loadCategories(db)).find((x) => x.id === catId);
+  if (!c) return 'That category is gone.';
   const trimmed = name.trim();
   const err = validateName(trimmed, c.subcategories);
   if (err) return err;
-  await db.cats.update(catId, { subcategories: [...c.subcategories, trimmed], updatedAt: Date.now() });
+  const now = Date.now();
+  await db.transaction('rw', db.cats, async () => {
+    if (c.baseId) {
+      const o = await overrideFor(db, c.baseId, now);
+      const d = DEFAULT_CATEGORIES.find((x) => x.key === c.baseId)!;
+      // re-adding a default subcategory just un-removes it
+      const inDefault = d.subcategories.includes(trimmed);
+      await db.cats.update(o.id, {
+        subRemoved: o.subRemoved.filter((x) => x !== trimmed),
+        subAdded: inDefault ? o.subAdded : [...o.subAdded, trimmed],
+        deletedAt: null,
+        updatedAt: now,
+      });
+    } else {
+      const row = await db.cats.get(catId);
+      if (row) await db.cats.update(catId, { subcategories: [...row.subcategories, trimmed], updatedAt: now });
+    }
+  });
   requestSync();
   return null;
 }
@@ -727,10 +726,21 @@ export async function addSubcategory(catId: string, name: string): Promise<strin
 export async function removeSubcategory(catId: string, name: string): Promise<void> {
   const db = getDB();
   await db.transaction('rw', [db.cats, db.transactions], async () => {
-    const c = await db.cats.get(catId);
+    const c = (await loadCategories(db)).find((x) => x.id === catId);
     if (!c) return;
     const now = Date.now();
-    await db.cats.update(catId, { subcategories: c.subcategories.filter((s) => s !== name), updatedAt: now });
+    if (c.baseId) {
+      const o = await overrideFor(db, c.baseId, now);
+      const d = DEFAULT_CATEGORIES.find((x) => x.key === c.baseId)!;
+      await db.cats.update(o.id, {
+        subAdded: o.subAdded.filter((x) => x !== name),
+        subRemoved: d.subcategories.includes(name) && !o.subRemoved.includes(name) ? [...o.subRemoved, name] : o.subRemoved,
+        updatedAt: now,
+      });
+    } else {
+      const row = await db.cats.get(catId);
+      if (row) await db.cats.update(catId, { subcategories: row.subcategories.filter((x) => x !== name), updatedAt: now });
+    }
     await db.transactions
       .where('type')
       .equals(c.name)
@@ -744,8 +754,8 @@ export async function removeSubcategory(catId: string, name: string): Promise<vo
 export async function removeCategory(catId: string): Promise<void> {
   const db = getDB();
   await db.transaction('rw', [db.cats, db.transactions, db.evts], async () => {
-    const c = await db.cats.get(catId);
-    if (!c || c.isSystem || c.deletedAt != null) return;
+    const c = (await loadCategories(db)).find((x) => x.id === catId);
+    if (!c || c.isSystem) return;
     const now = Date.now();
     await db.transactions
       .where('type')
@@ -757,9 +767,13 @@ export async function removeCategory(catId: string): Promise<void> {
         await db.evts.update(ev.id, { categories: ev.categories.filter((x) => x !== c.name), updatedAt: now });
       }
     }
-    await db.cats.update(catId, { deletedAt: now, updatedAt: now });
+    if (c.baseId) {
+      const o = await overrideFor(db, c.baseId, now);
+      await db.cats.update(o.id, { deletedAt: now, updatedAt: now });
+    } else {
+      await db.cats.update(catId, { deletedAt: now, updatedAt: now });
+    }
   });
-  await reindexCategories();
   requestSync();
 }
 
@@ -854,7 +868,7 @@ export async function fillSample(now: Date = new Date()): Promise<void> {
   const today = todayISO(now);
   const startDate = addDays(today, -SAMPLE_DAYS);
   const spends = generateSampleSpends(startDate, SAMPLE_DAYS);
-  const cats = (await db.cats.toArray()).filter(alive);
+  const cats = await loadCategories(db);
   const stamp = Date.now();
 
   await db.transaction(

@@ -48,7 +48,7 @@ import {
   mergeAccidentalCycle,
 } from '@/db/queries';
 import { getDB } from '@/db/schema';
-import { toEntry } from '@/db/queries';
+import { loadCategories, toEntry } from '@/db/queries';
 import { buildCalendar, buildMonthCalendar, compactINR, dayTotals, dayTotalsByDate, searchEntries } from '@/lib/history';
 import { sumItems } from '@/lib/budget';
 import { dateOfDay, todayISO } from '@/lib/dates';
@@ -194,7 +194,7 @@ describe('database queries', () => {
     const cycle = (await db.cycles.orderBy('startDate').last())!;
     const e = await addSpend(cycle, { amount: 100, label: 'Chai' });
 
-    const food = (await db.cats.where('name').equals('Food').first())!;
+    const food = (await loadCategories()).find((c) => c.name === 'Food')!;
     await removeSubcategory(food.id!, 'Chai & snacks');
     expect((await db.transactions.get(e.id))?.subtype).toBeNull();
     expect((await db.transactions.get(e.id))?.type).toBe('Food');
@@ -203,7 +203,7 @@ describe('database queries', () => {
     expect((await db.transactions.get(e.id))?.type).toBe('Other');
 
     expect(await addCategory('Pets')).toBeNull();
-    const pets = (await db.cats.where('name').equals('Pets').first())!;
+    const pets = (await loadCategories()).find((c) => c.name === 'Pets')!;
     expect(await addSubcategory(pets.id!, 'Vet')).toBeNull();
   });
 

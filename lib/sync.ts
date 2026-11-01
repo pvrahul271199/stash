@@ -1,5 +1,5 @@
 import Dexie from 'dexie';
-import { getDB, dbNameFor, GUEST_UID, type Category, type Cycle, type Plan, type StashDB, type StashEvent, type Txn } from '@/db/schema';
+import { getDB, dbNameFor, GUEST_UID, type CategoryRow, type Cycle, type Plan, type StashDB, type StashEvent, type Txn } from '@/db/schema';
 import { getAuth, getAccessToken } from './auth';
 import { getSupabase, supabaseEnv } from './supabaseClient';
 import { decodeBase64Username, encodeUsernameToBase64 } from './user';
@@ -154,14 +154,17 @@ export const MAPPERS = {
   },
   categories: {
     local: 'cats' as const,
-    toRemote: (c: Category) => ({
+    toRemote: (c: CategoryRow) => ({
       ...common(c),
       name: c.name,
       sort_order: c.sortOrder,
       is_system: c.isSystem,
       subcategories: c.subcategories,
+      base_id: c.baseId,
+      sub_added: c.subAdded,
+      sub_removed: c.subRemoved,
     }),
-    toLocal: (r: Remote): Category => ({
+    toLocal: (r: Remote): CategoryRow => ({
       id: r.id,
       updatedAt: r.client_updated_at,
       deletedAt: ms(r.deleted_at),
@@ -169,6 +172,9 @@ export const MAPPERS = {
       sortOrder: r.sort_order as number,
       isSystem: !!r.is_system,
       subcategories: (r.subcategories as string[]) ?? [],
+      baseId: (r.base_id as string | null) ?? null,
+      subAdded: (r.sub_added as string[]) ?? [],
+      subRemoved: (r.sub_removed as string[]) ?? [],
     }),
   },
   events: {

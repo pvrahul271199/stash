@@ -159,8 +159,14 @@ create table if not exists public.categories (
   name text not null,
   sort_order int not null default 0,
   is_system boolean not null default false,
-  subcategories jsonb not null default '[]'::jsonb
+  subcategories jsonb not null default '[]'::jsonb,
+  base_id text,
+  sub_added jsonb not null default '[]'::jsonb,
+  sub_removed jsonb not null default '[]'::jsonb
 );
+alter table public.categories add column if not exists base_id text;
+alter table public.categories add column if not exists sub_added jsonb not null default '[]'::jsonb;
+alter table public.categories add column if not exists sub_removed jsonb not null default '[]'::jsonb;
 create index if not exists idx_categories_user_updated on public.categories (user_id, updated_at);
 drop trigger if exists trg_categories_lww on public.categories;
 create trigger trg_categories_lww before update on public.categories
@@ -207,6 +213,40 @@ create trigger trg_feature_data_lww before update on public.feature_data
 drop trigger if exists trg_feature_data_touch on public.feature_data;
 create trigger trg_feature_data_touch before insert or update on public.feature_data
   for each row execute function public.stash_touch();
+
+-- ---------- default_categories (shared by every user, stored once) ----------
+-- public.categories holds only a user's own additions and their changes to these defaults
+-- (base_id = default key; deleted_at = removed; sub_added / sub_removed = subcategory diffs).
+create table if not exists public.default_categories (
+  key text primary key,
+  name text not null,
+  sort_order int not null,
+  is_system boolean not null default false,
+  subcategories jsonb not null default '[]'::jsonb
+);
+insert into public.default_categories (key, name, sort_order, is_system, subcategories) values
+  ('food', 'Food', 0, false, '["Chai & snacks","Breakfast","Lunch","Dinner","Delivery"]'),
+  ('travel', 'Travel', 1, false, '["Auto","Metro","Cab","Fuel"]'),
+  ('home', 'Home', 2, false, '["Groceries","Household"]'),
+  ('bills', 'Bills', 3, false, '["Recharge","Subscriptions"]'),
+  ('health', 'Health', 4, false, '["Medicine","Doctor"]'),
+  ('shopping', 'Shopping', 5, false, '["Clothes","Gifts"]'),
+  ('fun', 'Fun', 6, false, '["Movies","Outings"]'),
+  ('other', 'Other', 7, true, '[]')
+on conflict (key) do update set
+  name = excluded.name, sort_order = excluded.sort_order,
+  is_system = excluded.is_system, subcategories = excluded.subcategories;
+alter table public.default_categories enable row level security;
+revoke all on public.default_categories from anon;
+revoke insert, update, delete on public.default_categories from authenticated;
+grant select on public.default_categories to authenticated;
+drop policy if exists default_categories_read on public.default_categories;
+create policy default_categories_read on public.default_categories for select to authenticated using (true);
+
+-- Old full per-user copies of the defaults are obsolete: tombstone any that match a default exactly.
+update public.categories c set deleted_at = now(), client_updated_at = (extract(epoch from now()) * 1000)::bigint
+ where c.base_id is null and c.deleted_at is null
+   and exists (select 1 from public.default_categories d where lower(d.name) = lower(c.name) and d.subcategories = c.subcategories);
 
 -- ---------- row level security ----------
 alter table public.profiles enable row level security;

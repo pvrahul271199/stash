@@ -40,7 +40,7 @@ Open [http://localhost:3000](http://localhost:3000). On desktop browsers, Stash 
 
 ### Unit & Database Tests (Vitest)
 
-Runs 101 tests covering budget math, overspend/underspend spreading, big spend rules, calendar sync, catch-up estimates, pace/projection, sample generation, CSV formatting, and Dexie queries:
+Runs 103 tests covering budget math, overspend/underspend spreading, big spend rules, calendar sync, catch-up estimates, pace/projection, sample generation, CSV formatting, and Dexie queries:
 
 ```bash
 npm test

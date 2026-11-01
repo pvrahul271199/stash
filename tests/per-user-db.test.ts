@@ -145,22 +145,73 @@ describe('day rows stay derived in one transaction', () => {
   });
 });
 
-describe('default categories', () => {
-  it('seeds the same ids on every device for a user, and different ids per user', async () => {
-    const { ensureSeed } = await import('@/db/queries');
+describe('layered categories', () => {
+  it('a new user stores no category rows; changes store only the difference', async () => {
+    const { ensureSeed, loadCategories, addCategory, addSubcategory, removeSubcategory, removeCategory } = await import('@/db/queries');
     await Dexie.delete('stash-cat-a');
-    await Dexie.delete('stash-cat-b');
     await openUserDB('cat-a');
     await ensureSeed();
-    const a1 = (await getDB().cats.toArray()).map((c) => c.id).sort();
-    expect(a1.length).toBeGreaterThanOrEqual(8);
+    expect(await getDB().cats.count()).toBe(0);
+    const base = await loadCategories();
+    expect(base.map((c) => c.name)).toEqual(['Food', 'Travel', 'Home', 'Bills', 'Health', 'Shopping', 'Fun', 'Other']);
+
+    const food = base.find((c) => c.name === 'Food')!;
+    await addSubcategory(food.id, 'Biryani');
+    await removeSubcategory(food.id, 'Lunch');
+    await addCategory('Pets');
+    await removeCategory(base.find((c) => c.name === 'Fun')!.id);
+
+    const rows = await getDB().cats.toArray();
+    expect(rows).toHaveLength(3); // Food override, Fun removal, Pets
+    const after = await loadCategories();
+    expect(after.find((c) => c.name === 'Food')!.subcategories).toContain('Biryani');
+    expect(after.find((c) => c.name === 'Food')!.subcategories).not.toContain('Lunch');
+    expect(after.some((c) => c.name === 'Fun')).toBe(false);
+    expect(after.map((c) => c.name).slice(-2)).toEqual(['Pets', 'Other']);
+
+    // another user is unaffected and has no rows
     await openUserDB('cat-b');
     await ensureSeed();
-    const b = (await getDB().cats.toArray()).map((c) => c.id);
-    expect(b.some((id) => a1.includes(id))).toBe(false);
-    await Dexie.delete('stash-cat-a');
-    await openUserDB('cat-a');
-    await ensureSeed();
-    expect((await getDB().cats.toArray()).map((c) => c.id).sort()).toEqual(a1);
+    expect(await getDB().cats.count()).toBe(0);
+    expect((await loadCategories()).find((c) => c.name === 'Food')!.subcategories).toContain('Lunch');
+  });
+
+  it('v7 upgrade turns full category copies into overrides', async () => {
+    const { StashDB } = await import('@/db/schema');
+    const name = 'v6-cats-test';
+    await Dexie.delete(name);
+    const v6 = new Dexie(name);
+    v6.version(6).stores({
+      users: 'userId, username, updatedAt',
+      meta: 'id',
+      plans: 'id, updatedAt',
+      cycles: 'id, startDate, updatedAt',
+      transactions: 'id, cycleId, txnDate, [cycleId+txnDate], type, event, updatedAt',
+      dayRows: '[cycleId+day], cycleId',
+      cats: 'id, name, updatedAt',
+      evts: 'id, name, updatedAt',
+    });
+    await v6.open();
+    const row = (id: string, n: string, subs: string[], extra: object = {}) => ({
+      id, updatedAt: 1, name: n, sortOrder: 0, isSystem: false, subcategories: subs, ...extra,
+    });
+    await v6.table('cats').bulkAdd([
+      row('1', 'Food', ['Chai & snacks', 'Breakfast', 'Lunch', 'Dinner', 'Delivery']), // unchanged
+      row('2', 'Travel', ['Auto', 'Metro', 'Cab', 'Fuel', 'Flight']), // added Flight
+      row('3', 'Home', ['Groceries'], {}), // removed Household
+      row('4', 'Fun', ['Movies', 'Outings'], { deletedAt: 5 }), // user removed
+      row('5', 'Pets', ['Vet']), // user created
+    ]);
+    v6.close();
+    const db = new StashDB(name);
+    await db.open();
+    const rows = await db.cats.toArray();
+    const byId = Object.fromEntries(rows.map((r) => [r.id, r]));
+    expect(byId['1'].deletedAt).toBeTruthy();
+    expect(byId['2']).toMatchObject({ baseId: 'travel', subAdded: ['Flight'], subRemoved: [] });
+    expect(byId['3']).toMatchObject({ baseId: 'home', subRemoved: ['Household'] });
+    expect(byId['4']).toMatchObject({ baseId: 'fun' });
+    expect(byId['5']).toMatchObject({ baseId: null, subcategories: ['Vet'] });
+    db.close();
   });
 });

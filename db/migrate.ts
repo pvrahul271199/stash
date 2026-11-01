@@ -1,7 +1,8 @@
 import Dexie, { type Transaction } from 'dexie';
 import { rollupCycle } from '@/lib/budget';
+import { DEFAULT_CATEGORIES } from './schema';
 import { dateOfDay } from '@/lib/dates';
-import type { Category, Cycle, DayRow, StashEvent, Txn, Plan } from './schema';
+import type { CategoryRow, Cycle, DayRow, StashEvent, Txn, Plan } from './schema';
 import type { LegacyCategory, LegacyCycle, LegacyDayRow, LegacyEntry, LegacyEvent, LegacyPlan } from './legacy';
 import { SCHEMA_VERSION, dbNameFor, GUEST_UID, type Meta } from './schema';
 import { LegacyStashDB } from './legacy';
@@ -223,8 +224,9 @@ export function transformV4(rows: V4Rows, newId: () => string = () => crypto.ran
     c.fromSavingsTotal = r.fromSavingsTotal;
     for (const d of r.days) dayRows.push({ cycleId: c.id, day: d.day, allowanceAtStart: d.allowanceAtStart, spent: d.spent, status: d.status });
   }
-  const categories: Category[] = rows.categories.map((c) => ({
+  const categories: CategoryRow[] = rows.categories.map((c) => ({
     id: newId(), updatedAt: 0, name: c.name, sortOrder: c.sortOrder, isSystem: c.isSystem, subcategories: c.subcategories,
+    baseId: null, subAdded: [], subRemoved: [],
   }));
   const events: StashEvent[] = rows.events.map((e) => ({
     id: newId(), updatedAt: e.createdAt, name: e.name, note: e.note ?? null, categories: e.categories, createdAt: e.createdAt,
@@ -275,4 +277,32 @@ export async function initDB(): Promise<void> {
 /** Used by tests / future claim: base64 id of a legacy username. */
 export function legacyKeyFor(username: string): string {
   return `legacy-${encodeUsernameToBase64(username)}`;
+}
+
+/**
+ * v7 upgrade: full category copies become overrides. A row equal to a default is dropped
+ * (tombstoned so any copy already on the server is removed); differences become
+ * subAdded/subRemoved; other names stay as user-created categories.
+ */
+export async function migrateCatsToOverrides(tx: Transaction): Promise<void> {
+  const table = tx.table('cats');
+  const rows = (await table.toArray()) as (Partial<CategoryRow> & { id: string; name: string; subcategories: string[] })[];
+  const now = Date.now();
+  for (const r of rows) {
+    if (r.baseId !== undefined) continue; // already new-shape
+    const d = DEFAULT_CATEGORIES.find((x) => x.name.toLowerCase() === r.name.toLowerCase());
+    if (!d) {
+      await table.put({ ...r, baseId: null, subAdded: [], subRemoved: [] });
+      continue;
+    }
+    const subAdded = r.subcategories.filter((x) => !d.subcategories.includes(x));
+    const subRemoved = d.subcategories.filter((x) => !r.subcategories.includes(x));
+    if (r.deletedAt != null) {
+      await table.put({ ...r, baseId: d.key, subAdded: [], subRemoved: [] }); // user had removed it
+    } else if (subAdded.length || subRemoved.length) {
+      await table.put({ ...r, baseId: d.key, subAdded, subRemoved, updatedAt: now });
+    } else {
+      await table.put({ ...r, baseId: null, subAdded: [], subRemoved: [], deletedAt: now, updatedAt: now });
+    }
+  }
 }

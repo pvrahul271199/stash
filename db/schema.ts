@@ -1,7 +1,8 @@
 import Dexie, { type Table } from 'dexie';
 import { useSyncExternalStore } from 'react';
-import { migrateV4ToV5 } from './migrate';
+import { migrateV4ToV5, migrateCatsToOverrides } from './migrate';
 import { V4_STORES } from './legacy';
+import type { DefaultCategory } from '@/lib/categories';
 
 export interface UserRecord {
   /** Primary key: Base64-encoded username (e.g. "cmFodWw="). */
@@ -105,11 +106,25 @@ export interface DayRow {
   status: 'closed' | 'estimated';
 }
 
-export interface Category extends Syncable {
+/** Stored per-user row: a category the user created, or an override of a shared default (baseId). */
+export interface CategoryRow extends Syncable {
   name: string;
   sortOrder: number;
   isSystem: boolean;
   subcategories: string[];
+  baseId: string | null;
+  subAdded: string[];
+  subRemoved: string[];
+}
+
+/** Resolved view (defaults + this user's changes) used by the UI. */
+export interface Category {
+  id: string;
+  name: string;
+  sortOrder: number;
+  isSystem: boolean;
+  subcategories: string[];
+  baseId: string | null;
 }
 
 export interface StashEvent extends Syncable {
@@ -142,7 +157,7 @@ export interface Entry {
 export const PAYMENT_MODES = ['UPI', 'Card', 'Cash'] as const;
 export type PaymentMode = (typeof PAYMENT_MODES)[number];
 
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 export class StashDB extends Dexie {
   users!: Table<UserRecord, string>;
@@ -151,7 +166,7 @@ export class StashDB extends Dexie {
   cycles!: Table<Cycle, string>;
   transactions!: Table<Txn, string>;
   dayRows!: Table<DayRow, [string, number]>;
-  cats!: Table<Category, string>;
+  cats!: Table<CategoryRow, string>;
   evts!: Table<StashEvent, string>;
 
   constructor(name = dbNameFor(GUEST_UID)) {
@@ -180,18 +195,22 @@ export class StashDB extends Dexie {
         events: null,
       })
       .upgrade((tx) => migrateV4ToV5(tx));
+    // v7: categories become shared defaults + per-user overrides (rows only for adds/removals).
+    this.version(7)
+      .stores({ cats: 'id, name, updatedAt, baseId' })
+      .upgrade((tx) => migrateCatsToOverrides(tx));
   }
 }
 
-export const DEFAULT_CATEGORIES: { name: string; subcategories: string[] }[] = [
-  { name: 'Food', subcategories: ['Chai & snacks', 'Breakfast', 'Lunch', 'Dinner', 'Delivery'] },
-  { name: 'Travel', subcategories: ['Auto', 'Metro', 'Cab', 'Fuel'] },
-  { name: 'Home', subcategories: ['Groceries', 'Household'] },
-  { name: 'Bills', subcategories: ['Recharge', 'Subscriptions'] },
-  { name: 'Health', subcategories: ['Medicine', 'Doctor'] },
-  { name: 'Shopping', subcategories: ['Clothes', 'Gifts'] },
-  { name: 'Fun', subcategories: ['Movies', 'Outings'] },
-  { name: 'Other', subcategories: [] },
+export const DEFAULT_CATEGORIES: DefaultCategory[] = [
+  { key: 'food', name: 'Food', subcategories: ['Chai & snacks', 'Breakfast', 'Lunch', 'Dinner', 'Delivery'] },
+  { key: 'travel', name: 'Travel', subcategories: ['Auto', 'Metro', 'Cab', 'Fuel'] },
+  { key: 'home', name: 'Home', subcategories: ['Groceries', 'Household'] },
+  { key: 'bills', name: 'Bills', subcategories: ['Recharge', 'Subscriptions'] },
+  { key: 'health', name: 'Health', subcategories: ['Medicine', 'Doctor'] },
+  { key: 'shopping', name: 'Shopping', subcategories: ['Clothes', 'Gifts'] },
+  { key: 'fun', name: 'Fun', subcategories: ['Movies', 'Outings'] },
+  { key: 'other', name: 'Other', subcategories: [], isSystem: true },
 ];
 
 export const GUEST_UID = 'default';

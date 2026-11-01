@@ -15,7 +15,7 @@ Browser (static export, no server)
         Supabase PostgREST  /rest/v1/stash_*   (RLS = allow all)
 ```
 
-## 2. Data model (Dexie v6, `db/schema.ts`)
+## 2. Data model (Dexie v7, `db/schema.ts`)
 
 One database **per user**: `stash-<auth uid>`; guest = `stash-default` (never synced). All rows have uuid `id`, `updatedAt` (client ms) and optional `deletedAt` (tombstone; reads filter it out).
 
@@ -26,7 +26,7 @@ One database **per user**: `stash-<auth uid>`; guest = `stash-default` (never sy
 | `cycles` | `id` | startDate, totalDays, planAmount, `currentDay` (cursor), `estimatedDays[]`; `pool`/`fromSavingsTotal` are caches written by `recompute` |
 | `transactions` | `id` | cycleId\|null, `txnDate`, amount, type, subtype, label, event, payment, note, fromSavings, adjustsPool, isEstimate, hour, createdAt. Day is derived (`dayOfTxn`) |
 | `dayRows` | `[cycleId+day]` | derived by `recompute`, never synced |
-| `cats`, `evts` | `id` | categories / events |
+| `cats`, `evts` | `id` | `cats` holds only this user's categories and changes to the shared defaults (`baseId`, `subAdded`, `subRemoved`, tombstone = default removed); defaults live once in `DEFAULT_CATEGORIES` and server table `default_categories`. `loadCategories` resolves them. Events are plain rows. |
 
 v1-v4 live in `db/legacy.ts`. v5 added the tables above, v6 drops the v4 tables; both upgrades run `migrateV4ToV5` (derived pool wins, old value kept in `meta.migrationReport`). The old shared `stash` DB is split into `stash-default` and dormant `stash-legacy-*` DBs by `db/migrate.ts`.
 
