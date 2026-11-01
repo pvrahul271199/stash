@@ -69,6 +69,10 @@ import { getDB, openUserDB } from '@/db/schema';
 import { applyRemote, requestSync, syncNow } from '@/lib/sync';
 import { supabaseSync } from '@/lib/sync';
 
+const settle = async () => {
+  await new Promise((r) => setTimeout(r, 4)); // writes in the same ms as the push cutoff wait for the next sync
+  return syncNow();
+};
 const plan = { income: 80000, bills: 25000, savings: 15000, monthLength: 30 };
 let n = 0;
 
@@ -99,23 +103,23 @@ describe('sync engine', () => {
     await createPlanAndCycle(plan, '2026-10-01');
     const cycle = (await getDB().cycles.toArray())[0];
     await addSpend(cycle, { amount: 90, label: 'Tea', category: 'Food' });
-    await syncNow();
+    await settle();
     const posts = calls.filter((c) => c.method === 'POST').map((c) => c.table);
     expect(posts.indexOf('plans')).toBeLessThan(posts.indexOf('transactions'));
     expect(posts.indexOf('cycles')).toBeLessThan(posts.indexOf('transactions'));
     calls.length = 0;
-    await syncNow();
+    await settle();
     expect(calls.filter((c) => c.method === 'POST')).toHaveLength(0);
     await addSpend(cycle, { amount: 10, label: 'Tea', category: 'Food' });
     calls.length = 0;
-    await syncNow();
+    await settle();
     const again = calls.filter((c) => c.method === 'POST');
     expect(again.map((c) => c.table)).toEqual(['transactions']);
   });
 
   it('20 rapid writes give one sync with one request in flight', async () => {
     await createPlanAndCycle(plan, '2026-10-01');
-    await syncNow();
+    await settle();
     calls.length = 0;
     maxInFlight = 0;
     const cycle = (await getDB().cycles.toArray())[0];
@@ -135,10 +139,10 @@ describe('sync engine', () => {
     const cycle = (await getDB().cycles.toArray())[0];
     await addSpend(cycle, { amount: 5, label: 'x', category: 'Food' });
     failTable = 'transactions';
-    await expect(syncNow()).rejects.toThrow(/Sync failed/);
+    await expect(settle()).rejects.toThrow(/Sync failed/);
     expect((await getDB().meta.get('main'))?.lastPushedAt).toBeUndefined();
     failTable = null;
-    await syncNow();
+    await settle();
     expect(server.get('transactions')?.size).toBe(1);
     expect((await getDB().meta.get('main'))?.lastPushedAt).toBeGreaterThan(0);
   });
@@ -147,19 +151,19 @@ describe('sync engine', () => {
     await createPlanAndCycle(plan, '2026-10-01');
     const cycle = (await getDB().cycles.toArray())[0];
     const e = await addSpend(cycle, { amount: 200, label: 'x', category: 'Food' });
-    await syncNow();
+    await settle();
     await removeEntry(e.id);
-    await syncNow();
+    await settle();
     expect(server.get('transactions')!.get(e.id)!.deleted_at).toBeTruthy();
 
     // another device deletes a second spend
     const e2 = await addSpend(cycle, { amount: 50, label: 'y', category: 'Food' });
-    await syncNow();
+    await settle();
     const row = server.get('transactions')!.get(e2.id)!;
     row.deleted_at = new Date().toISOString();
     row.client_updated_at += 10;
     row.updated_at = new Date(clock++).toISOString();
-    await syncNow();
+    await settle();
     expect((await getDB().transactions.get(e2.id))?.deletedAt).toBeTruthy();
   });
 
@@ -197,7 +201,7 @@ describe('sync engine', () => {
     await createPlanAndCycle(plan, '2026-10-01');
     server.clear();
     const before = await getDB().cycles.count();
-    await syncNow(); // pushes, then pulls its own data back
+    await settle(); // pushes, then pulls its own data back
     expect(await getDB().cycles.count()).toBe(before);
   });
 
@@ -207,7 +211,7 @@ describe('sync engine', () => {
     await getDB().cycles.toCollection().modify({ updatedAt: Date.now() });
     refreshSession.mockClear();
     unauthorizedOnce = true;
-    await syncNow();
+    await settle();
     expect(refreshSession).toHaveBeenCalledTimes(1);
     expect(server.get('plans')?.size).toBe(1);
   });
