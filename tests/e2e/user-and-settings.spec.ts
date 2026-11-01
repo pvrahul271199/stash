@@ -54,8 +54,8 @@ test.describe('User Tab & Preferences Flows', () => {
     await page.getByRole('button', { name: 'Continue' }).click(); // Savings
     await page.getByRole('button', { name: 'See my plan' }).click(); // Summary
 
-    // Start month with updated plan
-    await page.getByRole('button', { name: 'Start my month' }).click();
+    // Save updated plan
+    await page.getByRole('button', { name: /Save updated plan|Start my month/i }).click();
     await expect(page.getByText('You can still spend today')).toBeVisible();
   });
 

@@ -1,9 +1,23 @@
 /** Pure date helpers. All dates are local, ISO yyyy-mm-dd. No timezone/DST surprises:
  *  day arithmetic goes through UTC midnight of the y/m/d triple. */
 
-const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const WEEKDAYS_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+export const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+export const WEEKDAYS_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+export const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+export const MONTHS_LONG = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+];
 
 const MS_DAY = 86_400_000;
 
@@ -74,6 +88,12 @@ export function formatWithWeekday(iso: string): string {
 export function formatLong(iso: string): string {
   const wd = new Date(utc(iso)).getUTCDay();
   return `${WEEKDAYS_LONG[wd]}, ${formatShort(iso)}`;
+}
+
+/** "October 2026" */
+export function formatMonthYear(year: number, month: number): string {
+  const m = Math.max(1, Math.min(12, month));
+  return `${MONTHS_LONG[m - 1]} ${year}`;
 }
 
 /** Last day of the cycle, as ISO. */
