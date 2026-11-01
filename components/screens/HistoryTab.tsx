@@ -234,68 +234,63 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: Cycle; plan?: P
       ) : (
         <>
           {/* Calendar Month & Year Navigation Header with Floating Overlay Picker */}
-          <div className="relative mt-4">
-            <div className="flex items-center justify-between rounded-note border border-line bg-tint/50 px-1.5 py-1">
-              <button
-                type="button"
-                aria-label="Previous month"
-                onClick={() => {
-                  if (viewMonth === 1) {
-                    setViewMonth(12);
-                    setViewYear((y) => y - 1);
-                  } else setViewMonth((m) => m - 1);
-                }}
-                className="flex h-9 w-9 min-h-0 items-center justify-center rounded-full text-soft transition-colors hover:bg-white hover:text-ink active:scale-90"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="m15 18-6-6 6-6" />
-                </svg>
-              </button>
+          <div className="relative mt-3">
+            <div className="flex items-center justify-between">
               <button
                 type="button"
                 onClick={() => setPickerOpen((o) => !o)}
                 aria-expanded={pickerOpen}
                 aria-label="Select month and year"
-                className="group flex items-center gap-1.5 rounded-full px-3 py-1.5 transition-colors hover:bg-white active:scale-[0.99]"
+                className="-ml-1 flex items-center gap-1 rounded-md px-1 py-0.5 text-[15px] font-semibold text-ink active:opacity-70"
               >
-                <span className="text-[18px] font-semibold tracking-tight text-ink">
-                  {formatMonthYear(viewYear, viewMonth)}
-                </span>
-                <span
-                  className={`flex h-5 w-5 items-center justify-center rounded-full text-soft transition-transform duration-200 ${
-                    pickerOpen ? 'rotate-180 text-ink' : 'group-hover:text-ink'
-                  }`}
+                {formatMonthYear(viewYear, viewMonth)}
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className={`text-faint transition-transform ${pickerOpen ? 'rotate-180' : ''}`}
                   aria-hidden="true"
                 >
-                  <svg
-                    width="13"
-                    height="13"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="m6 9 6 6 6-6" />
-                  </svg>
-                </span>
-              </button>
-              <button
-                type="button"
-                aria-label="Next month"
-                onClick={() => {
-                  if (viewMonth === 12) {
-                    setViewMonth(1);
-                    setViewYear((y) => y + 1);
-                  } else setViewMonth((m) => m + 1);
-                }}
-                className="flex h-9 w-9 min-h-0 items-center justify-center rounded-full text-soft transition-colors hover:bg-white hover:text-ink active:scale-90"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="m9 18 6-6-6-6" />
+                  <path d="m6 9 6 6 6-6" />
                 </svg>
               </button>
+              <div className="flex items-center">
+                <button
+                  type="button"
+                  aria-label="Previous month"
+                  onClick={() => {
+                    if (viewMonth === 1) {
+                      setViewMonth(12);
+                      setViewYear((y) => y - 1);
+                    } else setViewMonth((m) => m - 1);
+                  }}
+                  className="flex h-7 w-7 min-h-0 items-center justify-center rounded-full text-faint hover:text-ink active:bg-tint"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="m15 18-6-6 6-6" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  aria-label="Next month"
+                  onClick={() => {
+                    if (viewMonth === 12) {
+                      setViewMonth(1);
+                      setViewYear((y) => y + 1);
+                    } else setViewMonth((m) => m + 1);
+                  }}
+                  className="flex h-7 w-7 min-h-0 items-center justify-center rounded-full text-faint hover:text-ink active:bg-tint"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="m9 18 6-6-6-6" />
+                  </svg>
+                </button>
+              </div>
             </div>
 
             {/* Quick Month & Year Picker Floating Overlay */}
@@ -311,7 +306,7 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: Cycle; plan?: P
                 <div
                   role="region"
                   aria-label="Month and year picker"
-                  className="absolute left-0 right-0 top-full z-30 mt-2 rounded-card border border-line bg-white/95 p-4 shadow-[0_18px_45px_-12px_rgba(30,27,75,0.24)] backdrop-blur-md transition-all"
+                  className="absolute left-0 right-0 top-full z-30 mt-1.5 rounded-card border border-line bg-white/95 p-3 shadow-[0_18px_45px_-12px_rgba(30,27,75,0.24)] backdrop-blur-md transition-all"
                 >
                   <div className="flex items-center justify-between border-b border-line pb-3">
                     <span className="text-[12px] font-semibold text-soft">Choose Month & Year</span>
@@ -359,7 +354,7 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: Cycle; plan?: P
                       </button>
                     </div>
                   </div>
-                  <div className="mt-3 grid grid-cols-4 gap-2">
+                  <div className="mt-2 grid grid-cols-4 gap-1.5">
                     {MONTHS.map((mName, idx) => {
                       const mNum = idx + 1;
                       const isCurrent = mNum === viewMonth;
@@ -371,7 +366,7 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: Cycle; plan?: P
                             setViewMonth(mNum);
                             setPickerOpen(false);
                           }}
-                          className={`rounded-key py-2.5 text-[12px] font-medium transition-all ${
+                          className={`rounded-key py-2 text-[12px] font-medium transition-all ${
                             isCurrent
                               ? 'bg-ink font-semibold text-white shadow-xs'
                               : 'border border-line/60 bg-white text-ink hover:bg-tint active:scale-95'
