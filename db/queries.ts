@@ -1,9 +1,10 @@
 'use client';
-import { useLiveQuery } from 'dexie-react-hooks';
+import { useLiveQuery as useDexieLive } from 'dexie-react-hooks';
 import {
   DEFAULT_CATEGORIES,
   SCHEMA_VERSION,
   getDB,
+  useActiveUid,
   type Category,
   type Cycle,
   type Entry,
@@ -25,7 +26,7 @@ import {
   type PlanInput,
 } from '@/lib/budget';
 import { resolveLabel } from '@/lib/suggestions';
-import { addDays, calendarDay, dateOfDay, todayISO } from '@/lib/dates';
+import { addDays, calendarDay, dateOfDay, daysBetween, todayISO } from '@/lib/dates';
 import { DEFAULT_SAMPLE_PLAN, SAMPLE_DAYS, generateSampleSpends } from '@/lib/sample';
 import { buildCSV, type CsvRow } from '@/lib/csv';
 import { validateName } from '@/lib/categories';
@@ -33,6 +34,7 @@ import { getStoredCurrencyCode } from '@/lib/currency';
 import {
   buildUserProfile,
   deleteRemoteCategory,
+  deleteRemoteCycle,
   deleteRemoteEntry,
   deleteRemoteEvent,
   getActiveUserId,
@@ -43,6 +45,14 @@ import {
 } from '@/lib/sync';
 
 /* ---------- reads ---------- */
+
+/** Live query that re-runs when the active per-user DB switches. */
+function useLiveQuery<T>(q: () => Promise<T> | T, deps?: unknown[]): T | undefined;
+function useLiveQuery<T, D>(q: () => Promise<T> | T, deps: unknown[], def: D): T | D;
+function useLiveQuery<T, D>(q: () => Promise<T> | T, deps: unknown[] = [], def?: D) {
+  const uid = useActiveUid();
+  return useDexieLive(q, [uid, ...deps], def as D);
+}
 
 export interface Snapshot {
   plan: Plan | undefined;
@@ -228,14 +238,167 @@ async function startCycle(p: PlanInput, startDate: string, addPlan: boolean): Pr
   });
 }
 
-/** Saves the plan and starts a new cycle today. Also used by "Change my plan". */
+/** Saves the plan and starts a new cycle today. Used for initial onboarding. */
 export async function createPlanAndCycle(p: PlanInput, startDate: string = todayISO()): Promise<void> {
   await startCycle(p, startDate, true);
   await persistStorage();
-  if (supabaseSync.isEnabled()) {
-    await supabaseSync.push().catch(() => {});
+  scheduleSync(true);
+}
+
+/**
+ * Updates the plan and adjusts the active cycle's remaining pool.
+ * Does NOT restart the cycle or reset currentDay.
+ * The difference between the new total money to live on and the amounts
+ * already spent in previous days is divided equally across today and each of the next days.
+ */
+export async function updateActivePlan(p: PlanInput): Promise<void> {
+  const db = getDB();
+  const uid = getActiveUserId();
+  const currency = getStoredCurrencyCode();
+  const newMoneyToLiveOn = moneyToLiveOn(p);
+
+  await db.transaction('rw', db.plan, db.cycle, db.days, async () => {
+    // 1. Update or append the plan record
+    const latestPlan = await db.plan.orderBy('id').last();
+    if (latestPlan && latestPlan.id != null) {
+      await db.plan.update(latestPlan.id, {
+        income: Math.round(p.income),
+        bills: Math.round(p.bills),
+        savings: Math.round(p.savings),
+        monthLength: Math.round(p.monthLength),
+        billItems: p.billItems,
+        savingsItems: p.savingsItems,
+        currency,
+        userId: uid,
+        createdAt: Date.now(),
+      });
+    } else {
+      await db.plan.add({
+        ...p,
+        income: Math.round(p.income),
+        bills: Math.round(p.bills),
+        savings: Math.round(p.savings),
+        monthLength: Math.round(p.monthLength),
+        userId: uid,
+        currency,
+        createdAt: Date.now(),
+      });
+    }
+
+    // 2. Adjust the active cycle
+    const activeCycle = await db.cycle.orderBy('id').last();
+    if (activeCycle && activeCycle.id != null) {
+      // In Stash, activeCycle.pool is the money remaining from currentDay through the end of the month.
+      // Therefore, (activeCycle.planAmount - activeCycle.pool) is the exact amount consumed by past days.
+      const alreadySpent = Math.max(0, activeCycle.planAmount - activeCycle.pool);
+
+      // The new pool for the remaining days starting from today:
+      const newPool = newMoneyToLiveOn - alreadySpent;
+
+      await db.cycle.update(activeCycle.id, {
+        planAmount: newMoneyToLiveOn,
+        pool: newPool,
+        totalDays: p.monthLength,
+        userId: activeCycle.userId ?? uid,
+      });
+    }
+  });
+
+  await persistStorage();
+  scheduleSync(true);
+}
+
+export function useCanMergeCycle(): boolean {
+  const count = useLiveQuery(async () => {
+    return getDB().cycle.count();
+  }, []);
+  return (count ?? 0) > 1;
+}
+
+/**
+ * Merges an accidentally restarted cycle back into the original month.
+ * Moves any spends logged in the restarted cycle into the original cycle with
+ * their correct calendar day, updates the original cycle to today's active day,
+ * recalculates the remaining pool from the updated plan, and removes the accidental cycle.
+ */
+export async function mergeAccidentalCycle(): Promise<{ success: boolean; message: string; currentDay?: number }> {
+  const db = getDB();
+  const uid = getActiveUserId();
+  const cycles = await db.cycle.toArray();
+
+  if (cycles.length < 2) {
+    return { success: false, message: 'Only one cycle exists. No previous cycle to restore.' };
   }
-  scheduleSync();
+
+  // Sort cycles by id ascending: original cycle is the one before the latest
+  cycles.sort((a, b) => (a.id ?? 0) - (b.id ?? 0));
+  const latestCycle = cycles[cycles.length - 1];
+  const originalCycle = cycles[cycles.length - 2];
+
+  if (!latestCycle.id || !originalCycle.id) {
+    return { success: false, message: 'Cycle IDs are missing.' };
+  }
+
+  const latestPlan = (await db.plan.orderBy('id').last()) || (await db.plan.get(originalCycle.id));
+  const newMoneyToLiveOn = latestPlan ? moneyToLiveOn(latestPlan) : originalCycle.planAmount;
+  const monthLength = latestPlan?.monthLength ?? originalCycle.totalDays;
+
+  const today = todayISO();
+  const currentDayInOrig = Math.min(
+    monthLength,
+    Math.max(1, calendarDay(originalCycle.startDate, today, monthLength)),
+  );
+
+  await db.transaction('rw', db.cycle, db.entries, db.days, db.plan, async () => {
+    // 1. Move all entries from latestCycle into originalCycle with their calendar day
+    const latestEntries = await db.entries.where('cycleId').equals(latestCycle.id!).toArray();
+    for (const entry of latestEntries) {
+      const entryDate = entry.date || dateOfDay(latestCycle.startDate, entry.day);
+      const targetDay = Math.min(
+        monthLength,
+        Math.max(1, calendarDay(originalCycle.startDate, entryDate, monthLength)),
+      );
+      await db.entries.update(entry.id, {
+        cycleId: originalCycle.id!,
+        day: targetDay,
+        date: entryDate,
+        userId: uid,
+      });
+    }
+
+    // 2. Compute total non-savings spending on closed past days (< currentDayInOrig)
+    const closedDays = await db.days
+      .where('cycleId')
+      .equals(originalCycle.id!)
+      .filter((d) => d.day < currentDayInOrig)
+      .toArray();
+    const alreadySpent = closedDays.reduce((sum, d) => sum + d.spent, 0);
+
+    const newPool = newMoneyToLiveOn - alreadySpent;
+
+    // 3. Update originalCycle to be active, on today's calendar day, with updated plan & pool
+    await db.cycle.update(originalCycle.id!, {
+      currentDay: currentDayInOrig,
+      totalDays: monthLength,
+      planAmount: newMoneyToLiveOn,
+      pool: newPool,
+      userId: uid,
+    });
+
+    // 4. Delete the accidental latestCycle and its days
+    await db.cycle.delete(latestCycle.id!);
+    await db.days.where('cycleId').equals(latestCycle.id!).delete();
+  });
+
+  // 5. Clean up remote Supabase
+  void deleteRemoteCycle(latestCycle.id!);
+  scheduleSync(true);
+
+  return {
+    success: true,
+    currentDay: currentDayInOrig,
+    message: `Restored to Day ${currentDayInOrig} of your original month! Your past logs and updated plan are unified.`,
+  };
 }
 
 /** New cycle starting today with the same plan. */
@@ -277,12 +440,13 @@ export interface SpendUpdate {
   fromSavings?: boolean;
 }
 
-/** Logs a spend on the cycle's current day (or a specific `targetDay` when adding from History). */
+/** Logs a spend on the cycle's current day (or a specific `targetDay` / `targetDate` when adding from History). */
 export async function addSpend(
   cycle: Cycle,
   spend: NewSpend,
   now: Date = new Date(),
   targetDay?: number,
+  targetDate?: string,
 ): Promise<Entry> {
   const db = getDB();
   const cats = await db.categories.toArray();
@@ -294,12 +458,47 @@ export async function addSpend(
         : resolveLabel(spend.label, cats);
   const activeEvent = spend.event === undefined ? ((await db.meta.get('main'))?.activeEvent ?? null) : spend.event;
   const uid = getActiveUserId();
-  const dayToLog =
-    targetDay != null ? Math.min(Math.max(1, Math.round(targetDay)), cycle.totalDays) : cycle.currentDay;
-  const entryDate = dateOfDay(cycle.startDate, dayToLog);
+
+  let dayToLog: number;
+  let entryDate: string;
+  let targetCycleId: number = cycle.id!;
+  let isWithinCycle = false;
+  let shouldAdjustPool = spend.adjustPool !== false;
+
+  if (targetDate) {
+    entryDate = targetDate;
+    const diff = daysBetween(cycle.startDate, targetDate);
+    if (diff >= 0 && diff < cycle.totalDays) {
+      dayToLog = diff + 1;
+      isWithinCycle = true;
+    } else {
+      // Outside active cycle range. Find if an existing historical cycle covers this date.
+      const allCycles = await db.cycle.toArray();
+      const matched = allCycles.find((c) => {
+        const d = daysBetween(c.startDate, targetDate);
+        return d >= 0 && d < c.totalDays;
+      });
+      if (matched && matched.id != null) {
+        targetCycleId = matched.id;
+        dayToLog = daysBetween(matched.startDate, targetDate) + 1;
+      } else {
+        targetCycleId = cycle.id!;
+        dayToLog = 0;
+      }
+      isWithinCycle = false;
+      shouldAdjustPool = false; // Never deduct from active cycle pool when outside its range
+    }
+  } else {
+    dayToLog =
+      targetDay != null ? Math.min(Math.max(1, Math.round(targetDay)), cycle.totalDays) : cycle.currentDay;
+    entryDate = dateOfDay(cycle.startDate, dayToLog);
+    isWithinCycle = true;
+  }
+
   const [ey, em, ed] = entryDate.split('-').map(Number);
+  const isToday = entryDate === dateOfDay(cycle.startDate, cycle.currentDay);
   const entryTimestamp =
-    dayToLog !== cycle.currentDay
+    !isToday
       ? new Date(
           ey,
           em - 1,
@@ -310,11 +509,11 @@ export async function addSpend(
           now.getMilliseconds(),
         ).getTime()
       : now.getTime();
-  const shouldAdjustPool = spend.adjustPool !== false;
+
   const entry: Entry = {
     id: crypto.randomUUID(),
     userId: uid,
-    cycleId: cycle.id!,
+    cycleId: targetCycleId,
     day: dayToLog,
     date: entryDate,
     amount: Math.round(spend.amount),
@@ -330,13 +529,15 @@ export async function addSpend(
     hour: now.getHours(),
     createdAt: entryTimestamp,
   };
+
   await db.transaction('rw', db.entries, db.meta, db.cycle, db.days, async () => {
     await db.entries.add(entry);
     await db.meta.update('main', {
       lastUsedLabel: spend.label,
       ...(entry.payment ? { lastPayment: entry.payment } : {}),
     });
-    const c = await db.cycle.get(cycle.id!);
+
+    const c = await db.cycle.get(targetCycleId);
     if (entry.fromSavings) {
       if (c) {
         await db.cycle.update(c.id!, {
@@ -344,7 +545,7 @@ export async function addSpend(
           userId: c.userId ?? uid,
         });
       }
-    } else {
+    } else if (isWithinCycle && targetCycleId === cycle.id) {
       // Always update the target day's spent total in db.days if that day is already closed/past
       const dayRow = await db.days.get([cycle.id!, dayToLog]);
       const isPastDay = c ? dayToLog < c.currentDay : false;
@@ -392,8 +593,18 @@ export async function addSpend(
           userId: c.userId ?? uid,
         });
       }
+    } else if (!isWithinCycle && dayToLog > 0) {
+      // If belongs to a historical cycle with closed days, update that day row spent
+      const dayRow = await db.days.get([targetCycleId, dayToLog]);
+      if (dayRow) {
+        await db.days.put({
+          ...dayRow,
+          spent: dayRow.spent + entry.amount,
+        });
+      }
     }
   });
+
   if (supabaseSync.isEnabled()) {
     void supabaseSync.push().catch(() => {});
   }
@@ -764,7 +975,8 @@ export async function fillSample(now: Date = new Date()): Promise<void> {
   const spends = generateSampleSpends(startDate, SAMPLE_DAYS);
   const cats = await db.categories.toArray();
 
-  await db.transaction('rw', db.plan, db.cycle, db.days, db.entries, db.events, async () => {
+  await db.transaction('rw', [db.plan, db.cycle, db.days, db.entries, db.events, db.meta], async () => {
+    await db.meta.update('main', { sampleLoaded: true });
     await Promise.all([db.cycle.clear(), db.days.clear(), db.entries.clear(), db.events.clear()]);
     await db.events.bulkAdd([
       {
@@ -872,6 +1084,7 @@ export async function exportCSV(): Promise<string> {
 }
 
 /** Clears local data on this device only (preserves Supabase cloud backup so the user can restore by username). */
+/** Clears only the active user's DB (never other users' DBs). */
 export async function deleteAllData(): Promise<void> {
   const db = getDB();
   await db.transaction('rw', db.tables, async () => {

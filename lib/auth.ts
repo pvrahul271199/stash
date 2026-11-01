@@ -2,6 +2,7 @@
 import { useSyncExternalStore } from 'react';
 import { getSupabase } from './supabaseClient';
 import { openUserDB } from '@/db/schema';
+import { initDB } from '@/db/migrate';
 
 export const EMAIL_DOMAIN = 'stash.app';
 const USERNAME_RE = /^[a-z0-9_]{3,20}$/;
@@ -54,6 +55,7 @@ export function initAuth(): Promise<AuthState> {
   if (booted) return booted;
   booted = (async () => {
     const initial = readPersisted();
+    await initDB();
     await openUserDB(initial.uid ?? 'default');
     setState(initial);
     const sb = getSupabase();

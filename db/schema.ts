@@ -1,4 +1,5 @@
 import Dexie, { type Table } from 'dexie';
+import { useSyncExternalStore } from 'react';
 
 export interface UserRecord {
   /** Primary key: Base64-encoded username (e.g. "cmFodWw="). */
@@ -115,6 +116,10 @@ export interface Meta {
   activeEvent?: string | null;
   /** Last payment mode used, so the next spend defaults to it. */
   lastPayment?: string | null;
+  /** True once sample data was loaded; sample data is never claimed into an account. */
+  sampleLoaded?: boolean;
+  /** Set on a DB created from the legacy shared `stash` DB. */
+  migratedFrom?: string | null;
   /** Active display currency (e.g. 'INR', 'USD', 'EUR'). */
   currency?: string | null;
 }
@@ -134,7 +139,7 @@ export class StashDB extends Dexie {
   events!: Table<StashEvent, number>;
   meta!: Table<Meta, string>;
 
-  constructor(name = 'stash') {
+  constructor(name = dbNameFor(GUEST_UID)) {
     super(name);
     // v1. When the schema changes, add `this.version(N).stores({...}).upgrade(...)`
     // and bump SCHEMA_VERSION. Never edit a shipped version in place.
@@ -189,14 +194,71 @@ export const DEFAULT_CATEGORIES: { name: string; subcategories: string[] }[] = [
   { name: 'Other', subcategories: [] },
 ];
 
-/** Lazily created so importing this module on the server (static export) is safe. */
-let _db: StashDB | null = null;
-export function getDB(): StashDB {
-  if (!_db) _db = new StashDB();
-  return _db;
+export const GUEST_UID = 'default';
+
+export function dbNameFor(uid: string): string {
+  return `stash-${uid}`;
 }
 
-/** Phase-1 shim: single shared DB. Replaced by per-user DBs in phase 2. */
-export async function openUserDB(_uid: string): Promise<StashDB> {
-  return getDB();
+interface Active {
+  db: StashDB;
+  uid: string;
+}
+let active: Active | null = null;
+let opening: Promise<StashDB> | null = null;
+const listeners = new Set<() => void>();
+
+function notify() {
+  listeners.forEach((l) => l());
+}
+
+/**
+ * Closes the current handle (if different) and opens `stash-<uid>`.
+ * Subscribers (`useActiveUid`) are notified so live queries re-run.
+ */
+export async function openUserDB(uid: string): Promise<StashDB> {
+  if (active && active.uid === uid) return active.db;
+  // Serialise switches so quick login/logout never leaves two handles open.
+  const prev = opening ?? Promise.resolve(null);
+  const next = prev
+    .catch(() => null)
+    .then(async () => {
+      if (active && active.uid === uid) return active.db;
+      const old = active;
+      const db = new StashDB(dbNameFor(uid));
+      await db.open();
+      active = { db, uid };
+      old?.db.close();
+      notify();
+      return db;
+    });
+  opening = next;
+  return next;
+}
+
+/** Active DB. Lazily opens the guest DB so SSR/import and tests never see "no DB". */
+export function getDB(): StashDB {
+  if (!active) {
+    active = { db: new StashDB(dbNameFor(GUEST_UID)), uid: GUEST_UID };
+  }
+  return active.db;
+}
+
+export function getActiveDBUid(): string {
+  return active?.uid ?? GUEST_UID;
+}
+
+function subscribe(l: () => void) {
+  listeners.add(l);
+  return () => listeners.delete(l);
+}
+
+/** Changes whenever the active DB switches; add it to every live-query dependency list. */
+export function useActiveUid(): string {
+  return useSyncExternalStore(subscribe, getActiveDBUid, () => GUEST_UID);
+}
+
+export function useActiveDB(): { db: StashDB; uid: string } {
+  const uid = useActiveUid();
+  return { db: getDB(), uid };
 }
