@@ -189,6 +189,52 @@ export function useAllEntries(enabled = true): Entry[] | undefined {
   }, [enabled]);
 }
 
+export interface DateTotal {
+  spent: number;
+  fromSavings: number;
+  count: number;
+}
+
+/**
+ * Per-date totals straight from the transactions table (indexed by txnDate) for an inclusive
+ * date range. The date a spend was logged on is the only thing that decides which cell it lands in.
+ */
+export function useDateTotals(fromIso: string, toIso: string): Map<string, DateTotal> {
+  return (
+    useLiveQuery(async () => {
+      const rows = await getDB().transactions.where('txnDate').between(fromIso, toIso, true, true).toArray();
+      const map = new Map<string, DateTotal>();
+      for (const t of rows) {
+        if (t.deletedAt != null) continue;
+        const d = map.get(t.txnDate) ?? { spent: 0, fromSavings: 0, count: 0 };
+        if (t.fromSavings) d.fromSavings += t.amount;
+        else d.spent += t.amount;
+        d.count += 1;
+        map.set(t.txnDate, d);
+      }
+      return map;
+    }, [fromIso, toIso]) ?? new Map<string, DateTotal>()
+  );
+}
+
+/** Every live spend on one calendar date, newest first. */
+export function useDateEntries(iso: string): Entry[] {
+  return (
+    useLiveQuery(async () => {
+      const db = getDB();
+      const [rows, cycles] = await Promise.all([
+        db.transactions.where('txnDate').equals(iso).toArray(),
+        db.cycles.toArray(),
+      ]);
+      const byId = new Map(cycles.map((c) => [c.id, c]));
+      return rows
+        .filter(alive)
+        .map((t) => toEntry(t, t.cycleId ? byId.get(t.cycleId) : undefined))
+        .sort((a, b) => b.createdAt - a.createdAt);
+    }, [iso]) ?? []
+  );
+}
+
 /** Event currently being logged into (or null). */
 export function useActiveEvent(): string | null {
   return useLiveQuery(async () => (await getDB().meta.get('main'))?.activeEvent ?? null, [], null) ?? null;

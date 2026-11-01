@@ -5,6 +5,8 @@ import {
   useAllCycles,
   useAllEntries,
   useCycleEntries,
+  useDateEntries,
+  useDateTotals,
   useDayRows,
 } from '@/db/queries';
 import type { Cycle, Entry, Plan } from '@/db/schema';
@@ -13,7 +15,6 @@ import { LogSpend } from './LogSpend';
 import {
   buildMonthCalendar,
   compactINR,
-  dayTotalsByDate,
   searchEntries,
 } from '@/lib/history';
 import {
@@ -57,10 +58,12 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: Cycle; plan?: P
     [viewYear, viewMonth, activeCycle, today],
   );
 
-  const totalsByDate = useMemo(
-    () => dayTotalsByDate(allEntries, activeCycle),
-    [allEntries, activeCycle],
-  );
+  // Amounts come straight from the DB by calendar date (txnDate), never from cycle/day maths.
+  const gridFrom = monthWeeks[0]?.[0]?.iso ?? today;
+  const lastWeek = monthWeeks[monthWeeks.length - 1];
+  const gridTo = lastWeek?.[lastWeek.length - 1]?.iso ?? today;
+  const totalsByDate = useDateTotals(gridFrom, gridTo);
+  const selectedDateEntries = useDateEntries(selectedIso);
 
   const rowByDate = useMemo(() => {
     const map = new Map<string, (typeof dayRows)[0]>();
@@ -75,22 +78,17 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: Cycle; plan?: P
   const isWithinActiveCycle = offsetFromActive >= 0 && offsetFromActive < activeCycle.totalDays;
   const activeDayNumber = isWithinActiveCycle ? offsetFromActive + 1 : null;
 
-  const selectedStat = totalsByDate.get(selectedIso);
   const selectedRow = rowByDate.get(selectedIso);
-  const selectedSpent = selectedStat?.spent ?? selectedRow?.spent ?? 0;
-
-  const selectedDateEntries = useMemo(() => {
-    const seen = new Set<string>();
-    return allEntries
-      .filter((e) => {
-        if (seen.has(e.id)) return false;
-        const entryIso = e.date || (e.cycleId === activeCycle.id ? dateOfDay(activeCycle.startDate, e.day) : null);
-        if (entryIso !== selectedIso) return false;
-        seen.add(e.id);
-        return true;
-      })
-      .sort((a, b) => b.createdAt - a.createdAt);
-  }, [allEntries, selectedIso, activeCycle]);
+  const selectedStat = useMemo(() => {
+    const t = { spent: 0, fromSavings: 0, count: 0 };
+    for (const e of selectedDateEntries) {
+      if (e.fromSavings) t.fromSavings += e.amount;
+      else t.spent += e.amount;
+      t.count += 1;
+    }
+    return t;
+  }, [selectedDateEntries]);
+  const selectedSpent = selectedStat.spent;
 
   const searchResults = useMemo(
     () => (query.trim() ? searchEntries(allEntries, allCycles, query) : []),
@@ -398,12 +396,12 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: Cycle; plan?: P
                   {week.map((cell) => {
                     const stat = totalsByDate.get(cell.iso);
                     const row = rowByDate.get(cell.iso);
-                    const spent = stat?.spent ?? row?.spent ?? 0;
+                    const spent = stat?.spent ?? 0;
                     const isSelected = cell.iso === selectedIso;
                     const isToday = cell.isToday;
                     const isFuture = cell.iso > today;
                     const isOver = row ? spent > row.allowanceAtStart : false;
-                    const hasData = Boolean(stat || row);
+                    const hasData = Boolean(stat);
 
                     let circleStyle = 'border border-line bg-white text-ink';
                     if (isSelected) {
@@ -493,7 +491,7 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: Cycle; plan?: P
                         ? 'Today (open)'
                         : `Day ${activeDayNumber}/${activeCycle.totalDays}`
                     : 'Historical date (outside active 30-day cycle)'}
-                  {selectedStat?.fromSavings ? ` · +${inr(selectedStat.fromSavings)} from savings` : ''}
+                  {selectedStat.fromSavings ? ` · +${inr(selectedStat.fromSavings)} from savings` : ''}
                 </p>
               </div>
               <p className="num text-[22px] font-semibold text-ink">{inr(selectedSpent)}</p>

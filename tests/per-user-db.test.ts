@@ -215,3 +215,25 @@ describe('layered categories', () => {
     db.close();
   });
 });
+
+describe('spend lands on the date it was logged for', () => {
+  it('every target date (inside, before and after the cycle) is stored and indexed under that exact date', async () => {
+    const { ensureSeed } = await import('@/db/queries');
+    await openUserDB('date-user');
+    await ensureSeed();
+    await createPlanAndCycle(plan, '2026-10-20');
+    const c = (await getDB().cycles.toArray())[0];
+    const cases: [string, number][] = [
+      ['2026-10-20', 11], ['2026-10-25', 22], ['2026-11-05', 33], ['2026-09-30', 44], ['2026-11-30', 55],
+    ];
+    for (const [d, a] of cases) {
+      await addSpend(c, { amount: a, label: 'x', category: 'Food' }, new Date(2026, 10, 2, 23, 59), undefined, d);
+    }
+    for (const [d, a] of cases) {
+      const rows = await getDB().transactions.where('txnDate').equals(d).toArray();
+      expect(rows.map((r) => r.amount)).toEqual([a]);
+    }
+    const inRange = await getDB().transactions.where('txnDate').between('2026-10-20', '2026-11-05', true, true).toArray();
+    expect(inRange.reduce((s, r) => s + r.amount, 0)).toBe(11 + 22 + 33);
+  });
+});
