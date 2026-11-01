@@ -26,8 +26,7 @@ import {
 } from '@/db/queries';
 import { isCycleOver, isPlanValid, type PlanInput } from '@/lib/budget';
 import { todayISO } from '@/lib/dates';
-import { supabaseSync } from '@/lib/sync';
-import { getDB } from '@/db/schema';
+import { requestSync } from '@/lib/sync';
 import { initAuth, logOut, useAuth } from '@/lib/auth';
 import { useUI } from '@/store/ui';
 import { useToast } from '@/store/toast';
@@ -61,14 +60,8 @@ export function AppShell() {
   }, [runSync]);
 
   useEffect(() => {
-    const onOnline = () => {
-      if (supabaseSync.isEnabled()) {
-        void supabaseSync.push().catch(() => {});
-      }
-    };
-    window.addEventListener('online', onOnline);
-    return () => window.removeEventListener('online', onOnline);
-  }, []);
+    if (ready && auth.status === 'signedIn') requestSync();
+  }, [ready, auth.status, auth.uid]);
 
   useEffect(() => {
     const onVis = () => {

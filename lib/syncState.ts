@@ -31,7 +31,7 @@ export function getSyncStatusSnapshot(): SyncStatusInfo {
   const config = getSupabaseConfig();
   if (!config) {
     return {
-      state: 'local_only',
+      state: currentSyncState === 'syncing' ? 'syncing' : 'local_only',
       lastSyncedAt: null,
       errorMessage: null,
     };
@@ -51,9 +51,6 @@ export function reportSyncProgress(state: SyncState, error: string | null = null
 }
 
 if (typeof window !== 'undefined') {
-  window.addEventListener('online', () => {
-    reportSyncProgress('synced', null);
-  });
   window.addEventListener('offline', () => {
     reportSyncProgress('offline', null);
   });

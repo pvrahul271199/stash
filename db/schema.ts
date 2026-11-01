@@ -28,6 +28,12 @@ export interface Meta {
   lastPayment?: string | null;
   /** Result of the v4 -> v5 data migration (old vs derived pool, counts). */
   migrationReport?: unknown;
+  /** Last local updatedAt cutoff successfully pushed. */
+  lastPushedAt?: number;
+  /** Per remote table keyset cursor for pulls. */
+  pullCursors?: Record<string, { ts: string; id: string } | null>;
+  /** Set by claim; the guest DB is deleted after the first successful sync. */
+  guestClaimPending?: boolean;
   /** True once sample data was loaded; sample data is never claimed into an account. */
   sampleLoaded?: boolean;
   /** Set on a DB created from the legacy shared `stash` DB. */

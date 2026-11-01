@@ -49,6 +49,7 @@ export async function claimGuestData(uid: string): Promise<{ claimed: boolean; c
           activeUserId: uid,
           activeEvent: gMeta?.activeEvent ?? null,
           currency: gMeta?.currency ?? null,
+          guestClaimPending: true,
         });
       },
     );
