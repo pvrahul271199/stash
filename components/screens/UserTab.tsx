@@ -27,6 +27,7 @@ import { cycleEndDate, formatWithWeekday } from '@/lib/dates';
 import { inr } from '@/lib/format';
 import { useCurrency } from '@/lib/currency';
 import { useAuth } from '@/lib/auth';
+import { withLoading } from '@/store/busy';
 import { useToast } from '@/store/toast';
 import { usePWA } from '@/store/pwa';
 
@@ -615,8 +616,8 @@ export function UserTab({
           confirmLabel="Delete everything"
           onCancel={() => setConfirm(null)}
           onConfirm={async () => {
-            await deleteAllData();
             setConfirm(null);
+            await withLoading('Deleting your data…', deleteAllData);
             onDeleted();
           }}
         />
@@ -629,8 +630,8 @@ export function UserTab({
           confirmLabel="Fill with sample"
           onCancel={() => setConfirm(null)}
           onConfirm={async () => {
-            await fillSample();
             setConfirm(null);
+            await withLoading('Loading a sample month…', fillSample);
             onSampleDone();
           }}
         />

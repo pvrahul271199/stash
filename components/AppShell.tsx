@@ -32,6 +32,7 @@ import { requestSync, syncNow } from '@/lib/sync';
 import { getAuth, initAuth, logOut, useAuth } from '@/lib/auth';
 import { useUI } from '@/store/ui';
 import { useToast } from '@/store/toast';
+import { useBusy, withLoading } from '@/store/busy';
 
 /** Wait for the first pull, but never block the UI for long (offline / slow network). */
 function restoreFromCloud(): Promise<void> {
@@ -51,6 +52,7 @@ export function AppShell() {
   const sheet = useUI((s) => s.sheet);
   const setSheet = useUI((s) => s.setSheet);
   const toast = useToast((s) => s.show);
+  const busyMessage = useBusy((s) => s.message);
   const [ready, setReady] = useState(false);
   const [flow, setFlow] = useState<Flow>('welcome');
   const [draft, setDraft] = useState<PlanInput | null>(null);
@@ -81,7 +83,7 @@ export function AppShell() {
 
   useEffect(() => {
     // Hold the loader for a minimum time so it doesn't just flash on fast local boots.
-    const minShow = new Promise<void>((r) => setTimeout(r, 900));
+    const minShow = new Promise<void>((r) => setTimeout(r, 450));
     initAuth()
       .then(() => ensureSeed())
       .then(() => runSync())
@@ -118,7 +120,7 @@ export function AppShell() {
   }
 
   async function handleSample() {
-    await fillSample();
+    await withLoading('Loading a sample month…', fillSample);
     setSheet('none');
     setTab('insights');
   }
@@ -226,7 +228,7 @@ export function AppShell() {
                   setFlow('changePlan');
                 }}
                 onSwitchUser={() => {
-                  void logOut().then(() => {
+                  void withLoading('Signing out…', logOut).then(() => {
                     setDraft(null);
                     setFlow('welcome');
                     setTab('today');
@@ -251,7 +253,7 @@ export function AppShell() {
               onSwitchUser={() => {
                 setSheet('none');
                 if (auth.status === 'signedIn') {
-                  void logOut().then(() => {
+                  void withLoading('Signing out…', logOut).then(() => {
                     setDraft(null);
                     setFlow('welcome');
                     setTab('today');
@@ -334,6 +336,11 @@ export function AppShell() {
   return (
     <div className="relative flex h-full flex-col">
       {body}
+      {busyMessage && (
+        <div className="absolute inset-0 z-[60] bg-bg">
+          <LoadingScreen message={busyMessage} />
+        </div>
+      )}
       {showDemo && <Demo onClose={() => setShowDemo(false)} />}
       <Toast />
       <PWAManager />
