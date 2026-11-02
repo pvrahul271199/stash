@@ -77,9 +77,12 @@ export function AppShell() {
   }, []);
 
   useEffect(() => {
+    // Hold the loader for a minimum time so it doesn't just flash on fast local boots.
+    const minShow = new Promise<void>((r) => setTimeout(r, 900));
     initAuth()
       .then(() => ensureSeed())
       .then(() => runSync())
+      .then(() => minShow)
       .then(() => setReady(true));
   }, [runSync]);
 
@@ -114,7 +117,7 @@ export function AppShell() {
 
   let body: React.ReactNode = null;
   if (!ready || !snap) {
-    body = <div className="h-full" aria-busy="true" />;
+    body = <LoadingScreen message="Opening your stash…" />;
   } else if (restoring) {
     body = <LoadingScreen />;
   } else if (flow === 'auth') {

@@ -1,7 +1,6 @@
 'use client';
-import { Logo } from './Logo';
 
-/** Calm full-screen loader shown while a returning user's data is being restored. */
+/** Calm, text-only loader shown while the app opens or a returning user's data is restored. */
 export function LoadingScreen({ message = 'Restoring your stash…' }: { message?: string }) {
   return (
     <main
@@ -10,13 +9,12 @@ export function LoadingScreen({ message = 'Restoring your stash…' }: { message
       aria-busy="true"
       className="flex h-full flex-col items-center justify-center bg-bg px-6"
     >
-      <div className="relative flex h-24 w-24 items-center justify-center">
-        <span className="absolute inset-0 animate-ping rounded-full bg-goodBg opacity-70 motion-reduce:hidden" />
-        <span className="absolute inset-0 rounded-full border-[3px] border-line" />
-        <span className="absolute inset-0 animate-spin rounded-full border-[3px] border-transparent border-t-good motion-reduce:animate-none" />
-        <Logo size={56} />
-      </div>
-      <p className="mt-8 animate-pulse text-body text-soft motion-reduce:animate-none">{message}</p>
+      <p className="animate-pulse font-display text-[44px] font-semibold leading-none tracking-[-0.02em] text-ink motion-reduce:animate-none">
+        Stash
+      </p>
+      <p className="mt-3 animate-pulse font-display text-[15px] font-medium tracking-[-0.01em] text-ink motion-reduce:animate-none">
+        {message}
+      </p>
     </main>
   );
 }
