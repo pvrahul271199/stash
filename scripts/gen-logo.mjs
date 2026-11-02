@@ -15,7 +15,7 @@ let x = 50 - width / 2;
 const d = glyphs
   .map((g, i) => {
     x += (i ? font.getKerningValue(glyphs[i - 1], g) * scale : 0);
-    const path = g.getPath(x, 57, size).toPathData(2);
+    const path = g.getPath(x, 60, size).toPathData(2);
     x += g.advanceWidth * scale;
     return path;
   })
@@ -24,7 +24,6 @@ const d = glyphs
 const svg = (extra = '') => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"${extra}>
   <rect width="100" height="100" rx="22" fill="#1E1B4B"/>
   <path d="${d}" fill="#fff"/>
-  <rect x="38" y="67" width="24" height="5" rx="2.5" fill="#5EEAD4"/>
 </svg>
 `;
 writeFileSync('public/logo.svg', svg(' width="512" height="512" role="img" aria-label="Stash"'));

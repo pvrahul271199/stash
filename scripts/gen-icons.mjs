@@ -3,13 +3,11 @@ import sharp from 'sharp';
 import { mkdirSync } from 'node:fs';
 
 const INK = '#1E1B4B';
-const TEAL = '#5EEAD4';
 
 import { readFileSync } from 'node:fs';
 const WORDMARK = readFileSync('components/ui/logoPath.ts', 'utf8').match(/'([^']+)'/)[1];
 const glyph = `
-  <path d="${WORDMARK}" fill="#fff"/>
-  <rect x="38" y="67" width="24" height="5" rx="2.5" fill="${TEAL}"/>`;
+  <path d="${WORDMARK}" fill="#fff"/>`;
 
 function svg({ rounded, inset }) {
   const bg = rounded

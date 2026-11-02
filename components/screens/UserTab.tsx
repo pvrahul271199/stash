@@ -84,7 +84,6 @@ export function UserTab({
   const [removingEvent, setRemovingEvent] = useState<StashEvent | null>(null);
 
   const cleanUser = username.trim().toLowerCase();
-  const userId = auth.uid ?? 'default';
 
   const planRows: { label: string; value: string; items?: { name: string; amount: number }[] }[] = [
     { label: 'Monthly income', value: inr(plan.income) },
@@ -150,9 +149,6 @@ export function UserTab({
             <h2 className="truncate text-[16px] font-semibold text-ink">
               {cleanUser ? cleanUser.charAt(0).toUpperCase() + cleanUser.slice(1) : 'Guest User'}
             </h2>
-            <p className="mt-0.5 truncate text-[12px] text-soft">
-              User ID: <code className="font-mono font-medium text-ink">{userId}</code>
-            </p>
           </div>
         </div>
       </section>

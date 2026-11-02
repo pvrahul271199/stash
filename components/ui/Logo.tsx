@@ -23,7 +23,6 @@ export function Logo({ size = 40, className = '' }: { size?: number; className?:
       >
         Stash
       </text>
-      <rect x="38" y="66" width="24" height="5" rx="2.5" fill="#5EEAD4" />
     </svg>
   );
 }
