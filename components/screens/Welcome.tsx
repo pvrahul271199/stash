@@ -1,15 +1,17 @@
 'use client';
 import { Logo } from '../ui/Logo';
-import { PrimaryButton, GhostButton } from '../ui/Button';
+import { PrimaryButton, SecondaryButton, GhostButton } from '../ui/Button';
 
 export function Welcome({
   onStart,
   onAccount,
   onSample,
+  onDemo,
 }: {
   onStart: () => void;
   onAccount: () => void;
   onSample: () => void;
+  onDemo: () => void;
 }) {
   return (
     <main className="flex h-full flex-col justify-between px-6 pb-8 pt-14">
@@ -24,7 +26,8 @@ export function Welcome({
         </p>
       </div>
       <div className="flex flex-col gap-1">
-        <PrimaryButton onClick={onStart}>Try without an account</PrimaryButton>
+        <SecondaryButton onClick={onDemo}>See how it works</SecondaryButton>
+        <PrimaryButton onClick={onStart} className="mt-2">Try without an account</PrimaryButton>
         <p className="mb-2 mt-2 text-center text-[14px] text-soft">Takes about a minute</p>
         <GhostButton onClick={onAccount}>Sign up or log in</GhostButton>
         <GhostButton onClick={onSample}>Or explore with sample data first</GhostButton>

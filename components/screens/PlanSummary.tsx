@@ -4,7 +4,7 @@ import { Note } from '../ui/Chip';
 import { HugeNumber } from '../ui/HugeNumber';
 import { inr } from '@/lib/format';
 import { moneyToLiveOn, type PlanInput } from '@/lib/budget';
-import { cycleEndDate, formatWithWeekday, todayISO } from '@/lib/dates';
+import { addDays, cycleEndDate, formatShort, formatWithWeekday, todayISO } from '@/lib/dates';
 import type { Cycle } from '@/db/schema';
 
 export function PlanSummary({
@@ -14,6 +14,8 @@ export function PlanSummary({
   onBack,
   onStart,
   busy,
+  startDate,
+  onStartDateChange,
 }: {
   plan: PlanInput;
   activeCycle?: Cycle;
@@ -21,6 +23,9 @@ export function PlanSummary({
   onBack: () => void;
   onStart: () => void;
   busy?: boolean;
+  /** New cycles only: chosen start date (today … 7 days back). */
+  startDate?: string;
+  onStartDateChange?: (iso: string) => void;
 }) {
   const live = moneyToLiveOn(plan);
   const isEditing = !!activeCycle && activeCycle.currentDay > 0;
@@ -31,7 +36,7 @@ export function PlanSummary({
     : plan.monthLength;
   const dailyAmount = Math.max(0, Math.round(remainingPool / daysRemaining));
   const end = formatWithWeekday(
-    cycleEndDate(isEditing ? activeCycle.startDate : todayISO(), plan.monthLength),
+    cycleEndDate(isEditing ? activeCycle.startDate : (startDate ?? todayISO()), plan.monthLength),
   );
 
   const rows = [
@@ -88,9 +93,38 @@ export function PlanSummary({
             <span className="font-semibold text-ink">Note:</span> Your day will not restart. Differences from previous days are divided equally across each remaining day.
           </div>
         ) : (
+          <>
+            {startDate && onStartDateChange && (
+              <div className="mt-6">
+                <p className="text-[14px] text-soft">Start date</p>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {Array.from({ length: 8 }, (_, i) => {
+                    const iso = addDays(todayISO(), -i);
+                    const on = iso === startDate;
+                    return (
+                      <button
+                        key={iso}
+                        type="button"
+                        onClick={() => onStartDateChange(iso)}
+                        aria-pressed={on}
+                        className={`rounded-full px-3 py-1.5 text-[13px] ${on ? 'bg-ink text-white' : 'bg-tint text-soft'}`}
+                      >
+                        {i === 0 ? 'Today' : i === 1 ? 'Yesterday' : formatShort(iso)}
+                      </button>
+                    );
+                  })}
+                </div>
+                {startDate !== todayISO() && (
+                  <p className="mt-2 text-[12px] leading-relaxed text-soft">
+                    Days since {formatShort(startDate)} will be caught up next, so you can enter a rough total for them.
+                  </p>
+                )}
+              </div>
+            )}
           <div className="mt-6 rounded-note border border-line bg-tint/80 px-4 py-3 text-[13px] leading-relaxed text-soft">
             Bills and savings are already set aside, so you won&apos;t log them again.
           </div>
+          </>
         )}
       </div>
       <PrimaryButton onClick={onStart} disabled={busy}>

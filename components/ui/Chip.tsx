@@ -20,8 +20,8 @@ export function Chip({
 }
 
 const noteTone = {
-  good: 'bg-goodBg text-good',
-  adjust: 'bg-warmBg text-warm',
+  good: 'bg-tint text-ink',
+  adjust: 'bg-line/60 text-ink',
   neutral: 'bg-tint text-ink',
 } as const;
 

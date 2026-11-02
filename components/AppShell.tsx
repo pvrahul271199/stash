@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Toast } from './ui/Toast';
 import { TabBar, type Tab } from './ui/TabBar';
 import { Welcome } from './screens/Welcome';
+import { Demo } from './screens/Demo';
 import { AuthScreen } from './screens/AuthScreen';
 import { Onboarding } from './screens/Onboarding';
 import { PlanSummary } from './screens/PlanSummary';
@@ -26,7 +27,7 @@ import {
   type PendingCatchUp,
 } from '@/db/queries';
 import { isCycleOver, isPlanValid, type PlanInput } from '@/lib/budget';
-import { todayISO } from '@/lib/dates';
+import { addDays, todayISO } from '@/lib/dates';
 import { requestSync, syncNow } from '@/lib/sync';
 import { getAuth, initAuth, logOut, useAuth } from '@/lib/auth';
 import { useUI } from '@/store/ui';
@@ -55,6 +56,8 @@ export function AppShell() {
   const [draft, setDraft] = useState<PlanInput | null>(null);
   const [tab, setTab] = useState<Tab>('today');
   const [busy, setBusy] = useState(false);
+  const [showDemo, setShowDemo] = useState(false);
+  const [startDate, setStartDate] = useState(() => todayISO());
   const [catchUpGap, setCatchUpGap] = useState<PendingCatchUp | null>(null);
 
   const auth = useAuth();
@@ -103,7 +106,12 @@ export function AppShell() {
   async function start() {
     if (!draft || !isPlanValid(draft)) return;
     setBusy(true);
-    await createPlanAndCycle(draft);
+    // Guard: only today … 7 days back is allowed.
+    const earliest = addDays(todayISO(), -7);
+    const date = startDate > todayISO() ? todayISO() : startDate < earliest ? earliest : startDate;
+    await createPlanAndCycle(draft, date);
+    await runSync(); // a back-dated start surfaces the catch-up prompt for the elapsed days
+    setStartDate(todayISO());
     setBusy(false);
     setFlow('welcome');
     setTab('today');
@@ -297,6 +305,7 @@ export function AppShell() {
           onStart={() => setFlow('onboarding')}
           onAccount={() => setFlow('auth')}
           onSample={handleSample}
+          onDemo={() => setShowDemo(true)}
         />
       );
     }
@@ -312,12 +321,20 @@ export function AppShell() {
       />
     );
   } else if (draft) {
-    body = <PlanSummary plan={draft} busy={busy} onBack={() => setFlow('onboarding')} onStart={start} />;
+    body = <PlanSummary
+        plan={draft}
+        busy={busy}
+        onBack={() => setFlow('onboarding')}
+        onStart={start}
+        startDate={startDate}
+        onStartDateChange={setStartDate}
+      />;
   }
 
   return (
     <div className="relative flex h-full flex-col">
       {body}
+      {showDemo && <Demo onClose={() => setShowDemo(false)} />}
       <Toast />
       <PWAManager />
     </div>

@@ -149,3 +149,9 @@ Triggered from `UserTab`/`PlanScreen` → `onSwitchUser`:
 ## 21. Mobile app (summary)
 
 Expo app: onboarding → Today (log, close day, catch-up) → History/Insights/Categories subset, state in AsyncStorage, no cloud. Parity gaps listed in ARCHITECTURE §8.
+
+### Back-dated cycle start (onboarding)
+On the plan summary screen a new cycle can start today or up to 7 days back (`PlanSummary` chips -> `AppShell.start` -> `createPlanAndCycle(draft, startDate)`). The start date is clamped to that window, then `runSync()` runs `syncCalendar`, which closes the elapsed days and shows the WelcomeBack catch-up prompt for a rough total. Changing an active plan never changes its start date.
+
+### Demo
+Welcome screen has "See how it works" -> `components/screens/Demo.tsx`: chapters Basics (auto-playing animated explainer), Events, History, Insights (mock screens with tappable dots and curvy arrows whose labels use the display font; no DB writes). Note tones (`ui/Chip.tsx`) now use the indigo palette only, no green/amber backgrounds.
