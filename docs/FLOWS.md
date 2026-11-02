@@ -126,7 +126,7 @@ Triggered from `UserTab`/`PlanScreen` → `onSwitchUser`:
 ## 16. Export / delete
 
 - Export: `exportCSV()` → all entries of existing cycles → CSV download.
-- Delete: confirm → `deleteAllData()` clears every Dexie table, `ensureSeed()`, `onDeleted()` clears the session and returns to Welcome. Cloud copy intentionally kept ("restore by username"). ⚠ F-04.
+- Delete / start over: warning dialog (lists custom categories + events) → `deleteAllData()`. Guest: clears every Dexie table. Signed in: tombstones plans, cycles, transactions, custom categories and events (`deletedAt`), clears `dayRows`, `ensureSeed()`, then `syncNow()` so the deletion reaches the cloud and other devices (LWW); offline → pushed on next sync. Account is kept. `onDeleted()` returns to Welcome → onboarding.
 
 ## 17. Currency
 

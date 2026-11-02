@@ -60,7 +60,7 @@ Every money write changes a transaction/cycle and calls `recompute(db, cycleId)`
 | `applyCatchUp` | +Rough-total entries | +estimated rows | currentDay,pool | – |
 | `mergeAccidentalCycle` | re-point to older cycle | – (!) | rewrite older, delete latest | remote cycle delete |
 | `fillSample` | **clear all** + sample | clear + sample | **clear all** + 1 new | events replaced |
-| `deleteAllData` | clear every table | | | `ensureSeed()` |
+| `deleteAllData` | guest: clear every table; signed in: tombstone all synced rows | dayRows cleared | – | `ensureSeed()` + `syncNow()` |
 | category/event CRUD | rewrite names | | | event removal clears `meta.activeEvent` |
 
 ## 5. Identity model

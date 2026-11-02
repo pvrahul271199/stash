@@ -565,7 +565,7 @@ export function UserTab({
           onClick={() => setConfirm('delete')}
           className="mt-2 min-h-[48px] w-full rounded-btn border border-warm/30 bg-warmBg/40 text-[14px] font-semibold text-warm transition-colors hover:bg-warmBg active:scale-[0.99]"
         >
-          Delete all data on this device
+          Delete all data and start over
         </button>
       </section>
 
@@ -606,9 +606,13 @@ export function UserTab({
 
       {confirm === 'delete' && (
         <ConfirmDialog
-          title="Delete everything?"
-          body="Your plan, spends and categories will be removed from this device. Remote Supabase backups are preserved."
-          confirmLabel="Delete all data"
+          title="Delete everything and start over?"
+          body={
+            auth.status === 'signedIn'
+              ? 'This permanently deletes your plan, every spend and history, and the categories and events you added. It is removed from this device, your cloud backup and your other devices. Your account stays so you can set up a new cycle. This cannot be undone: export a CSV first if you want a copy.'
+              : 'This permanently deletes your plan, every spend and history, and the categories and events you added from this device. This cannot be undone: export a CSV first if you want a copy.'
+          }
+          confirmLabel="Delete everything"
           onCancel={() => setConfirm(null)}
           onConfirm={async () => {
             await deleteAllData();

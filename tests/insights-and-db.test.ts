@@ -653,3 +653,28 @@ describe('database queries', () => {
     expect(finalCycle.pool).toBe(initialPool - 500);
   });
 });
+
+describe('deleteAllData for a signed-in user', () => {
+  it('tombstones every synced row instead of clearing, and ends the cycle', async () => {
+    const { vi } = await import('vitest');
+    const auth = await import('@/lib/auth');
+    const spy = vi.spyOn(auth, 'getAuth').mockReturnValue({ status: 'signedIn', uid: 'u1', username: 'bob' });
+    try {
+      await deleteAllData();
+      await ensureSeed();
+      await createPlanAndCycle({ income: 50000, bills: 18000, savings: 10000, monthLength: 30 }, '2026-10-27');
+      const db = getDB();
+      await addSpend((await db.cycles.toArray())[0], { amount: 100, label: 'Chai' });
+      await deleteAllData();
+      for (const t of [db.plans, db.cycles, db.transactions]) {
+        const rows = await t.toArray();
+        expect(rows.length).toBeGreaterThan(0);
+        expect(rows.every((r) => r.deletedAt != null)).toBe(true);
+      }
+      expect(await db.dayRows.count()).toBe(0);
+    } finally {
+      spy.mockRestore();
+      await deleteAllData();
+    }
+  });
+});

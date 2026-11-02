@@ -36,7 +36,8 @@ import { buildCSV, type CsvRow } from '@/lib/csv';
 import { resolveCategories, validateName, type ResolvedCategory } from '@/lib/categories';
 import { getStoredCurrencyCode } from '@/lib/currency';
 import { buildUserProfile, getActiveUserId, getStoredAvatarTheme, getStoredUsername } from '@/lib/user';
-import { requestSync } from '@/lib/sync';
+import { requestSync, syncNow } from '@/lib/sync';
+import { getAuth } from '@/lib/auth';
 import { uuidv7 } from '@/lib/uuid';
 
 /* ---------- helpers ---------- */
@@ -1164,11 +1165,43 @@ export async function exportCSV(): Promise<string> {
   return buildCSV(rows);
 }
 
-/** Clears only the active user's local DB (never other users' DBs, never the cloud copy). */
+/**
+ * Resets the active user's data so they can start over.
+ * - Guest (never syncs): clears every local table.
+ * - Signed in: tombstones every plan, cycle, spend, custom category and event (soft delete), so the
+ *   deletion syncs to the cloud and to the user's other devices instead of being restored from them.
+ *   The account itself stays. If offline, the tombstones are pushed on the next sync.
+ */
 export async function deleteAllData(): Promise<void> {
   const db = getDB();
-  await db.transaction('rw', db.tables, async () => {
-    await Promise.all(db.tables.map((t) => t.clear()));
-  });
+  if (!getAuth().uid) {
+    await db.transaction('rw', db.tables, async () => {
+      await Promise.all(db.tables.map((t) => t.clear()));
+    });
+    await ensureSeed();
+    return;
+  }
+  const now = Date.now();
+  await db.transaction(
+    'rw',
+    [db.plans, db.cycles, db.transactions, db.cats, db.evts, db.dayRows, db.meta],
+    async () => {
+      const tombstone = { deletedAt: now, updatedAt: now };
+      await db.transactions.toCollection().modify(tombstone);
+      await db.plans.toCollection().modify(tombstone);
+      await db.cats.toCollection().modify(tombstone);
+      await db.evts.toCollection().modify(tombstone);
+      // a tombstoned cycle must never count as the user's unfinished one
+      await db.cycles.toCollection().modify((c) => {
+        c.deletedAt = now;
+        c.updatedAt = now;
+        c.currentDay = Math.max(c.currentDay, c.totalDays + 1);
+      });
+      await db.dayRows.clear();
+      await db.meta.update('main', { sampleLoaded: false, lastUsedLabel: null, activeEvent: null });
+    },
+  );
   await ensureSeed();
+  // Push now (not debounced) so the tombstones leave before the user can sign out or switch DBs.
+  await syncNow().catch(() => {});
 }
