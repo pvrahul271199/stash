@@ -1,5 +1,5 @@
 'use client';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Toast } from './ui/Toast';
 import { TabBar, type Tab } from './ui/TabBar';
 import { Welcome } from './screens/Welcome';
@@ -14,6 +14,7 @@ import { HistoryTab } from './screens/HistoryTab';
 import { InsightsTab } from './screens/InsightsTab';
 import { UserTab } from './screens/UserTab';
 import { PWAManager } from './pwa/PWAManager';
+import { LoadingScreen } from './ui/LoadingScreen';
 import {
   applyCatchUp,
   createPlanAndCycle,
@@ -26,10 +27,21 @@ import {
 } from '@/db/queries';
 import { isCycleOver, isPlanValid, type PlanInput } from '@/lib/budget';
 import { todayISO } from '@/lib/dates';
-import { requestSync } from '@/lib/sync';
-import { initAuth, logOut, useAuth } from '@/lib/auth';
+import { requestSync, syncNow } from '@/lib/sync';
+import { getAuth, initAuth, logOut, useAuth } from '@/lib/auth';
 import { useUI } from '@/store/ui';
 import { useToast } from '@/store/toast';
+
+/** Wait for the first pull, but never block the UI for long (offline / slow network). */
+function restoreFromCloud(): Promise<void> {
+  return Promise.race([
+    syncNow().then(
+      () => undefined,
+      () => undefined,
+    ),
+    new Promise<void>((r) => setTimeout(r, 8000)),
+  ]);
+}
 
 type Flow = 'welcome' | 'auth' | 'onboarding' | 'summary' | 'changePlan' | 'changeSummary';
 
@@ -46,6 +58,18 @@ export function AppShell() {
   const [catchUpGap, setCatchUpGap] = useState<PendingCatchUp | null>(null);
 
   const auth = useAuth();
+  const [restoring, setRestoring] = useState(false);
+  const restoredFor = useRef<string | null>(null);
+
+  // Returning user on a fresh device/reload with nothing local yet: pull before deciding what to show.
+  const hasCycle = snap ? !!snap.cycle : null;
+  useEffect(() => {
+    if (!ready || hasCycle !== false || auth.status !== 'signedIn' || !auth.uid) return;
+    if (restoredFor.current === auth.uid) return;
+    restoredFor.current = auth.uid;
+    setRestoring(true);
+    void restoreFromCloud().finally(() => setRestoring(false));
+  }, [ready, hasCycle, auth.status, auth.uid]);
 
   const runSync = useCallback(async () => {
     const gap = await syncCalendar(todayISO());
@@ -91,15 +115,21 @@ export function AppShell() {
   let body: React.ReactNode = null;
   if (!ready || !snap) {
     body = <div className="h-full" aria-busy="true" />;
+  } else if (restoring) {
+    body = <LoadingScreen />;
   } else if (flow === 'auth') {
     body = (
       <AuthScreen
         onBack={() => setFlow('welcome')}
         onDone={async (mode, username) => {
           if (mode === 'login') {
-            await runSync();
+            restoredFor.current = getAuth().uid ?? null; // this handler owns the restore
+            setRestoring(true);
             setFlow('welcome');
             setTab('today');
+            await restoreFromCloud();
+            await runSync();
+            setRestoring(false);
             toast(`Welcome back, ${username}!`);
             return;
           }
