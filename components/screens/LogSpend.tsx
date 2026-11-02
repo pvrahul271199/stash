@@ -130,10 +130,10 @@ export function LogSpend({
         : (effectiveDay != null && effectiveDay !== cycle.currentDay
             ? ` on ${targetDateLabel} (Day ${effectiveDay})`
             : '');
-      toast(`Saved ${inr(amount)}${suffix}`);
+      toast(`Logged ${inr(amount)}${suffix}`);
       onClose();
     } catch {
-      toast('Failed to save spend. Please try again.', 'warm');
+      toast('Couldn’t log that spend. Please try again.', 'warm');
     } finally {
       savingRef.current = false;
       setSaving(false);
