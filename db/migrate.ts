@@ -1,6 +1,7 @@
 import Dexie, { type Transaction } from 'dexie';
 import { rollupCycle } from '@/lib/budget';
 import { DEFAULT_CATEGORIES } from './schema';
+import { resolveCategories } from '@/lib/categories';
 import { dateOfDay } from '@/lib/dates';
 import type { CategoryRow, Cycle, DayRow, StashEvent, Txn, Plan } from './schema';
 import type { LegacyCategory, LegacyCycle, LegacyDayRow, LegacyEntry, LegacyEvent, LegacyPlan } from './legacy';
@@ -210,7 +211,7 @@ export function transformV4(rows: V4Rows, newId: () => string = () => crypto.ran
     transactions.push({
       id: e.id, updatedAt: e.createdAt, createdAt: e.createdAt,
       cycleId: e.day === 0 ? null : mapped, txnDate, amount: e.amount,
-      type: e.category, subtype: e.subcategory, label: e.label, event: e.event ?? null,
+      type: e.category, categoryId: null, subtype: e.subcategory, label: e.label, event: e.event ?? null, eventId: null,
       payment: e.payment ?? null, note: e.note ?? null, fromSavings: e.fromSavings,
       adjustsPool: e.adjustsPool !== false, isEstimate: e.isEstimate, hour: e.hour,
     });
@@ -305,4 +306,26 @@ export async function migrateCatsToOverrides(tx: Transaction): Promise<void> {
       await table.put({ ...r, baseId: null, subAdded: [], subRemoved: [], deletedAt: now, updatedAt: now });
     }
   }
+}
+
+/**
+ * v7 -> v8: fills `categoryId` / `eventId` from the old name links (case-insensitive).
+ * Categories resolve to a default's key or a live `cats` row id; unknown names stay null and keep
+ * their `type` snapshot. When two live events share a name the oldest wins.
+ */
+export async function migrateTxnLinks(tx: Transaction): Promise<void> {
+  const cats = resolveCategories(DEFAULT_CATEGORIES, await tx.table('cats').toArray());
+  const catId = new Map(cats.map((c) => [c.name.toLowerCase(), c.id]));
+  const evts = ((await tx.table('evts').toArray()) as { id: string; name: string; createdAt: number; deletedAt?: number | null }[])
+    .filter((e) => e.deletedAt == null)
+    .sort((a, b) => a.createdAt - b.createdAt);
+  const evtId = new Map<string, string>();
+  for (const e of evts) if (!evtId.has(e.name.toLowerCase())) evtId.set(e.name.toLowerCase(), e.id);
+  await tx
+    .table('transactions')
+    .toCollection()
+    .modify((t: { type: string; event: string | null; categoryId?: string | null; eventId?: string | null }) => {
+      t.categoryId ??= catId.get((t.type ?? '').toLowerCase()) ?? null;
+      t.eventId ??= t.event ? (evtId.get(t.event.trim().toLowerCase()) ?? null) : null;
+    });
 }

@@ -1,5 +1,5 @@
 import Dexie from 'dexie';
-import { getDB, dbNameFor, GUEST_UID, type CategoryRow, type Cycle, type Plan, type StashDB, type StashEvent, type Txn } from '@/db/schema';
+import { getDB, dbNameFor, GUEST_UID, type CategoryRow, type Cycle, type Plan, type StashDB, type StashEvent, type SyncBase, type Txn } from '@/db/schema';
 import { getAuth, getAccessToken } from './auth';
 import { getSupabase, supabaseEnv } from './supabaseClient';
 import { decodeBase64Username, encodeUsernameToBase64 } from './user';
@@ -21,6 +21,8 @@ export interface SupabaseConfig {
 
 const LAST_SYNC_KEY = 'stash:last-synced-at';
 const PAGE = 1000;
+/** Each pull restarts this far behind its cursor: a slow transaction that took its updated_at before the last pull but committed after it would otherwise be skipped forever. Re-reading is free (applyRemote skips versions it already has). */
+const PULL_OVERLAP_MS = 5 * 60 * 1000;
 const PUSH_CHUNK = 500;
 const TOMBSTONE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -49,7 +51,7 @@ function setLastSyncedAt(ts: number) {
 
 /* ---------- row mapping ---------- */
 
-type Remote = Record<string, unknown> & { id: string; client_updated_at: number; deleted_at: string | null; updated_at?: string };
+type Remote = Record<string, unknown> & { id: string; client_updated_at: number; deleted_at: string | null; updated_at?: string; version?: number };
 
 const iso = (ms?: number | null) => (ms == null ? null : new Date(ms).toISOString());
 const ms = (s: unknown) => (typeof s === 'string' ? Date.parse(s) : null);
@@ -121,9 +123,11 @@ export const MAPPERS = {
       txn_date: t.txnDate,
       amount: t.amount,
       type: t.type,
+      category_id: t.categoryId,
       subtype: t.subtype,
       label: t.label,
       event: t.event,
+      event_id: t.eventId,
       payment: t.payment,
       note: t.note,
       from_savings: t.fromSavings,
@@ -140,9 +144,11 @@ export const MAPPERS = {
       txnDate: r.txn_date as string,
       amount: r.amount as number,
       type: r.type as string,
+      categoryId: (r.category_id as string | null) ?? null,
       subtype: (r.subtype as string | null) ?? null,
       label: (r.label as string) ?? '',
       event: (r.event as string | null) ?? null,
+      eventId: (r.event_id as string | null) ?? null,
       payment: (r.payment as string | null) ?? null,
       note: (r.note as string | null) ?? null,
       fromSavings: !!r.from_savings,
@@ -199,8 +205,8 @@ export const MAPPERS = {
 };
 
 type TableName = keyof typeof MAPPERS;
-/** Parents first. */
-export const TABLE_ORDER: TableName[] = ['plans', 'cycles', 'transactions', 'categories', 'events'];
+/** Parents first: transactions reference categories and events (events.id is a real FK remotely). */
+export const TABLE_ORDER: TableName[] = ['plans', 'cycles', 'categories', 'events', 'transactions'];
 
 export type RemoteRows = Partial<Record<TableName, Remote[]>>;
 
@@ -210,6 +216,8 @@ export class SyncError extends Error {
   constructor(
     message: string,
     readonly kind: 'offline' | 'auth' | 'server',
+    /** HTTP status when the server answered. */
+    readonly status?: number,
   ) {
     super(message);
   }
@@ -253,9 +261,66 @@ async function authed(path: string, init: RequestInit): Promise<Response> {
   }
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw new SyncError(`Sync failed (${res.status}) ${body.slice(0, 160)}`, 'server');
+    throw new SyncError(`Sync failed (${res.status}) ${body.slice(0, 160)}`, 'server', res.status);
   }
   return res;
+}
+
+/* ---------- merge ---------- */
+
+/** Bookkeeping columns: never merged field-by-field and never compared when looking for local edits. */
+const META_KEYS = new Set(['id', 'client_updated_at', 'updated_at', 'version', 'user_id', 'status', '_base_version']);
+
+/** Comparable form of a column value (timestamps differ in text between local ISO and Postgres output). */
+function norm(key: string, v: unknown): unknown {
+  if (key === 'deleted_at') return typeof v === 'string' ? Date.parse(v) : null;
+  return v === undefined ? null : v;
+}
+
+function deepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  const ka = Object.keys(a as object);
+  const kb = Object.keys(b as object);
+  if (ka.length !== kb.length) return false;
+  return ka.every((k) => deepEqual((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]));
+}
+
+const fieldsOf = (row: Record<string, unknown>) => Object.keys(row).filter((k) => !META_KEYS.has(k));
+const sameField = (k: string, a: unknown, b: unknown) => deepEqual(norm(k, a), norm(k, b));
+
+/** True when `local` has no field the base doesn't already have. */
+function sameFields(local: Record<string, unknown>, other: Record<string, unknown>): boolean {
+  return fieldsOf(local).every((k) => sameField(k, local[k], other[k]));
+}
+
+/**
+ * Three-way, field-level merge of one row. `base` is the last state both sides agreed on.
+ * A field changed on only one side keeps that change, so a note edited on the phone and an amount
+ * edited on the laptop both survive. When both sides changed the same field (or there is no base),
+ * the newer `client_updated_at` decides: client time is only a tiebreaker here.
+ */
+export function mergeRows(
+  table: TableName,
+  local: Record<string, unknown>,
+  base: Record<string, unknown> | null,
+  server: Record<string, unknown>,
+): Record<string, unknown> {
+  const localWins = Number(local.client_updated_at) >= Number(server.client_updated_at);
+  const out: Record<string, unknown> = { ...server };
+  for (const k of fieldsOf(local)) {
+    const lv = local[k];
+    const sv = server[k];
+    if (sameField(k, lv, sv)) continue;
+    if (base && sameField(k, lv, base[k])) continue; // only the server changed it
+    if (base && sameField(k, sv, base[k])) out[k] = lv; // only we changed it
+    else out[k] = localWins ? lv : sv; // both changed
+  }
+  // a cycle's day cursor only ever moves forward
+  if (table === 'cycles') out.current_day = Math.max(Number(local.current_day), Number(server.current_day));
+  out.client_updated_at = Math.max(Number(local.client_updated_at), Number(server.client_updated_at));
+  return out;
 }
 
 /* ---------- push ---------- */
@@ -264,26 +329,132 @@ async function getMeta(db: StashDB) {
   return (await db.meta.get('main')) ?? { id: 'main' as const, lastUsedLabel: null, schemaVersion: 0 };
 }
 
+type Ref = { name: TableName; id: string };
+type Payload = Record<string, Record<string, unknown>[]>;
+type PushResult =
+  | { status: 'ok'; versions: Record<string, Record<string, number>> }
+  | { status: 'conflict'; conflicts: Record<string, Remote[]> };
+
+const baseKey = (name: string, id: string) => `${name}/${id}`;
+const toRemoteRow = (name: TableName, row: unknown) => (MAPPERS[name].toRemote as (x: unknown) => Record<string, unknown>)(row);
+const isNameTable = (n: string) => n === 'categories' || n === 'events';
+
+/** Dirty rows -> payload items, with the server version each was based on. Rows identical to their base are skipped. */
+async function buildPayload(db: StashDB, refs: Ref[]): Promise<{ payload: Payload; items: Ref[] }> {
+  const payload: Payload = {};
+  const items: Ref[] = [];
+  for (const { name, id } of refs) {
+    const table = db[MAPPERS[name].local] as unknown as Dexie.Table<{ id: string }, string>;
+    const row = await table.get(id);
+    if (!row) continue;
+    const remote = toRemoteRow(name, row);
+    const base = await db.syncBase.get(baseKey(name, id));
+    if (base && sameFields(remote, base.row) && norm('deleted_at', remote.deleted_at) === norm('deleted_at', base.row.deleted_at)) continue;
+    (payload[name] ??= []).push({ ...remote, _base_version: base?.version ?? null });
+    items.push({ name, id });
+  }
+  return { payload, items };
+}
+
+async function callPush(mutationId: string, payload: Payload): Promise<PushResult> {
+  const res = await authed('rpc/push_changes', {
+    method: 'POST',
+    body: JSON.stringify({ p_mutation_id: mutationId, p_changes: payload }),
+  });
+  return (await res.json()) as PushResult;
+}
+
+/** Records the versions the server assigned, so the next edit of each row is based on them. */
+async function recordPushed(db: StashDB, payload: Payload, versions: Record<string, Record<string, number>>) {
+  const bases: SyncBase[] = [];
+  for (const [name, rows] of Object.entries(payload)) {
+    for (const r of rows) {
+      const v = versions[name]?.[r.id as string];
+      if (v == null) continue;
+      const { _base_version, ...row } = r;
+      void _base_version;
+      bases.push({ key: baseKey(name, r.id as string), version: v, row });
+    }
+  }
+  await db.syncBase.bulkPut(bases);
+}
+
+/** Gives a row that lost a unique-name race a free "Name (n)"; its id (and so every link to it) is unchanged. */
+async function renameForClash(db: StashDB, name: 'categories' | 'events', id: string): Promise<void> {
+  const table = db[MAPPERS[name].local] as unknown as Dexie.Table<{ id: string; name: string; updatedAt: number }, string>;
+  const row = await table.get(id);
+  if (!row) return;
+  const m = row.name.match(/^(.*) \((\d+)\)$/);
+  const next = m ? `${m[1]} (${Number(m[2]) + 1})` : `${row.name} (2)`;
+  await table.update(id, { name: next, updatedAt: Date.now() });
+}
+
+/**
+ * Sends these rows in one `push_changes` call (one Postgres transaction). On a version conflict the
+ * server rows are merged in field by field and the call is retried with the new versions. The batch is
+ * stored as `meta.pendingPush` first, so if the response is lost the same mutation id is resent and the
+ * server replays its stored result instead of applying it twice.
+ */
+async function pushRefs(db: StashDB, refs: Ref[]): Promise<number> {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const { payload, items } = await buildPayload(db, refs);
+    if (!items.length) return 0;
+    const id = crypto.randomUUID();
+    await db.meta.update('main', { pendingPush: { id, payload } });
+    let res: PushResult;
+    try {
+      res = await callPush(id, payload);
+    } catch (e) {
+      // a 4xx means the server rolled the batch back; offline / 5xx leave the outcome unknown, so keep it pending
+      if (e instanceof SyncError && e.status != null && e.status < 500) await db.meta.update('main', { pendingPush: null });
+      if (e instanceof SyncError && e.status === 409 && items.some((r) => isNameTable(r.name))) {
+        // another device already holds one of these live names (unique index)
+        if (items.length === 1) await renameForClash(db, items[0].name as 'categories' | 'events', items[0].id);
+        else for (const r of items.filter((x) => isNameTable(x.name))) await pushRefs(db, [r]);
+        continue;
+      }
+      throw e;
+    }
+    await db.meta.update('main', { pendingPush: null });
+    if (res.status === 'ok') {
+      await recordPushed(db, payload, res.versions);
+      return items.length;
+    }
+    await applyRemote(db, res.conflicts as RemoteRows); // field-level merge, bases move to the server versions
+  }
+  throw new SyncError('Sync could not settle after repeated conflicts', 'server');
+}
+
+/** Resends a batch whose outcome is unknown. Returns how many rows it covered. */
+async function resendPending(db: StashDB): Promise<number> {
+  const pending = (await getMeta(db)).pendingPush;
+  if (!pending) return 0;
+  let res: PushResult;
+  try {
+    res = await callPush(pending.id, pending.payload);
+  } catch (e) {
+    if (e instanceof SyncError && e.status != null && e.status < 500) await db.meta.update('main', { pendingPush: null });
+    throw e;
+  }
+  await db.meta.update('main', { pendingPush: null });
+  if (res.status !== 'ok') return 0; // the rows are still dirty; the normal path re-merges them
+  await recordPushed(db, pending.payload, res.versions);
+  return Object.values(pending.payload).reduce((n, rows) => n + rows.length, 0);
+}
+
 /** Pushes every row changed since `meta.lastPushedAt` (tombstones included), parents first. */
 export async function pushDirty(db: StashDB): Promise<number> {
+  let sent = await resendPending(db);
   const meta = await getMeta(db);
   const since = meta.lastPushedAt ?? 0;
   const cutoff = Date.now() - 1;
-  let sent = 0;
+  const refs: Ref[] = [];
   for (const name of TABLE_ORDER) {
-    const m = MAPPERS[name];
-    const table = db[m.local] as unknown as Dexie.Table<{ id: string; updatedAt: number }, string>;
+    const table = db[MAPPERS[name].local] as unknown as Dexie.Table<{ id: string; updatedAt: number }, string>;
     const dirty = await table.where('updatedAt').above(since).and((r) => r.updatedAt <= cutoff).toArray();
-    for (let i = 0; i < dirty.length; i += PUSH_CHUNK) {
-      const chunk = dirty.slice(i, i + PUSH_CHUNK).map((r) => (m.toRemote as (x: unknown) => unknown)(r));
-      await authed(`${name}?on_conflict=id`, {
-        method: 'POST',
-        headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
-        body: JSON.stringify(chunk),
-      });
-      sent += chunk.length;
-    }
+    for (const r of dirty) refs.push({ name, id: r.id });
   }
+  for (let i = 0; i < refs.length; i += PUSH_CHUNK) sent += await pushRefs(db, refs.slice(i, i + PUSH_CHUNK));
   await db.meta.update('main', { lastPushedAt: cutoff });
   return sent;
 }
@@ -299,17 +470,19 @@ async function pullTable(
 ): Promise<{ cursor: Cursor | null; touchedCycles: Set<string> }> {
   const touched = new Set<string>();
   let cur = cursor;
+  // first page: plain `updated_at > cursor - overlap`; later pages: the exact (updated_at, id) keyset
+  let filter = cursor ? `&updated_at=gt.${encodeURIComponent(new Date(Date.parse(cursor.ts) - PULL_OVERLAP_MS).toISOString())}` : '';
   for (;;) {
-    const filter = cur
-      ? `&or=(updated_at.gt.${encodeURIComponent(cur.ts)},and(updated_at.eq.${encodeURIComponent(cur.ts)},id.gt.${cur.id}))`
-      : '';
     const res = await authed(`${name}?select=*&order=updated_at.asc,id.asc&limit=${PAGE}${filter}`, { method: 'GET' });
     const rows = (await res.json()) as Remote[];
     if (rows.length) {
       const t = await applyRemote(db, { [name]: rows });
       t.forEach((id) => touched.add(id));
       const last = rows[rows.length - 1];
-      cur = { ts: last.updated_at as string, id: last.id };
+      const next = { ts: last.updated_at as string, id: last.id };
+      // the overlap window re-reads old rows first; never let the stored cursor move backwards
+      if (!cur || Date.parse(next.ts) > Date.parse(cur.ts) || (next.ts === cur.ts && next.id > cur.id)) cur = next;
+      filter = `&or=(updated_at.gt.${encodeURIComponent(next.ts)},and(updated_at.eq.${encodeURIComponent(next.ts)},id.gt.${next.id}))`;
     }
     if (rows.length < PAGE) break;
   }
@@ -329,15 +502,17 @@ export async function pullSince(db: StashDB): Promise<void> {
 }
 
 /**
- * Last-write-wins per row on client_updated_at. Cycle.currentDay merges as max(local, remote),
- * then touched cycles are re-derived. Returns the touched cycle ids.
+ * Applies server rows. A row we never edited is replaced; a row with local edits is merged field by
+ * field against the last synced version (`mergeRows`), and what still differs from the server stays
+ * dirty so the next push sends it. Cycle.currentDay merges as max(local, remote); touched cycles are
+ * re-derived. Returns the touched cycle ids.
  */
 export async function applyRemote(db: StashDB, rows: RemoteRows): Promise<Set<string>> {
   const touched = new Set<string>();
   const { recompute } = await import('@/db/queries');
   await db.transaction(
     'rw',
-    [db.plans, db.cycles, db.transactions, db.cats, db.evts, db.dayRows, db.meta],
+    [db.plans, db.cycles, db.transactions, db.cats, db.evts, db.dayRows, db.meta, db.syncBase],
     async () => {
       for (const name of TABLE_ORDER) {
         const list = rows[name];
@@ -345,29 +520,30 @@ export async function applyRemote(db: StashDB, rows: RemoteRows): Promise<Set<st
         const m = MAPPERS[name];
         const table = db[m.local] as unknown as Dexie.Table<Record<string, unknown> & { id: string; updatedAt: number }, string>;
         for (const r of list) {
-          const incoming = m.toLocal(r) as unknown as Record<string, unknown> & { id: string; updatedAt: number };
+          const key = baseKey(name, r.id);
+          const version = r.version == null ? null : Number(r.version);
+          const base = await db.syncBase.get(key);
+          if (base && version != null && version <= base.version) continue; // already have this (our own push, or an old page)
           const local = await table.get(r.id);
-          if (name === 'cycles' && local) {
-            const l = local as unknown as Cycle;
-            const inc = incoming as unknown as Cycle;
-            const day = Math.max(l.currentDay, inc.currentDay);
-            if (local.updatedAt >= incoming.updatedAt) {
-              if (day !== l.currentDay) {
-                await db.cycles.update(l.id, { currentDay: day });
-                touched.add(l.id);
-              }
-              continue;
+          let next: Record<string, unknown> & { id: string; updatedAt: number };
+          if (!local) {
+            next = m.toLocal(r) as never;
+          } else {
+            const merged = mergeRows(name, toRemoteRow(name, local), base?.row ?? null, r);
+            const dirty = !sameFields(merged, r) || norm('deleted_at', merged.deleted_at) !== norm('deleted_at', r.deleted_at);
+            next = m.toLocal({ ...r, ...merged } as Remote) as never;
+            next.updatedAt = dirty ? Math.max(Date.now(), local.updatedAt) : Number(merged.client_updated_at);
+            if (name === 'cycles') {
+              const c = next as unknown as Cycle;
+              c.pool = (local as unknown as Cycle).pool;
+              c.fromSavingsTotal = (local as unknown as Cycle).fromSavingsTotal;
             }
-            inc.currentDay = day;
-            inc.pool = l.pool;
-            inc.fromSavingsTotal = l.fromSavingsTotal;
-          } else if (local && local.updatedAt >= incoming.updatedAt) {
-            continue;
           }
-          await table.put(incoming);
+          await table.put(next);
+          if (version != null) await db.syncBase.put({ key, version, row: r });
           if (name === 'cycles') touched.add(r.id);
           if (name === 'transactions') {
-            const cid = (incoming as unknown as Txn).cycleId;
+            const cid = (next as unknown as Txn).cycleId;
             const prev = (local as unknown as Txn | undefined)?.cycleId;
             if (cid) touched.add(cid);
             if (prev) touched.add(prev);
@@ -398,9 +574,9 @@ async function purgeTombstones(db: StashDB): Promise<void> {
   const pushed = meta.lastPushedAt ?? 0;
   for (const name of TABLE_ORDER) {
     const table = db[MAPPERS[name].local] as unknown as Dexie.Table<{ id: string; updatedAt: number; deletedAt?: number | null }, string>;
-    await table
-      .filter((r) => r.deletedAt != null && r.deletedAt < limit && r.updatedAt <= pushed)
-      .delete();
+    const old = await table.filter((r) => r.deletedAt != null && r.deletedAt < limit && r.updatedAt <= pushed).primaryKeys();
+    await table.bulkDelete(old);
+    await db.syncBase.bulkDelete(old.map((id) => baseKey(name, id)));
   }
 }
 

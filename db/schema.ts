@@ -1,6 +1,6 @@
 import Dexie, { type Table } from 'dexie';
 import { useSyncExternalStore } from 'react';
-import { migrateV4ToV5, migrateCatsToOverrides } from './migrate';
+import { migrateV4ToV5, migrateCatsToOverrides, migrateTxnLinks } from './migrate';
 import { V4_STORES } from './legacy';
 import type { DefaultCategory } from '@/lib/categories';
 
@@ -33,6 +33,8 @@ export interface Meta {
   lastPushedAt?: number;
   /** Per remote table keyset cursor for pulls. */
   pullCursors?: Record<string, { ts: string; id: string } | null>;
+  /** Batch sent to `push_changes` whose outcome is unknown (offline / 5xx). Resent with the same id so the retry is idempotent. */
+  pendingPush?: { id: string; payload: Record<string, Record<string, unknown>[]> } | null;
   /** Set by claim; the guest DB is deleted after the first successful sync. */
   guestClaimPending?: boolean;
   /** True once sample data was loaded; sample data is never claimed into an account. */
@@ -44,6 +46,16 @@ export interface Meta {
 }
 
 /* ---------- v5 tables (uuid ids, soft delete, derived day rows) ---------- */
+
+/** Last server state of a synced row: the common ancestor for field-level merges and the OCC token. */
+export interface SyncBase {
+  /** `<remote table>/<row id>` */
+  key: string;
+  /** Server `version` this base was read at (sent back as `_base_version`). */
+  version: number;
+  /** The remote-shaped row as the server holds it. */
+  row: Record<string, unknown>;
+}
 
 export interface Syncable {
   id: string;
@@ -74,6 +86,8 @@ export interface Cycle extends Syncable {
   pool: number;
   /** Cache written by recompute. */
   fromSavingsTotal: number;
+  /** CALC_VERSION the pool/fromSavingsTotal/dayRows caches were built with (local only, not synced). */
+  calcVersion?: number;
   leftoverMoved: boolean;
   /** Closed days that were back-filled with a rough total. */
   estimatedDays: number[];
@@ -84,10 +98,16 @@ export interface Txn extends Syncable {
   /** Calendar date yyyy-mm-dd; the day is derived via dayOfTxn. */
   txnDate: string;
   amount: number;
+  /** Display snapshot of the category name; `categoryId` is the link (see `CategoryRow`/defaults). */
   type: string;
+  /** Resolved category id: a default's key or a `cats` row id. Null only for legacy/unknown names. */
+  categoryId: string | null;
   subtype: string | null;
   label: string;
+  /** Display snapshot of the event name; `eventId` is the link. */
   event: string | null;
+  /** `evts` row id. Null when untagged (or a legacy name-only event). */
+  eventId: string | null;
   payment: string | null;
   note: string | null;
   fromSavings: boolean;
@@ -157,7 +177,7 @@ export interface Entry {
 export const PAYMENT_MODES = ['UPI', 'Card', 'Cash'] as const;
 export type PaymentMode = (typeof PAYMENT_MODES)[number];
 
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 9;
 
 export class StashDB extends Dexie {
   users!: Table<UserRecord, string>;
@@ -168,6 +188,7 @@ export class StashDB extends Dexie {
   dayRows!: Table<DayRow, [string, number]>;
   cats!: Table<CategoryRow, string>;
   evts!: Table<StashEvent, string>;
+  syncBase!: Table<SyncBase, string>;
 
   constructor(name = dbNameFor(GUEST_UID)) {
     super(name);
@@ -199,6 +220,12 @@ export class StashDB extends Dexie {
     this.version(7)
       .stores({ cats: 'id, name, updatedAt, baseId' })
       .upgrade((tx) => migrateCatsToOverrides(tx));
+    // v8: transactions link to categories/events by id (names stay as display snapshots).
+    this.version(8)
+      .stores({ transactions: 'id, cycleId, txnDate, [cycleId+txnDate], type, event, categoryId, eventId, updatedAt' })
+      .upgrade((tx) => migrateTxnLinks(tx));
+    // v9: per-row server version + last-synced snapshot (optimistic concurrency, field-level merge).
+    this.version(9).stores({ syncBase: 'key' });
   }
 }
 
