@@ -81,6 +81,5 @@ export const LogoMark = () => (
     <Logo size={32} />
     <Logo size={64} />
     <Logo size={128} />
-    <Logo size={128} variant="light" />
   </div>
 );

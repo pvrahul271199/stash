@@ -1,15 +1,5 @@
 /** Stash logo: ink tile, "Stash" wordmark in the display font, teal underline. Pure SVG, scales to any size. */
-export function Logo({
-  size = 40,
-  className = '',
-  variant = 'dark',
-}: {
-  size?: number;
-  className?: string;
-  /** dark: indigo tile (icons, dark surfaces). light: white tile with indigo text (white screens). */
-  variant?: 'dark' | 'light';
-}) {
-  const light = variant === 'light';
+export function Logo({ size = 40, className = '' }: { size?: number; className?: string }) {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -20,11 +10,7 @@ export function Logo({
       aria-label="Stash"
       className={className}
     >
-      {light ? (
-        <rect x="1" y="1" width="98" height="98" rx="22" fill="#fff" stroke="#E4E3F0" strokeWidth="2" />
-      ) : (
-        <rect width="100" height="100" rx="22" fill="#1E1B4B" />
-      )}
+      <rect width="100" height="100" rx="22" fill="#1E1B4B" />
       <text
         x="50"
         y="56"

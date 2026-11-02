@@ -14,7 +14,7 @@ export function Welcome({
   return (
     <main className="flex h-full flex-col justify-between px-6 pb-8 pt-14">
       <div>
-        <Logo size={44} variant="light" className="mb-6" />
+        <Logo size={44} className="mb-6" />
         <h1 className="font-display text-[40px] font-semibold leading-[1.1] tracking-tight text-ink">
           Know what you can spend today.
         </h1>
