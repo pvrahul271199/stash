@@ -16,6 +16,7 @@ import {
   useSafeAreaInsets,
 } from 'react-native-safe-area-context';
 import { TabBar, Toast, type Tab } from '@/components/ui';
+import { LoadingScreen } from '@/components/LoadingScreen';
 import {
   CategoriesTab,
   InsightsTab,
@@ -48,6 +49,7 @@ function Shell() {
   const sheet = useUI((s) => s.sheet);
   const setSheet = useUI((s) => s.setSheet);
   const [ready, setReady] = useState(false);
+  const [loadMsg, setLoadMsg] = useState('Opening your stash…');
   const [flow, setFlow] = useState<Flow>('welcome');
   const [draft, setDraft] = useState<PlanInput | null>(null);
   const [tab, setTab] = useState<Tab>('today');
@@ -61,7 +63,10 @@ function Shell() {
 
   useEffect(() => {
     ensureSeed()
-      .then(() => runSync())
+      .then(() => {
+        setLoadMsg('Catching up your days…');
+        return runSync();
+      })
       .then(() => setReady(true));
   }, [runSync]);
 
@@ -89,7 +94,7 @@ function Shell() {
 
   let body: React.ReactNode = null;
   if (!ready || !snap) {
-    body = <View style={{ flex: 1, backgroundColor: '#FFFFFF' }} />;
+    body = <LoadingScreen message={loadMsg} />;
   } else if (flow === 'changePlan') {
     body = (
       <Onboarding
@@ -212,7 +217,7 @@ export default function App() {
   });
 
   if (!loaded) {
-    return <View style={{ flex: 1, backgroundColor: '#FFFFFF' }} />;
+    return <LoadingScreen />;
   }
 
   return (

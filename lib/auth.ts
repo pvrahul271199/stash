@@ -25,7 +25,8 @@ function validatePassword(p: string): string | null {
   return p.length >= 8 ? null : 'Password must be at least 8 characters';
 }
 
-let state: AuthState = { status: 'loading' };
+const LOADING: AuthState = { status: 'loading' };
+let state: AuthState = LOADING;
 const listeners = new Set<() => void>();
 function setState(next: AuthState) {
   state = next;
@@ -83,7 +84,7 @@ export function useAuth(): AuthState {
       return () => listeners.delete(l);
     },
     () => state,
-    () => ({ status: 'loading' }) as AuthState,
+    () => LOADING,
   );
 }
 
