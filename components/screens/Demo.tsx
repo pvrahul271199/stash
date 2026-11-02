@@ -1,12 +1,40 @@
 'use client';
-import { useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { CloseIcon, IconButton, PrimaryButton } from '../ui/Button';
 import { HugeNumber } from '../ui/HugeNumber';
-import { moneyToLiveOn } from '@/lib/budget';
+import { moneyToLiveOn, projection } from '@/lib/budget';
+import { categoryTotals, type InsightEntry } from '@/lib/insights';
+import { DEFAULT_SAMPLE_PLAN, SAMPLE_DAYS, generateSampleSpends } from '@/lib/sample';
+import { weekdayOfDay } from '@/lib/dates';
 import { inr } from '@/lib/format';
 import { categoryRamp } from '@/theme/tokens';
 
-/* Illustrative numbers only: 50,000 income, 15,000 bills, 5,000 savings, 30 days. */
+/* ---------- sample month: the same data "explore with sample data" uses ---------- */
+
+const SAMPLE_START = '2026-10-10';
+const spends = generateSampleSpends(SAMPLE_START, SAMPLE_DAYS);
+const sampleEntries: InsightEntry[] = spends.map((s) => ({
+  day: s.day,
+  amount: s.amount,
+  label: s.label,
+  category: s.category,
+  subcategory: s.subcategory,
+  fromSavings: s.fromSavings,
+  isEstimate: false,
+  hour: s.hour,
+}));
+const SLICES = categoryTotals(sampleEntries).slice(0, 5);
+const SAMPLE_PLAN_AMOUNT = moneyToLiveOn(DEFAULT_SAMPLE_PLAN);
+const SAMPLE_SPENT = sampleEntries.filter((e) => !e.fromSavings).reduce((a, e) => a + e.amount, 0);
+const PROJ = projection(SAMPLE_PLAN_AMOUNT, DEFAULT_SAMPLE_PLAN.monthLength, SAMPLE_DAYS, SAMPLE_SPENT);
+const WEEKDAY_TOTALS = (() => {
+  const t = Array(7).fill(0) as number[];
+  for (const e of sampleEntries) if (!e.fromSavings) t[weekdayOfDay(SAMPLE_START, e.day)] += e.amount;
+  return t;
+})();
+
+/* ---------- basics numbers (illustrative) ---------- */
+
 const PLAN = { income: 50000, bills: 15000, savings: 5000 };
 const DAYS = 30;
 const POOL = moneyToLiveOn(PLAN);
@@ -17,33 +45,25 @@ const POOL_1 = POOL - SPENT_1;
 const NEXT_1 = Math.round(POOL_1 / (DAYS - 1));
 const POOL_2 = POOL_1 - SPENT_2;
 const NEXT_2 = Math.round(POOL_2 / (DAYS - 2));
+const STEP_MS = 4800;
 
-const STEP_MS = 4200;
-const MAX_H = 150; // px for the tallest value
-const px = (v: number) => (v / SPENT_2) * MAX_H;
-
-const STEPS = [
-  { title: 'Set it once', body: 'Income minus bills and savings is the money you have to live on this month.', big: POOL },
-  { title: 'Split across your days', body: 'Every day starts with the same amount. That is your one number.', big: BASE },
-  { title: 'Spend less, tomorrow grows', body: `Day 1: you spent ${inr(SPENT_1)}, ${inr(BASE - SPENT_1)} less than your amount. Every day ahead gets a little more.`, big: NEXT_1 },
-  { title: 'Spend more, it is spread out', body: `Day 2: you spent ${inr(SPENT_2)}. No single day takes the hit; every day ahead adjusts a little.`, big: NEXT_2 },
-] as const;
-
-/* ---------- interactive callout canvas (320 x 300 units, scaled uniformly) ---------- */
+/* ---------- canvas: fixed unit space (320 wide, H tall) scaled uniformly ---------- */
 
 const W = 320;
-const H = 300;
 type Pt = [number, number];
+const CanvasH = createContext(400);
 
 interface Callout {
   text: string;
-  target: Pt; // the thing being pointed at
-  from: Pt; // where the arrow leaves the label
+  /** Where the arrow tip lands. Keep a few units of air between this and the component. */
+  target: Pt;
+  /** Where the arrow leaves the label. */
+  from: Pt;
   label: { x: number; y: number; w: number };
-  bend?: number; // curve strength, sign picks the side
+  bend?: number;
 }
 
-/** Curvy arrow: quadratic curve from the label to just short of the target, with an open arrowhead. */
+/** Curvy arrow: a quadratic curve from the label to the target, with an open arrowhead at the tip. */
 function arrowGeometry(from: Pt, to: Pt, bend = 0.3) {
   const [x1, y1] = from;
   const [x2, y2] = to;
@@ -56,60 +76,104 @@ function arrowGeometry(from: Pt, to: Pt, bend = 0.3) {
   const tl = Math.hypot(tx, ty) || 1;
   const ux = tx / tl;
   const uy = ty / tl;
-  const ex = x2 - ux * 9; // stop short of the dot
-  const ey = y2 - uy * 9;
   const rot = (a: number): Pt => [ux * Math.cos(a) - uy * Math.sin(a), ux * Math.sin(a) + uy * Math.cos(a)];
   const [ax, ay] = rot(Math.PI * 0.84);
   const [bx, by] = rot(-Math.PI * 0.84);
   return {
-    curve: `M${x1} ${y1} Q${cx} ${cy} ${ex} ${ey}`,
-    head: `M${ex + ax * 7} ${ey + ay * 7} L${ex} ${ey} L${ex + bx * 7} ${ey + by * 7}`,
+    curve: `M${x1} ${y1} Q${cx} ${cy} ${x2} ${y2}`,
+    head: `M${x2 + ax * 7} ${y2 + ay * 7} L${x2} ${y2} L${x2 + bx * 7} ${y2 + by * 7}`,
   };
 }
 
-const pctX = (v: number) => `${(v / W) * 100}%`;
-const pctY = (v: number) => `${(v / H) * 100}%`;
+const px = (v: number) => `${(v / W) * 100}%`;
 
-/** Absolutely placed block in canvas units. */
+/** A block placed in canvas units. `plain` skips the flex centring (for charts). */
 function Box({
-  x, y, w, h, className = '', children,
-}: { x: number; y: number; w: number; h: number; className?: string; children?: ReactNode }) {
+  x, y, w, h, className = '', plain, children,
+}: { x: number; y: number; w: number; h: number; className?: string; plain?: boolean; children?: ReactNode }) {
+  const H = useContext(CanvasH);
   return (
     <div
-      className={`absolute flex items-center ${className}`}
-      style={{ left: pctX(x), top: pctY(y), width: pctX(w), height: pctY(h) }}
+      className={`absolute ${plain ? '' : 'flex items-center'} ${className}`}
+      style={{ left: px(x), top: `${(y / H) * 100}%`, width: px(w), height: `${(h / H) * 100}%` }}
     >
       {children}
     </div>
   );
 }
 
+function Canvas({
+  H, callout, id, onLabel, children,
+}: { H: number; callout: Callout; id: string; onLabel?: () => void; children: ReactNode }) {
+  const g = arrowGeometry(callout.from, callout.target, callout.bend);
+  return (
+    <CanvasH.Provider value={H}>
+      <div
+        className="relative w-full overflow-hidden rounded-[18px] border border-line bg-white"
+        style={{ aspectRatio: `${W} / ${H}` }}
+      >
+        {children}
+        <svg
+          key={id}
+          viewBox={`0 0 ${W} ${H}`}
+          className="pointer-events-none absolute inset-0 h-full w-full"
+          fill="none"
+          aria-hidden="true"
+        >
+          <path d={g.curve} pathLength={1} className="demo-draw" stroke="#1E1B4B" strokeWidth={1.8} strokeLinecap="round" />
+          <path d={g.head} className="demo-head" stroke="#1E1B4B" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+        <button
+          key={`label-${id}`}
+          type="button"
+          onClick={onLabel}
+          className="demo-fade absolute rounded-[8px] bg-white text-left font-display text-[15px] font-medium leading-snug text-ink"
+          style={{
+            left: px(callout.label.x),
+            top: `${(callout.label.y / H) * 100}%`,
+            width: px(callout.label.w),
+            minHeight: 0,
+            padding: '1px 3px',
+          }}
+        >
+          {callout.text}
+        </button>
+      </div>
+    </CanvasH.Provider>
+  );
+}
+
+/* ---------- mocks ---------- */
+
 const row = 'rounded-[10px] border border-line bg-white px-2.5 text-[11px] text-ink';
+const heading = 'text-[11px] font-semibold text-soft';
 
 function EventsMock() {
   return (
     <>
-      <Box x={16} y={10} w={150} h={30} className="rounded-full bg-ink px-3 text-[12px] font-semibold text-white">
+      <Box x={16} y={62} w={150} h={30} className="rounded-full bg-ink px-3 text-[12px] font-semibold text-white">
         <span className="mr-2 h-2 w-2 rounded-full bg-white" /> Goa trip
       </Box>
-      {[
-        ['Beach shack lunch', 640],
-        ['Scooter rental', 500],
-        ['Sunset cruise', 1200],
-      ].map(([l, a], i) => (
-        <Box key={l} x={16} y={54 + i * 36} w={288} h={30} className={`${row} justify-between`}>
+      {(
+        [
+          ['Beach shack lunch', 640],
+          ['Scooter rental', 500],
+          ['Sunset cruise', 1200],
+        ] as const
+      ).map(([l, a], i) => (
+        <Box key={l} x={16} y={110 + i * 36} w={288} h={30} className={`${row} justify-between`}>
           <span>{l}</span>
           <span className="flex items-center gap-2">
             <span className="rounded-full bg-tint px-2 py-0.5 text-[10px] text-soft">Goa trip</span>
-            <span className="num">{inr(a as number)}</span>
+            <span className="num">{inr(a)}</span>
           </span>
         </Box>
       ))}
-      <Box x={16} y={202} w={200} h={14} className="text-[11px] font-semibold text-soft">By event</Box>
-      <Box x={16} y={222} w={230} h={16} className="rounded-full bg-ink" />
-      <Box x={16} y={246} w={70} h={16} className="rounded-full bg-[#7E7BBF]" />
-      <Box x={254} y={221} w={60} h={18} className="num text-[11px] text-ink">{inr(2340)}</Box>
-      <Box x={94} y={245} w={60} h={18} className="num text-[11px] text-ink">{inr(680)}</Box>
+      <Box x={16} y={288} w={200} h={14} className={heading}>By event</Box>
+      <Box x={16} y={308} w={220} h={16} className="rounded-full bg-ink" />
+      <Box x={16} y={332} w={70} h={16} className="rounded-full bg-[#7E7BBF]" />
+      <Box x={244} y={307} w={64} h={18} className="num text-[11px] text-ink">{inr(2340)}</Box>
+      <Box x={94} y={331} w={64} h={18} className="num text-[11px] text-ink">{inr(680)}</Box>
     </>
   );
 }
@@ -119,13 +183,13 @@ function HistoryMock() {
   return (
     <>
       {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => (
-        <Box key={i} x={20 + i * 42} y={8} w={30} h={14} className="justify-center text-[10px] text-faint">{d}</Box>
+        <Box key={i} x={20 + i * 42} y={10} w={30} h={14} className="justify-center text-[10px] text-faint">{d}</Box>
       ))}
       {Array.from({ length: 21 }, (_, i) => (
         <Box
           key={i}
           x={20 + (i % 7) * 42}
-          y={30 + Math.floor(i / 7) * 38}
+          y={32 + Math.floor(i / 7) * 38}
           w={30}
           h={30}
           className={`justify-center rounded-full border text-[11px] ${
@@ -135,55 +199,94 @@ function HistoryMock() {
           {i + 1}
         </Box>
       ))}
-      <Box x={20} y={146} w={90} h={14} className="gap-1.5 text-[10px] text-soft">
-        <span className="h-2.5 w-2.5 rounded-full border border-line bg-tint" /> On plan
+      <Box x={16} y={236} w={288} h={14} className={heading}>Day 10 · spends</Box>
+      {(
+        [
+          ['Groceries', 430],
+          ['Auto ride', 180],
+        ] as const
+      ).map(([l, a], i) => (
+        <Box key={l} x={16} y={256 + i * 36} w={288} h={30} className={`${row} justify-between`}>
+          <span>{l}</span>
+          <span className="num">{inr(a)}</span>
+        </Box>
+      ))}
+    </>
+  );
+}
+
+/** Donut drawn from the sample month's real category totals. */
+function MiniDonut({ cx, cy, R, r }: { cx: number; cy: number; R: number; r: number }) {
+  const H = useContext(CanvasH);
+  const total = SLICES.reduce((a, s) => a + s.total, 0);
+  let acc = 0;
+  const pt = (rad: number, deg: number): Pt => {
+    const a = ((deg - 90) * Math.PI) / 180;
+    return [cx + rad * Math.cos(a), cy + rad * Math.sin(a)];
+  };
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="absolute inset-0 h-full w-full" aria-hidden="true">
+      {SLICES.map((s, i) => {
+        const start = acc;
+        acc += (s.total / total) * 360;
+        const [x1, y1] = pt(R, start);
+        const [x2, y2] = pt(R, acc);
+        const [x3, y3] = pt(r, acc);
+        const [x4, y4] = pt(r, start);
+        const large = acc - start > 180 ? 1 : 0;
+        return (
+          <path
+            key={s.name}
+            d={`M${x1} ${y1} A${R} ${R} 0 ${large} 1 ${x2} ${y2} L${x3} ${y3} A${r} ${r} 0 ${large} 0 ${x4} ${y4} Z`}
+            fill={categoryRamp[i]}
+            stroke="#fff"
+            strokeWidth={1.5}
+          />
+        );
+      })}
+    </svg>
+  );
+}
+
+function InsightsMock() {
+  const barMax = Math.max(SAMPLE_PLAN_AMOUNT, PROJ?.projected ?? 0, SAMPLE_SPENT) * 1.05;
+  const BAR_X = 16;
+  const BAR_W = 288;
+  const at = (v: number) => (v / barMax) * BAR_W;
+  const projected = PROJ?.projected ?? SAMPLE_SPENT;
+  const wdMax = Math.max(...WEEKDAY_TOTALS, 1);
+  return (
+    <>
+      <Box x={16} y={10} w={200} h={14} className={heading}>Where it went</Box>
+      <MiniDonut cx={82} cy={96} R={52} r={32} />
+      {SLICES.slice(0, 4).map((s, i) => (
+        <Box key={s.name} x={160} y={40 + i * 24} w={150} h={18} className="gap-2 text-[11px] text-ink">
+          <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: categoryRamp[i] }} />
+          <span className="flex-1 truncate">{s.name}</span>
+          <span className="num">{inr(s.total)}</span>
+        </Box>
+      ))}
+
+      <Box x={16} y={196} w={200} h={14} className={heading}>Projected spending</Box>
+      <Box x={BAR_X} y={216} w={BAR_W} h={14} plain className="overflow-hidden rounded-full bg-tint">
+        <div className="absolute inset-y-0 left-0 bg-[#7E7BBF]" style={{ width: `${(at(projected) / BAR_W) * 100}%` }} />
+        <div className="absolute inset-y-0 left-0 bg-ink" style={{ width: `${(at(SAMPLE_SPENT) / BAR_W) * 100}%` }} />
       </Box>
-      <Box x={110} y={146} w={140} h={14} className="gap-1.5 text-[10px] text-soft">
-        <span className="h-2.5 w-2.5 rounded-full border border-ink bg-[#B5B3DA]" /> Over day limit
-      </Box>
-      <Box x={16} y={206} w={288} h={14} className="text-[11px] font-semibold text-soft">Day 10 · spends</Box>
-      <Box x={16} y={226} w={288} h={30} className={`${row} justify-between`}>
-        <span>Groceries</span>
-        <span className="num">{inr(430)}</span>
+      <Box x={BAR_X + at(SAMPLE_PLAN_AMOUNT) - 1} y={211} w={2} h={24} plain className="bg-ink" />
+      <Box x={16} y={238} w={140} h={14} className="num text-[11px] text-ink">Spent {inr(SAMPLE_SPENT)}</Box>
+      <Box x={160} y={238} w={144} h={14} className="num justify-end text-[11px] text-soft">Heading to {inr(Math.round(projected))}</Box>
+
+      <Box x={16} y={316} w={150} h={14} className={heading}>By day of week</Box>
+      <Box x={16} y={336} w={150} h={50} plain className="flex items-end gap-1.5">
+        {WEEKDAY_TOTALS.map((t, i) => (
+          <div key={i} className="flex-1 rounded-[3px] bg-[#7E7BBF]" style={{ height: `${Math.max(8, (t / wdMax) * 100)}%` }} />
+        ))}
       </Box>
     </>
   );
 }
 
-function InsightsMock() {
-  const bars = [60, 85, 40, 110, 70, 95, 50, 75, 120, 65, 30, 30, 30, 30];
-  return (
-    <>
-      <Box x={16} y={6} w={288} h={40} className="justify-between rounded-[12px] bg-tint px-3">
-        <span className="text-[11px] text-soft">On plan for today</span>
-        <span className="num text-[20px] text-ink">{inr(1014)}</span>
-      </Box>
-      <div className="absolute" style={{ left: pctX(16), top: pctY(100), width: pctX(288), height: pctY(60) }}>
-        <div className="flex h-full items-end gap-[3px]">
-          {bars.map((b, i) => (
-            <div
-              key={i}
-              className={`flex-1 rounded-[3px] ${i < 9 ? 'bg-ink' : 'border border-line bg-tint'}`}
-              style={{ height: `${(b / 120) * 100}%` }}
-            />
-          ))}
-        </div>
-      </div>
-      <Box x={16} y={170} w={288} h={14} className="text-[11px] font-semibold text-soft">Where it went</Box>
-      <div className="absolute flex overflow-hidden rounded-full" style={{ left: pctX(16), top: pctY(188), width: pctX(288), height: pctY(14) }}>
-        {[40, 25, 20, 15].map((w, i) => (
-          <div key={i} style={{ width: `${w}%`, background: categoryRamp[i] }} />
-        ))}
-      </div>
-      <Box x={16} y={214} w={150} h={14} className="text-[11px] font-semibold text-soft">By day of week</Box>
-      <div className="absolute flex items-end gap-1.5" style={{ left: pctX(16), top: pctY(234), width: pctX(150), height: pctY(56) }}>
-        {[40, 55, 35, 60, 80, 100, 90].map((b, i) => (
-          <div key={i} className="flex-1 rounded-[3px] bg-[#7E7BBF]" style={{ height: `${b}%` }} />
-        ))}
-      </div>
-    </>
-  );
-}
+/* ---------- chapters ---------- */
 
 interface Chapter {
   name: string;
@@ -198,9 +301,9 @@ const CHAPTERS: Chapter[] = [
     title: 'Tag spends to an event',
     mock: <EventsMock />,
     callouts: [
-      { text: 'Going on a trip? Start an event.', target: [100, 25], from: [200, 22], label: { x: 176, y: 8, w: 130 }, bend: -0.35 },
-      { text: 'New spends get tagged to it automatically.', target: [258, 141], from: [150, 176], label: { x: 16, y: 160, w: 150 }, bend: 0.3 },
-      { text: 'See what the whole trip cost.', target: [240, 230], from: [150, 278], label: { x: 16, y: 268, w: 140 }, bend: -0.3 },
+      { text: 'Going on a trip? Start an event.', target: [100, 53], from: [196, 22], label: { x: 100, y: 8, w: 210 }, bend: -0.3 },
+      { text: 'Every spend after is tagged for you.', target: [236, 220], from: [150, 246], label: { x: 16, y: 228, w: 134 }, bend: 0.3 },
+      { text: 'See what the whole trip cost.', target: [272, 336], from: [232, 362], label: { x: 16, y: 354, w: 250 }, bend: -0.3 },
     ],
   },
   {
@@ -208,9 +311,9 @@ const CHAPTERS: Chapter[] = [
     title: 'Look back at any day',
     mock: <HistoryMock />,
     callouts: [
-      { text: 'Calm days stay light.', target: [77, 121], from: [60, 168], label: { x: 16, y: 166, w: 130 }, bend: 0.3 },
-      { text: 'Over the limit? The day is just marked darker.', target: [161, 121], from: [200, 172], label: { x: 176, y: 166, w: 130 }, bend: -0.3 },
-      { text: 'Tap any day to see or fix its spends.', target: [250, 241], from: [180, 276], label: { x: 16, y: 268, w: 200 }, bend: -0.3 },
+      { text: 'Calm days stay light.', target: [77, 143], from: [60, 176], label: { x: 16, y: 170, w: 120 }, bend: 0.3 },
+      { text: 'Over the limit? Just marked darker, never shamed.', target: [161, 143], from: [200, 178], label: { x: 176, y: 172, w: 134 }, bend: -0.3 },
+      { text: 'Tap any day to see or fix its spends.', target: [222, 330], from: [150, 362], label: { x: 16, y: 352, w: 280 }, bend: -0.25 },
     ],
   },
   {
@@ -218,63 +321,112 @@ const CHAPTERS: Chapter[] = [
     title: 'Understand your month',
     mock: <InsightsMock />,
     callouts: [
-      { text: 'Every bar is a day. Dark ones are done.', target: [150, 130], from: [230, 62], label: { x: 16, y: 54, w: 190 }, bend: 0.3 },
-      { text: 'Where it went, by category. Tap one to focus.', target: [260, 195], from: [215, 216], label: { x: 180, y: 208, w: 130 }, bend: -0.3 },
-      { text: 'Spot patterns by weekday and time.', target: [135, 262], from: [215, 262], label: { x: 180, y: 252, w: 130 }, bend: 0.3 },
+      { text: 'Where it went. Tap a slice to focus.', target: [128, 140], from: [190, 172], label: { x: 160, y: 150, w: 150 }, bend: 0.3 },
+      { text: PROJ ? 'Where the month is heading at this pace.' : 'Your pace, so far.', target: [200, 258], from: [250, 284], label: { x: 160, y: 270, w: 150 }, bend: -0.3 },
+      { text: 'Spot your patterns by weekday.', target: [174, 362], from: [215, 342], label: { x: 190, y: 330, w: 120 }, bend: 0.3 },
     ],
   },
 ];
 
 function Tour({ chapter, hot, setHot }: { chapter: Chapter; hot: number; setHot: (i: number) => void }) {
-  const c = chapter.callouts[hot];
-  const g = arrowGeometry(c.from, c.target, c.bend);
+  const next = () => setHot((hot + 1) % chapter.callouts.length);
   return (
     <div className="demo-fade">
       <h2 className="font-display text-[26px] font-semibold leading-tight text-ink">{chapter.title}</h2>
-      <p className="mt-1 text-[13px] text-soft">Tap an arrow or a dot to explore.</p>
-      <div
-        className="relative mt-4 w-full overflow-hidden rounded-[18px] border border-line bg-white"
-        style={{ aspectRatio: `${W} / ${H}` }}
-      >
-        {chapter.mock}
-        <svg
-          key={`${chapter.name}-${hot}`}
-          viewBox={`0 0 ${W} ${H}`}
-          className="pointer-events-none absolute inset-0 h-full w-full"
-          fill="none"
-          aria-hidden="true"
-        >
-          <path d={g.curve} pathLength={1} className="demo-draw" stroke="#1E1B4B" strokeWidth={1.8} strokeLinecap="round" />
-          <path d={g.head} className="demo-head" stroke="#1E1B4B" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+      <p className="mt-1 text-[13px] text-soft">Tap the text or the dots below to explore.</p>
+      <div className="mt-4">
+        <Canvas H={400} callout={chapter.callouts[hot]} id={`${chapter.name}-${hot}`} onLabel={next}>
+          {chapter.mock}
+        </Canvas>
+      </div>
+      <div className="mt-3 flex items-center justify-center gap-1" role="tablist" aria-label="Tips">
         {chapter.callouts.map((k, i) => (
           <button
             key={i}
             type="button"
-            aria-label={`Show tip ${i + 1}: ${k.text}`}
+            role="tab"
+            aria-selected={i === hot}
+            aria-label={`Tip ${i + 1}: ${k.text}`}
             onClick={() => setHot(i)}
-            className="absolute -translate-x-1/2 -translate-y-1/2"
-            style={{ left: pctX(k.target[0]), top: pctY(k.target[1]), width: 28, height: 28, minWidth: 0, minHeight: 0 }}
+            className="flex items-center justify-center"
+            style={{ width: 28, height: 28, minWidth: 0, minHeight: 0 }}
           >
-            <span
-              className={`absolute inset-[9px] rounded-full ${i === hot ? 'bg-ink' : 'bg-ink/40'}`}
-            />
-            {i === hot && <span className="demo-pulse absolute inset-[3px] rounded-full border-2 border-ink" />}
+            <span className={`block rounded-full transition-all ${i === hot ? 'h-2.5 w-6 bg-ink' : 'h-2.5 w-2.5 bg-line'}`} />
           </button>
         ))}
-        <button
-          key={`label-${chapter.name}-${hot}`}
-          type="button"
-          onClick={() => setHot((hot + 1) % chapter.callouts.length)}
-          className="demo-fade absolute rounded-[10px] bg-white/95 text-left font-display text-[14px] font-medium leading-snug text-ink"
-          style={{ left: pctX(c.label.x), top: pctY(c.label.y), width: pctX(c.label.w), padding: '2px 4px' }}
-        >
-          {c.text}
-        </button>
       </div>
     </div>
   );
 }
+
+/* ---------- basics ---------- */
+
+const BASICS = [
+  { title: 'Set it once', body: 'Income minus bills and savings is the money you have to live on this month.', big: POOL, cap: 'to live on this month' },
+  { title: 'Split across your days', body: 'Every day starts with the same amount. That is your one number.', big: BASE, cap: 'you can spend a day' },
+  { title: 'Spend less, tomorrow grows', body: `Day 1: you spent ${inr(SPENT_1)}, ${inr(BASE - SPENT_1)} less than your amount.`, big: NEXT_1, cap: 'you can spend a day' },
+  { title: 'Spend more, it is spread out', body: `Day 2: you spent ${inr(SPENT_2)}. No single day takes the hit.`, big: NEXT_2, cap: 'you can spend a day' },
+] as const;
+
+const BASICS_H = 330;
+const BARS_TOP = 196;
+const BARS_H = 100;
+const barPct = (v: number) => `${(v / SPENT_2) * 100}%`;
+
+const BASICS_CALLOUTS: Callout[] = [
+  { text: 'This is all yours to live on. Bills and savings are already set aside.', target: [160, 84], from: [214, 122], label: { x: 16, y: 106, w: 192 }, bend: 0.3 },
+  { text: 'The same amount every day. Simple and calm.', target: [130, BARS_TOP + BARS_H - 67 - 12], from: [110, 150], label: { x: 16, y: 104, w: 190 }, bend: 0.35 },
+  { text: 'Spent less? Tomorrow gets a little more. You earned it.', target: [66, BARS_TOP + BARS_H - 68 - 12], from: [190, 150], label: { x: 16, y: 100, w: 200 }, bend: -0.3 },
+  { text: 'Spent more? No guilt. It is shared across the days ahead.', target: [120, BARS_TOP + BARS_H - 66 - 12], from: [200, 150], label: { x: 16, y: 100, w: 200 }, bend: -0.3 },
+];
+
+function Basics({ step }: { step: number }) {
+  const cur = BASICS[step];
+  const future = step <= 1 ? BASE : step === 2 ? NEXT_1 : NEXT_2;
+  return (
+    <div>
+      <div key={step} className="demo-fade">
+        <h2 className="font-display text-[26px] font-semibold leading-tight text-ink">{cur.title}</h2>
+        <p className="mt-2 text-body text-soft">{cur.body}</p>
+      </div>
+      <div className="mt-4">
+        <Canvas H={BASICS_H} callout={BASICS_CALLOUTS[step]} id={`basics-${step}`}>
+          <Box x={16} y={10} w={288} h={52} plain>
+            <HugeNumber value={cur.big} size={48} />
+          </Box>
+          <Box x={16} y={64} w={288} h={16} className="text-[12px] text-soft">{cur.cap}</Box>
+          <Box x={16} y={BARS_TOP} w={288} h={BARS_H} plain className="flex items-end gap-[3px]">
+            {Array.from({ length: DAYS }, (_, i) => {
+              const day = i + 1;
+              const closed1 = day === 1 && step >= 2;
+              const closed2 = day === 2 && step >= 3;
+              const track = day === 1 ? BASE : day === 2 && step >= 3 ? NEXT_1 : future;
+              const fill = closed1 ? SPENT_1 : closed2 ? SPENT_2 : 0;
+              return (
+                <div key={i} className="relative h-full flex-1">
+                  <div
+                    className={`absolute bottom-0 w-full rounded-[3px] border border-line bg-tint transition-all duration-700 ease-out ${step === 0 ? 'opacity-0' : 'opacity-100'}`}
+                    style={{ height: barPct(track), transitionDelay: step === 0 ? '0ms' : `${i * 12}ms` }}
+                  />
+                  <div
+                    className={`absolute bottom-0 w-full rounded-[3px] transition-all duration-700 ease-out ${fill > track ? 'bg-[#4B47A0]' : 'bg-ink'}`}
+                    style={{ height: barPct(fill) }}
+                  />
+                </div>
+              );
+            })}
+          </Box>
+          <Box x={16} y={BARS_TOP + BARS_H + 6} w={288} h={14} plain className="flex justify-between text-[11px] text-faint">
+            <span>Day 1</span>
+            <span>Day {DAYS}</span>
+          </Box>
+        </Canvas>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- shell ---------- */
 
 export function Demo({ onClose }: { onClose: () => void }) {
   const [ch, setCh] = useState(0); // 0 = basics, 1.. = CHAPTERS[ch - 1]
@@ -284,7 +436,7 @@ export function Demo({ onClose }: { onClose: () => void }) {
 
   useEffect(() => {
     if (ch !== 0 || !playing) return;
-    if (step >= STEPS.length - 1) {
+    if (step >= BASICS.length - 1) {
       setPlaying(false);
       return;
     }
@@ -302,10 +454,8 @@ export function Demo({ onClose }: { onClose: () => void }) {
     }
   };
 
-  const future = step <= 1 ? BASE : step === 2 ? NEXT_1 : NEXT_2;
-  const cur = STEPS[step];
   const tour = ch > 0 ? CHAPTERS[ch - 1] : null;
-  const lastInChapter = tour ? hot >= tour.callouts.length - 1 : step >= STEPS.length - 1;
+  const lastInChapter = tour ? hot >= tour.callouts.length - 1 : step >= BASICS.length - 1;
   const lastChapter = ch === names.length - 1;
 
   function next() {
@@ -345,62 +495,16 @@ export function Demo({ onClose }: { onClose: () => void }) {
         ))}
       </div>
 
-      <div className="mt-6 flex-1 overflow-y-auto">
-        {tour ? (
-          <Tour key={tour.name} chapter={tour} hot={hot} setHot={setHot} />
-        ) : (
-          <>
-            <div className="flex gap-1.5" aria-hidden="true">
-              {STEPS.map((_, i) => (
-                <span key={i} className={`h-1 flex-1 rounded-full transition-colors duration-500 ${i <= step ? 'bg-ink' : 'bg-line'}`} />
-              ))}
-            </div>
-            <div key={step} className="demo-fade mt-6">
-              <h2 className="font-display text-[26px] font-semibold leading-tight text-ink">{cur.title}</h2>
-              <p className="mt-2 text-body text-soft">{cur.body}</p>
-              <HugeNumber value={cur.big} size={56} className="mt-4" />
-              <p className="mt-1 text-[13px] text-soft">{step === 0 ? 'to live on this month' : 'you can spend a day'}</p>
-            </div>
-            <div className="mt-8 flex items-end gap-[3px]" style={{ height: MAX_H }} aria-hidden="true">
-              {Array.from({ length: DAYS }, (_, i) => {
-                const day = i + 1;
-                const closed1 = day === 1 && step >= 2;
-                const closed2 = day === 2 && step >= 3;
-                const track = day === 1 ? BASE : day === 2 && step >= 3 ? NEXT_1 : future;
-                const fill = closed1 ? SPENT_1 : closed2 ? SPENT_2 : 0;
-                const over = fill > track;
-                return (
-                  <div key={i} className="relative flex-1" style={{ height: MAX_H }}>
-                    <div
-                      className={`absolute bottom-0 w-full rounded-[3px] border border-line bg-tint transition-all duration-700 ease-out ${step === 0 ? 'opacity-0' : 'opacity-100'}`}
-                      style={{ height: px(track), transitionDelay: step === 0 ? '0ms' : `${i * 12}ms` }}
-                    />
-                    <div
-                      className={`absolute bottom-0 w-full rounded-[3px] transition-all duration-700 ease-out ${over ? 'bg-[#4B47A0]' : 'bg-ink'}`}
-                      style={{ height: px(fill) }}
-                    />
-                  </div>
-                );
-              })}
-            </div>
-            <div className="mt-2 flex justify-between text-[11px] text-faint" aria-hidden="true">
-              <span>Day 1</span>
-              <span>Day {DAYS}</span>
-            </div>
-          </>
-        )}
+      <div className="mt-5 flex-1 overflow-y-auto">
+        {tour ? <Tour key={tour.name} chapter={tour} hot={hot} setHot={setHot} /> : <Basics step={step} />}
       </div>
 
       <div className="mt-3 flex flex-col gap-1">
         <PrimaryButton onClick={next}>
           {lastInChapter ? (lastChapter ? 'Got it' : `Next: ${names[ch + 1]}`) : 'Next'}
         </PrimaryButton>
-        {ch === 0 && step >= STEPS.length - 1 && (
-          <button
-            type="button"
-            className="min-h-[40px] text-[15px] font-medium text-soft"
-            onClick={() => goChapter(0)}
-          >
+        {ch === 0 && step >= BASICS.length - 1 && (
+          <button type="button" className="min-h-[40px] text-[15px] font-medium text-soft" onClick={() => goChapter(0)}>
             Watch again
           </button>
         )}
