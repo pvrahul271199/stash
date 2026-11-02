@@ -86,7 +86,7 @@ export function TodayTab({ cycle, plan }: { cycle: Cycle; plan: Plan }) {
         <header className="flex items-center justify-between">
           <p className="text-[14px] text-soft">
             {formatWithWeekday(dateOfDay(cycle.startDate, cycle.currentDay))} ·{' '}
-            <span className="num font-semibold text-ink">
+            <span className="num">
               Day {cycle.currentDay}/{cycle.totalDays}
             </span>
           </p>

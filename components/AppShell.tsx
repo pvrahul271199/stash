@@ -127,7 +127,7 @@ export function AppShell() {
 
   let body: React.ReactNode = null;
   if (!ready || !snap) {
-    body = <LoadingScreen message="Opening your stash…" />;
+    body = <LoadingScreen />;
   } else if (restoring) {
     body = <LoadingScreen />;
   } else if (flow === 'auth') {

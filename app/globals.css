@@ -150,3 +150,11 @@ select:focus {
 .demo-head { animation: demo-fade 0.3s ease-out 0.55s both; }
 @keyframes demo-pulse { 0% { transform: scale(0.7); opacity: 0.9; } 100% { transform: scale(1.5); opacity: 0; } }
 .demo-pulse { animation: demo-pulse 1.4s ease-out infinite; }
+
+/* Loader wordmark: letters appear one by one, like being written. */
+@keyframes stash-letter { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+.stash-letter { display: inline-block; opacity: 0; animation: stash-letter 0.28s ease-out forwards; }
+@keyframes stash-breathe { 0%, 100% { transform: scale(0.94); } 50% { transform: scale(1); } }
+.stash-breathe { animation: stash-breathe 3s ease-in-out infinite; }
+@keyframes stash-ripple { 0% { transform: scale(0.9); opacity: 0.9; } 100% { transform: scale(1.18); opacity: 0; } }
+.stash-ripple { animation: stash-ripple 2.4s ease-out infinite; }
