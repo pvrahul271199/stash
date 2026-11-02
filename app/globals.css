@@ -158,3 +158,5 @@ select:focus {
 .stash-breathe { animation: stash-breathe 3s ease-in-out infinite; }
 @keyframes stash-ripple { 0% { transform: scale(0.9); opacity: 0.9; } 100% { transform: scale(1.18); opacity: 0; } }
 .stash-ripple { animation: stash-ripple 2.4s ease-out infinite; }
+@keyframes demo-caret { 50% { opacity: 0; } }
+.demo-caret { animation: demo-caret 0.9s steps(1) infinite; }

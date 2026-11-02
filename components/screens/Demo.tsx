@@ -46,6 +46,7 @@ const NEXT_1 = Math.round(POOL_1 / (DAYS - 1));
 const POOL_2 = POOL_1 - SPENT_2;
 const NEXT_2 = Math.round(POOL_2 / (DAYS - 2));
 const STEP_MS = 4800;
+const SETUP_MS = 9000;
 
 /* ---------- canvas: fixed unit space (320 wide, H tall) scaled uniformly ---------- */
 
@@ -104,8 +105,8 @@ function Box({
 
 function Canvas({
   H, callout, id, onLabel, children,
-}: { H: number; callout: Callout; id: string; onLabel?: () => void; children: ReactNode }) {
-  const g = arrowGeometry(callout.from, callout.target, callout.bend);
+}: { H: number; callout?: Callout; id: string; onLabel?: () => void; children: ReactNode }) {
+  const g = callout ? arrowGeometry(callout.from, callout.target, callout.bend) : null;
   return (
     <CanvasH.Provider value={H}>
       <div
@@ -113,6 +114,7 @@ function Canvas({
         style={{ aspectRatio: `${W} / ${H}` }}
       >
         {children}
+        {callout && g && (<>
         <svg
           key={id}
           viewBox={`0 0 ${W} ${H}`}
@@ -138,6 +140,7 @@ function Canvas({
         >
           {callout.text}
         </button>
+        </>)}
       </div>
     </CanvasH.Provider>
   );
@@ -362,7 +365,7 @@ function Tour({ chapter, hot, setHot }: { chapter: Chapter; hot: number; setHot:
 /* ---------- basics ---------- */
 
 const BASICS = [
-  { title: 'Set it once', body: 'Income minus bills and savings is the money you have to live on this month.', big: POOL, cap: 'to live on this month' },
+  { title: 'Set it once', body: 'Type what comes in. Take out fixed spends and investments. The rest is yours to live on.', big: POOL, cap: 'to live on this month' },
   { title: 'Split across your days', body: 'Every day starts with the same amount. That is your one number.', big: BASE, cap: 'you can spend a day' },
   { title: 'Spend less, tomorrow grows', body: `Day 1: you spent ${inr(SPENT_1)}, ${inr(BASE - SPENT_1)} less than your amount.`, big: NEXT_1, cap: 'you can spend a day' },
   { title: 'Spend more, it is spread out', body: `Day 2: you spent ${inr(SPENT_2)}. No single day takes the hit.`, big: NEXT_2, cap: 'you can spend a day' },
@@ -380,6 +383,68 @@ const BASICS_CALLOUTS: Callout[] = [
   { text: 'Spent more? No guilt. It is shared across the days ahead.', target: [120, BARS_TOP + BARS_H - 66 - 12], from: [200, 150], label: { x: 16, y: 100, w: 200 }, bend: -0.3 },
 ];
 
+/** Step 0: income is typed in, fixed spend and investment come off, the rest is split over the month. */
+function SetupAnim() {
+  const [t, setT] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setT((v) => (v >= SETUP_MS ? v : v + 50)), 50);
+    return () => clearInterval(id);
+  }, []);
+  const typed = (value: number, start: number) => {
+    if (t < start) return null;
+    const digits = String(value);
+    const n = Math.min(digits.length, Math.floor((t - start) / 230) + 1);
+    return { text: inr(Number(digits.slice(0, n))), done: n === digits.length };
+  };
+  const rows = [
+    { label: 'Income', value: PLAN.income, start: 300, sign: '' },
+    { label: 'Fixed spend', value: PLAN.bills, start: 2200, sign: '− ' },
+    { label: 'Investment', value: PLAN.savings, start: 3900, sign: '− ' },
+  ];
+  const resultAt = 5400;
+  const splitAt = 6600;
+  const shown = t < resultAt ? 0 : Math.round(POOL * Math.min(1, (t - resultAt) / 900));
+  const split = t >= splitAt;
+  return (
+    <>
+      {rows.map((r, i) => {
+        const ty = typed(r.value, r.start);
+        const active = ty && !ty.done;
+        return (
+          <Box key={r.label} x={16} y={12 + i * 40} w={288} h={32} className={`justify-between rounded-[10px] border px-3 text-[14px] transition-opacity duration-300 ${ty ? 'border-line opacity-100' : 'border-transparent opacity-0'}`}>
+            <span className="text-soft">{r.label}</span>
+            <span className="num text-ink">
+              {r.sign}{ty?.text}
+              {active && <span className="demo-caret ml-0.5 inline-block h-[15px] w-[1.5px] translate-y-[2px] bg-ink" />}
+            </span>
+          </Box>
+        );
+      })}
+      <Box x={16} y={136} w={288} h={1} plain className={`bg-line transition-opacity duration-300 ${t >= resultAt ? 'opacity-100' : 'opacity-0'}`} />
+      <Box x={16} y={144} w={288} h={52} plain className={`transition-opacity duration-300 ${t >= resultAt ? 'opacity-100' : 'opacity-0'}`}>
+        <HugeNumber value={shown} size={48} />
+      </Box>
+      <Box x={16} y={198} w={288} h={16} className={`text-[12px] text-soft transition-opacity duration-300 ${t >= resultAt ? 'opacity-100' : 'opacity-0'}`}>
+        left to live on this month
+      </Box>
+      <Box x={16} y={BARS_TOP + 22} w={288} h={BARS_H - 22} plain className="flex items-end gap-[3px]">
+        {Array.from({ length: DAYS }, (_, i) => (
+          <div key={i} className="relative h-full flex-1">
+            <div
+              className="absolute bottom-0 w-full rounded-[3px] border border-line bg-tint transition-all duration-700 ease-out"
+              style={{ height: split ? '100%' : '0%', transitionDelay: split ? `${i * 18}ms` : '0ms' }}
+            />
+          </div>
+        ))}
+      </Box>
+      <Box x={16} y={BARS_TOP + BARS_H + 6} w={288} h={16} className={`justify-between text-[12px] text-soft transition-opacity duration-500 ${split ? 'opacity-100' : 'opacity-0'}`}>
+        <span>Day 1</span>
+        <span className="font-medium text-ink">÷ {DAYS} days = {inr(BASE)} a day</span>
+      </Box>
+    </>
+  );
+}
+
 function Basics({ step }: { step: number }) {
   const cur = BASICS[step];
   const future = step <= 1 ? BASE : step === 2 ? NEXT_1 : NEXT_2;
@@ -390,11 +455,14 @@ function Basics({ step }: { step: number }) {
         <p className="mt-2 text-body text-soft">{cur.body}</p>
       </div>
       <div className="mt-4">
-        <Canvas H={BASICS_H} callout={BASICS_CALLOUTS[step]} id={`basics-${step}`}>
+        <Canvas H={BASICS_H} callout={step === 0 ? undefined : BASICS_CALLOUTS[step]} id={`basics-${step}`}>
+          {step === 0 && <SetupAnim />}
+          {step > 0 && (<>
           <Box x={16} y={10} w={288} h={52} plain>
             <HugeNumber value={cur.big} size={48} />
           </Box>
           <Box x={16} y={64} w={288} h={16} className="text-[12px] text-soft">{cur.cap}</Box>
+          </>)}
           <Box x={16} y={BARS_TOP} w={288} h={BARS_H} plain className="flex items-end gap-[3px]">
             {Array.from({ length: DAYS }, (_, i) => {
               const day = i + 1;
@@ -416,10 +484,11 @@ function Basics({ step }: { step: number }) {
               );
             })}
           </Box>
+          {step > 0 && (
           <Box x={16} y={BARS_TOP + BARS_H + 6} w={288} h={14} plain className="flex justify-between text-[11px] text-faint">
             <span>Day 1</span>
             <span>Day {DAYS}</span>
-          </Box>
+          </Box>)}
         </Canvas>
       </div>
     </div>
@@ -440,7 +509,7 @@ export function Demo({ onClose }: { onClose: () => void }) {
       setPlaying(false);
       return;
     }
-    const t = setTimeout(() => setStep((s) => s + 1), STEP_MS);
+    const t = setTimeout(() => setStep((s) => s + 1), step === 0 ? SETUP_MS : STEP_MS);
     return () => clearTimeout(t);
   }, [ch, step, playing]);
 
