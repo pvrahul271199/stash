@@ -37,10 +37,16 @@ import { resolveCategories, validateName, type ResolvedCategory } from '@/lib/ca
 import { getStoredCurrencyCode } from '@/lib/currency';
 import { buildUserProfile, getActiveUserId, getStoredAvatarTheme, getStoredUsername } from '@/lib/user';
 import { requestSync } from '@/lib/sync';
+import { uuidv7 } from '@/lib/uuid';
 
 /* ---------- helpers ---------- */
 
 const uuid = () => crypto.randomUUID();
+/** Transactions are the big table: time-ordered ids keep its Postgres primary-key index compact. */
+const txnId = uuidv7;
+
+/** Bump when rollupCycle's logic changes: cached pool/dayRows built by an older version are rebuilt at startup. */
+export const CALC_VERSION = 1;
 
 const alive = <T extends { deletedAt?: number | null }>(r: T) => r.deletedAt == null;
 
@@ -52,7 +58,34 @@ function useLiveQuery<T, D>(q: () => Promise<T> | T, deps: unknown[] = [], def?:
   return useDexieLive(q, [uid, ...deps], def as D);
 }
 
-export function toEntry(t: Txn, cycle: Pick<Cycle, 'startDate' | 'totalDays'> | undefined): Entry {
+/** Current names by id. Transactions store a name snapshot, but the id link is what is trusted. */
+export interface LinkNames {
+  cats: Map<string, string>;
+  evts: Map<string, string>;
+}
+
+export async function loadLinkNames(db: StashDB = getDB()): Promise<LinkNames> {
+  const [cats, evts] = await Promise.all([loadCategories(db), db.evts.toArray()]);
+  return {
+    cats: new Map(cats.map((c) => [c.id, c.name])),
+    evts: new Map(evts.filter(alive).map((e) => [e.id, e.name])),
+  };
+}
+
+const catNameOf = (t: Txn, n?: LinkNames) => (t.categoryId && n?.cats.get(t.categoryId)) || t.type;
+const eventNameOf = (t: Txn, n?: LinkNames) => (t.eventId && n?.evts.get(t.eventId)) || t.event;
+
+/** Id link first; legacy rows that never got an id fall back to the old name match. */
+const inCategory = (t: Txn, c: { id: string; name: string }) =>
+  t.categoryId != null ? t.categoryId === c.id : t.type.toLowerCase() === c.name.toLowerCase();
+const inEvent = (t: Txn, e: { id: string; name: string }) =>
+  t.eventId != null ? t.eventId === e.id : t.event?.trim().toLowerCase() === e.name.toLowerCase();
+
+export function toEntry(
+  t: Txn,
+  cycle: Pick<Cycle, 'startDate' | 'totalDays'> | undefined,
+  names?: LinkNames,
+): Entry {
   return {
     id: t.id,
     cycleId: t.cycleId ?? '',
@@ -60,9 +93,9 @@ export function toEntry(t: Txn, cycle: Pick<Cycle, 'startDate' | 'totalDays'> | 
     date: t.txnDate,
     amount: t.amount,
     label: t.label,
-    category: t.type,
+    category: catNameOf(t, names),
     subcategory: t.subtype,
-    event: t.event,
+    event: eventNameOf(t, names),
     payment: t.payment,
     note: t.note,
     fromSavings: t.fromSavings,
@@ -93,9 +126,20 @@ export async function recompute(db: StashDB, cycleId: string): Promise<void> {
       status: d.status,
     })),
   );
-  if (c.pool !== r.pool || c.fromSavingsTotal !== r.fromSavingsTotal) {
-    await db.cycles.update(cycleId, { pool: r.pool, fromSavingsTotal: r.fromSavingsTotal });
+  if (c.pool !== r.pool || c.fromSavingsTotal !== r.fromSavingsTotal || c.calcVersion !== CALC_VERSION) {
+    // no updatedAt bump: these are local caches, not synced fields
+    await db.cycles.update(cycleId, { pool: r.pool, fromSavingsTotal: r.fromSavingsTotal, calcVersion: CALC_VERSION });
   }
+}
+
+/** Re-derives every cycle whose caches were built by an older CALC_VERSION. Cheap no-op when none are. */
+export async function rebuildStaleCaches(db: StashDB = getDB()): Promise<number> {
+  const stale = (await db.cycles.toArray()).filter((c) => c.deletedAt == null && c.calcVersion !== CALC_VERSION);
+  if (!stale.length) return 0;
+  await db.transaction('rw', [db.cycles, db.transactions, db.dayRows], async () => {
+    for (const c of stale) await recompute(db, c.id);
+  });
+  return stale.length;
 }
 
 /** Defaults + this user's overrides, resolved. */
@@ -136,10 +180,13 @@ export function useDayEntries(cycleId: string | undefined, day: number | undefin
     const cycle = await db.cycles.get(cycleId);
     if (!cycle) return [];
     const date = dateOfDay(cycle.startDate, day);
-    const rows = await db.transactions.where('[cycleId+txnDate]').equals([cycleId, date]).toArray();
+    const [rows, names] = await Promise.all([
+      db.transactions.where('[cycleId+txnDate]').equals([cycleId, date]).toArray(),
+      loadLinkNames(db),
+    ]);
     return rows
       .filter(alive)
-      .map((t) => toEntry(t, cycle))
+      .map((t) => toEntry(t, cycle, names))
       .sort((a, b) => b.createdAt - a.createdAt);
   }, [cycleId, day]);
 }
@@ -149,8 +196,8 @@ export function useCycleEntries(cycleId: string | undefined): Entry[] | undefine
     if (cycleId == null) return [];
     const db = getDB();
     const cycle = await db.cycles.get(cycleId);
-    const rows = await db.transactions.where('cycleId').equals(cycleId).toArray();
-    return rows.filter(alive).map((t) => toEntry(t, cycle));
+    const [rows, names] = await Promise.all([db.transactions.where('cycleId').equals(cycleId).toArray(), loadLinkNames(db)]);
+    return rows.filter(alive).map((t) => toEntry(t, cycle, names));
   }, [cycleId]);
 }
 
@@ -183,9 +230,9 @@ export function useAllEntries(enabled = true): Entry[] | undefined {
   return useLiveQuery(async () => {
     if (!enabled) return [];
     const db = getDB();
-    const [cycles, txns] = await Promise.all([db.cycles.toArray(), db.transactions.toArray()]);
+    const [cycles, txns, names] = await Promise.all([db.cycles.toArray(), db.transactions.toArray(), loadLinkNames(db)]);
     const byId = new Map(cycles.map((c) => [c.id, c]));
-    return txns.filter(alive).map((t) => toEntry(t, t.cycleId ? byId.get(t.cycleId) : undefined));
+    return txns.filter(alive).map((t) => toEntry(t, t.cycleId ? byId.get(t.cycleId) : undefined, names));
   }, [enabled]);
 }
 
@@ -222,14 +269,15 @@ export function useDateEntries(iso: string): Entry[] {
   return (
     useLiveQuery(async () => {
       const db = getDB();
-      const [rows, cycles] = await Promise.all([
+      const [rows, cycles, names] = await Promise.all([
         db.transactions.where('txnDate').equals(iso).toArray(),
         db.cycles.toArray(),
+        loadLinkNames(db),
       ]);
       const byId = new Map(cycles.map((c) => [c.id, c]));
       return rows
         .filter(alive)
-        .map((t) => toEntry(t, t.cycleId ? byId.get(t.cycleId) : undefined))
+        .map((t) => toEntry(t, t.cycleId ? byId.get(t.cycleId) : undefined, names))
         .sort((a, b) => b.createdAt - a.createdAt);
     }, [iso]) ?? []
   );
@@ -263,9 +311,12 @@ export function useCategoryCounts(): Record<string, number> {
   return (
     useLiveQuery(async () => {
       const counts: Record<string, number> = {};
-      await getDB().transactions.each((t) => {
+      const db = getDB();
+      const names = await loadLinkNames(db);
+      await db.transactions.each((t) => {
         if (t.deletedAt != null) return;
-        counts[t.type] = (counts[t.type] ?? 0) + 1;
+        const name = catNameOf(t, names);
+        counts[name] = (counts[name] ?? 0) + 1;
       });
       return counts;
     }, []) ?? {}
@@ -277,9 +328,11 @@ export function useEventCounts(): Record<string, number> {
   return (
     useLiveQuery(async () => {
       const counts: Record<string, number> = {};
-      await getDB().transactions.each((t) => {
+      const db = getDB();
+      const names = await loadLinkNames(db);
+      await db.transactions.each((t) => {
         if (t.deletedAt != null) return;
-        const ev = t.event?.trim();
+        const ev = eventNameOf(t, names)?.trim();
         if (ev) counts[ev] = (counts[ev] ?? 0) + 1;
       });
       return counts;
@@ -308,6 +361,7 @@ export async function ensureSeed(): Promise<void> {
       lastSeenAt: Date.now(),
     });
   });
+  await rebuildStaleCaches(db);
 }
 
 async function persistStorage() {
@@ -318,20 +372,30 @@ async function persistStorage() {
   }
 }
 
+/** Server constraints: 1 <= total_days <= 366 and amounts >= 0. A violating row would wedge the whole push batch. */
+const clampDays = (n: number) => Math.min(366, Math.max(1, Math.round(n)));
+const nonNeg = (n: number) => Math.max(0, Math.round(n));
+
 async function startCycle(p: PlanInput, startDate: string, addPlan: boolean): Promise<void> {
   const db = getDB();
   const s = initialCycleState(p);
   const currency = getStoredCurrencyCode();
   const now = Date.now();
-  await db.transaction('rw', [db.plans, db.cycles], async () => {
+  await db.transaction('rw', [db.plans, db.cycles, db.transactions, db.dayRows], async () => {
+    // The server allows one unfinished cycle per user: end any still-open one (e.g. onboarding redone
+    // mid-month) before the new one starts. Its remaining days close empty, so the unspent pool is left over.
+    for (const old of (await db.cycles.toArray()).filter((c) => alive(c) && c.currentDay <= c.totalDays)) {
+      await db.cycles.update(old.id, { currentDay: old.totalDays + 1, updatedAt: now });
+      await recompute(db, old.id);
+    }
     if (addPlan) {
       await db.plans.add({
         id: uuid(),
         updatedAt: now,
         createdAt: now,
-        income: p.income,
-        bills: p.bills,
-        savings: p.savings,
+        income: nonNeg(p.income),
+        bills: nonNeg(p.bills),
+        savings: nonNeg(p.savings),
         monthLength: p.monthLength,
         billItems: p.billItems,
         savingsItems: p.savingsItems,
@@ -342,7 +406,7 @@ async function startCycle(p: PlanInput, startDate: string, addPlan: boolean): Pr
       id: uuid(),
       updatedAt: now,
       startDate,
-      totalDays: s.totalDays,
+      totalDays: clampDays(s.totalDays),
       planAmount: moneyToLiveOn(p),
       currentDay: s.currentDay,
       pool: s.pool,
@@ -371,9 +435,9 @@ export async function updateActivePlan(p: PlanInput): Promise<void> {
   await db.transaction('rw', [db.plans, db.cycles, db.transactions, db.dayRows], async () => {
     const plan = await latestPlan(db);
     const fields = {
-      income: Math.round(p.income),
-      bills: Math.round(p.bills),
-      savings: Math.round(p.savings),
+      income: nonNeg(p.income),
+      bills: nonNeg(p.bills),
+      savings: nonNeg(p.savings),
       monthLength: Math.round(p.monthLength),
       billItems: p.billItems,
       savingsItems: p.savingsItems,
@@ -389,7 +453,8 @@ export async function updateActivePlan(p: PlanInput): Promise<void> {
     if (cycle) {
       await db.cycles.update(cycle.id, {
         planAmount: moneyToLiveOn(p),
-        totalDays: p.monthLength,
+        // never below the current day: current_day <= total_days + 1 is a server constraint (F-14)
+        totalDays: clampDays(Math.max(p.monthLength, cycle.currentDay)),
         updatedAt: now,
       });
       await recompute(db, cycle.id);
@@ -522,16 +587,22 @@ export async function addSpend(
     ? new Date(ey, em - 1, ed, now.getHours(), now.getMinutes(), now.getSeconds(), now.getMilliseconds()).getTime()
     : now.getTime();
 
+  const linkedCat = cats.find((c) => c.name.toLowerCase() === resolved.category.toLowerCase());
+  const eventName = activeEvent?.trim() || null;
+  const linkedEvent = eventName ? await findEventByName(db, eventName) : undefined;
+
   const txn: Txn = {
-    id: uuid(),
+    id: txnId(),
     updatedAt: Date.now(),
     cycleId: targetCycle.id,
     txnDate: entryDate,
     amount: Math.round(spend.amount),
     label: spend.label,
-    type: resolved.category,
+    type: linkedCat?.name ?? resolved.category,
+    categoryId: linkedCat?.id ?? null,
     subtype: resolved.subcategory,
-    event: activeEvent?.trim() || null,
+    event: linkedEvent?.name ?? eventName,
+    eventId: linkedEvent?.id ?? null,
     payment: spend.payment?.trim() || null,
     note: spend.note?.trim() || null,
     fromSavings: !!spend.fromSavings,
@@ -560,17 +631,22 @@ export async function addSpend(
 export async function updateEntry(id: string, patch: SpendUpdate): Promise<Entry | null> {
   const db = getDB();
   let updated: Entry | null = null;
-  await db.transaction('rw', [db.transactions, db.cycles, db.dayRows], async () => {
+  await db.transaction('rw', [db.transactions, db.cycles, db.dayRows, db.cats, db.evts], async () => {
     const prev = await db.transactions.get(id);
     if (!prev || prev.deletedAt != null) return;
+    const cat = patch.category != null ? (await loadCategories(db)).find((c) => c.name.toLowerCase() === patch.category!.toLowerCase()) : undefined;
+    const newEventName = patch.event !== undefined ? patch.event?.trim() || null : undefined;
+    const ev = newEventName ? await findEventByName(db, newEventName) : undefined;
     const next: Txn = {
       ...prev,
       updatedAt: Date.now(),
       amount: patch.amount != null ? Math.max(1, Math.round(patch.amount)) : prev.amount,
       label: patch.label != null ? patch.label.trim() || prev.label : prev.label,
-      type: patch.category != null ? patch.category : prev.type,
+      type: patch.category != null ? (cat?.name ?? patch.category) : prev.type,
+      categoryId: patch.category != null ? (cat?.id ?? null) : prev.categoryId,
       subtype: patch.subcategory !== undefined ? patch.subcategory : prev.subtype,
-      event: patch.event !== undefined ? patch.event?.trim() || null : prev.event,
+      event: newEventName !== undefined ? (ev?.name ?? newEventName) : prev.event,
+      eventId: newEventName !== undefined ? (ev?.id ?? null) : prev.eventId,
       payment: patch.payment !== undefined ? patch.payment?.trim() || null : prev.payment,
       note: patch.note !== undefined ? patch.note?.trim() || null : prev.note,
       fromSavings: patch.fromSavings != null ? patch.fromSavings : prev.fromSavings,
@@ -578,7 +654,7 @@ export async function updateEntry(id: string, patch: SpendUpdate): Promise<Entry
     await db.transactions.put(next);
     if (prev.cycleId) await recompute(db, prev.cycleId);
     const cycle = prev.cycleId ? await db.cycles.get(prev.cycleId) : undefined;
-    updated = toEntry(next, cycle);
+    updated = toEntry(next, cycle, await loadLinkNames(db));
   });
   if (updated) requestSync();
   return updated;
@@ -673,15 +749,17 @@ export async function applyCatchUp(
         const [y, m, d] = iso.split('-').map(Number);
         const createdAt = new Date(y, m - 1, d, 12, 0, 0).getTime();
         return {
-          id: uuid(),
+          id: txnId(),
           updatedAt: stamp,
           cycleId,
           txnDate: iso,
           amount: e.amount,
           label: 'Rough total',
           type: 'Other',
+          categoryId: 'other',
           subtype: null,
           event: null,
+          eventId: null,
           payment: null,
           note: null,
           fromSavings: false,
@@ -739,6 +817,32 @@ export async function addCategory(name: string): Promise<string | null> {
   return null;
 }
 
+/**
+ * Renames a user-created category. Transactions link by id so history follows; events list
+ * categories by name, so those lists are updated. Defaults and "Other" keep their names.
+ */
+export async function renameCategory(catId: string, name: string): Promise<string | null> {
+  const db = getDB();
+  const trimmed = name.trim();
+  const all = await loadCategories(db);
+  const c = all.find((x) => x.id === catId);
+  if (!c) return 'That category is gone.';
+  if (c.isSystem || c.baseId) return "Built-in categories can't be renamed.";
+  const err = validateName(trimmed, all.filter((x) => x.id !== catId).map((x) => x.name));
+  if (err) return err;
+  await db.transaction('rw', [db.cats, db.evts], async () => {
+    const now = Date.now();
+    await db.cats.update(catId, { name: trimmed, updatedAt: now });
+    for (const ev of (await db.evts.toArray()).filter(alive)) {
+      if (ev.categories.includes(c.name)) {
+        await db.evts.update(ev.id, { categories: ev.categories.map((x) => (x === c.name ? trimmed : x)), updatedAt: now });
+      }
+    }
+  });
+  requestSync();
+  return null;
+}
+
 export async function addSubcategory(catId: string, name: string): Promise<string | null> {
   const db = getDB();
   const c = (await loadCategories(db)).find((x) => x.id === catId);
@@ -788,9 +892,7 @@ export async function removeSubcategory(catId: string, name: string): Promise<vo
       if (row) await db.cats.update(catId, { subcategories: row.subcategories.filter((x) => x !== name), updatedAt: now });
     }
     await db.transactions
-      .where('type')
-      .equals(c.name)
-      .filter((t) => t.subtype === name && alive(t))
+      .filter((t) => inCategory(t, c) && t.subtype === name && alive(t))
       .modify({ subtype: null, updatedAt: now });
   });
   requestSync();
@@ -804,10 +906,8 @@ export async function removeCategory(catId: string): Promise<void> {
     if (!c || c.isSystem) return;
     const now = Date.now();
     await db.transactions
-      .where('type')
-      .equals(c.name)
-      .filter(alive)
-      .modify({ type: 'Other', subtype: null, updatedAt: now });
+      .filter((t) => alive(t) && inCategory(t, c))
+      .modify({ type: 'Other', categoryId: 'other', subtype: null, updatedAt: now });
     for (const ev of (await db.evts.toArray()).filter(alive)) {
       if (ev.categories.includes(c.name)) {
         await db.evts.update(ev.id, { categories: ev.categories.filter((x) => x !== c.name), updatedAt: now });
@@ -824,6 +924,36 @@ export async function removeCategory(catId: string): Promise<void> {
 }
 
 /* ---------- events (with categories as sub-items) ---------- */
+
+/** Live event by case-insensitive name; the oldest wins if (legacy) duplicates exist. */
+async function findEventByName(db: StashDB, name: string): Promise<StashEvent | undefined> {
+  const key = name.trim().toLowerCase();
+  return (await db.evts.toArray())
+    .filter(alive)
+    .sort((a, b) => a.createdAt - b.createdAt)
+    .find((e) => e.name.toLowerCase() === key);
+}
+
+/**
+ * Renames an event. Transactions link by id, so history follows without rewriting any of them;
+ * their name snapshot is refreshed lazily the next time they are edited.
+ */
+export async function renameEvent(eventId: string, name: string): Promise<string | null> {
+  const db = getDB();
+  const trimmed = name.trim();
+  const all = (await db.evts.toArray()).filter(alive);
+  const ev = all.find((e) => e.id === eventId);
+  if (!ev) return 'That event is gone.';
+  const err = validateName(trimmed, all.filter((e) => e.id !== eventId).map((e) => e.name));
+  if (err) return err;
+  await db.transaction('rw', [db.evts, db.meta], async () => {
+    await db.evts.update(eventId, { name: trimmed, updatedAt: Date.now() });
+    const meta = await db.meta.get('main');
+    if (meta?.activeEvent === ev.name) await db.meta.update('main', { activeEvent: trimmed });
+  });
+  requestSync();
+  return null;
+}
 
 export async function addEvent(name: string, categories: string[] = [], note?: string | null): Promise<string | null> {
   const db = getDB();
@@ -870,7 +1000,7 @@ export async function removeEvent(eventId: string): Promise<void> {
     const ev = await db.evts.get(eventId);
     if (!ev || ev.deletedAt != null) return;
     const now = Date.now();
-    await db.transactions.where('event').equals(ev.name).filter(alive).modify({ event: null, updatedAt: now });
+    await db.transactions.filter((t) => alive(t) && inEvent(t, ev)).modify({ event: null, eventId: null, updatedAt: now });
     await db.evts.update(eventId, { deletedAt: now, updatedAt: now });
     const meta = await db.meta.get('main');
     if (meta?.activeEvent === ev.name) await db.meta.update('main', { activeEvent: null });
@@ -974,15 +1104,17 @@ export async function fillSample(now: Date = new Date()): Promise<void> {
             sampleEvent = 'Family dinner';
           }
           txns.push({
-            id: uuid(),
+            id: txnId(),
             updatedAt: stamp,
             cycleId,
             txnDate: dayIso,
             amount: s.amount,
             label: s.label,
             type: resolvedCat,
+            categoryId: cat?.id ?? 'other',
             subtype: cat ? sub : null,
             event: sampleEvent,
+            eventId: null,
             payment: resolvedCat === 'Bills' || resolvedCat === 'Shopping' ? 'Card' : s.amount <= 40 ? 'Cash' : 'UPI',
             note: null,
             fromSavings: s.fromSavings,
@@ -1005,7 +1137,7 @@ export async function fillSample(now: Date = new Date()): Promise<void> {
 
 export async function exportCSV(): Promise<string> {
   const db = getDB();
-  const [cycles, txns] = await Promise.all([db.cycles.toArray(), db.transactions.toArray()]);
+  const [cycles, txns, names] = await Promise.all([db.cycles.toArray(), db.transactions.toArray(), loadLinkNames(db)]);
   const byId = new Map(cycles.filter(alive).map((c) => [c.id, c]));
   const rows: CsvRow[] = txns
     .filter((t) => alive(t) && t.cycleId != null && byId.has(t.cycleId))
@@ -1021,12 +1153,12 @@ export async function exportCSV(): Promise<string> {
       day: dayOfTxn(c, t.txnDate),
       amount: t.amount,
       label: t.label,
-      category: t.type,
+      category: catNameOf(t, names),
       type: t.subtype ?? '',
       fromSavings: t.fromSavings,
       estimate: t.isEstimate,
       payment: t.payment ?? '',
-      event: t.event ?? '',
+      event: eventNameOf(t, names) ?? '',
       note: t.note ?? '',
     }));
   return buildCSV(rows);

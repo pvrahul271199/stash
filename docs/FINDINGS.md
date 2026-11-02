@@ -30,6 +30,10 @@ Status values: `open` · `fixed` · `wontfix` · `by-design` (update this column
 | F-22 | Low | Quality | Doc/test drift, duplicated mobile logic, test gaps | open |
 | F-23 | Low | Misc | Small UI/logic nits | open |
 | F-24 | Medium | Budget | Overspend beyond pool forgiven; message misleading | open |
+| F-25 | Medium | Sync | Pull pagination, pull cursor ties, client-clock LWW abuse | fixed (2026-11-02) |
+| F-26 | Medium | Data | Transactions link to categories/events by name, not id | fixed (2026-11-02) |
+| F-28 | Low | Scale | UUIDv4 keys, per-row RLS function calls, no cache version stamp | fixed (2026-11-02) |
+| F-27 | High | Sync | Client-clock LWW, whole-row overwrites, non-atomic multi-request push, missing DB constraints | fixed (2026-11-02) |
 
 ---
 
@@ -215,6 +219,58 @@ Switching currency relabels all numbers without conversion (`lib/currency.ts`); 
 - `getBrowserSessionUser()` is evaluated every render of `AppShell` (touches storage each render).
 - `useCurrentUser` reads storage inside `useLiveQuery` without dependencies on it, so avatar/username changes don't re-render until the Dexie row changes.
 - `saveUsername` writes `users` asynchronously and swallows errors.
+
+## F-25 · Pull pagination, cursor ties, client-clock LWW — Medium (fixed 2026-11-02)
+
+- **Pagination** (verified, already fixed): `pullTable` pages at 1000 rows and loops until a short page, so a new device gets the whole table.
+- **Cursor ties** (verified, already fixed): the cursor is `(updated_at, id)`, not `updated_at` alone.
+- **Double writes** (F-12, already fixed): only `requestSync()` remains.
+- **Clock abuse** (fixed now): `stash_touch` only rejected clients more than 24h ahead, and `stash_lww_guard` ran before it and compared the unclamped value. A phone 23h ahead won every conflict. Fix: `stash_clamp_client_ts` caps at `now() + 1 min` and is applied in both triggers (`supabase/schema.sql`). **Re-run the SQL in Supabase to apply.**
+- **In-flight commits** (fixed later the same day): a transaction that took its `now()` before a pull but committed after it could be skipped by the `(updated_at, id)` cursor. Each pull now restarts 5 minutes behind its stored cursor (`PULL_OVERLAP_MS`); re-read rows are skipped cheaply because `applyRemote` ignores versions it already has (F-27). The stored cursor never moves backwards.
+
+## F-26 · Records link by name, not id — Medium (fixed 2026-11-02)
+
+**Problem** `transactions.type` / `.event` matched `cats.name` / `evts.name`. A rename would orphan history or force a rewrite of every transaction, and duplicate or case-differing names would break joins.
+
+**Fix**
+- Local (Dexie v8): `Txn.categoryId`, `Txn.eventId`, back-filled by `migrateTxnLinks`. Names stay as display snapshots. Display and removal logic resolve by id (`loadLinkNames`, `inCategory`, `inEvent` in `db/queries.ts`). `renameCategory` / `renameEvent` change one row.
+- Remote (`supabase/schema.sql`): `category_id text` (no FK, since defaults are not rows) and `event_id uuid` FK. The script back-fills legacy rows by name, renames existing duplicate live names to `Name (2)`..., then creates partial unique indexes on `(user_id, lower(name)) where deleted_at is null` (categories also `and base_id is null`, so default override rows are exempt). **Re-run the SQL in Supabase.**
+- Sync: a unique-name 409 no longer stalls the queue; the rejected row is renamed locally and retried (`pushRenamingOnConflict`).
+- Tests: `tests/links.test.ts` (ids, rename, migration) and a conflict case in `tests/sync.test.ts`.
+
+**Not done / residual**
+- `evts.categories` and `meta.activeEvent` still hold names; the rename functions keep them in step.
+- Built-in categories can't be renamed.
+- No UI calls `renameCategory` / `renameEvent` yet.
+- `event_id` is a foreign key, which Postgres checks without RLS, so a user could reference another user's event id. The id is a random uuid, so this is low risk.
+- `stash-mobile/` has its own copy of the logic and is unchanged.
+
+## F-27 · LWW on the client clock, lossy whole-row merge, non-atomic push, weak constraints — High (fixed 2026-11-02)
+
+**Problems** (1) A far-future or drifting `client_updated_at` won every conflict. (2) Whole-row LWW dropped one of two offline edits to different fields. (3) A push was one PostgREST request per table, so a transaction could land while its cycle update failed. (4) Postgres accepted impossible rows (`current_day` past the month, negative income, malformed `bill_items`, a transaction pointing at another user's cycle, two active cycles).
+
+**Fix** (details in `docs/ARCHITECTURE.md`, "Versioned, atomic push")
+- `version` bigint per row, server-assigned; optimistic concurrency via `_base_version` in `push_changes`; `client_updated_at` is clamped and only breaks same-field ties.
+- Field-level three-way merge (`mergeRows`) against a stored `syncBase`; applied on conflicts and on pull.
+- `push_changes(p_mutation_id, p_changes)` applies a batch in one transaction, replays stored results for a repeated id (`push_mutations`), and the client keeps an unacknowledged batch in `meta.pendingPush`.
+- Constraints listed in the architecture doc, added `NOT VALID`.
+- Client guards so valid actions can't violate them (see architecture doc).
+- **Re-run `supabase/schema.sql`.** Deploy the new client after that: an old client keeps working through direct writes but bypasses the version check.
+
+**Residual / follow-ups**
+- Constraints are `NOT VALID`: old violating rows are tolerated but can't be rewritten unchanged. Clean them, then `validate constraint`.
+- `uq_cycles_one_active` is skipped (with a notice) if any user already has two active cycles; fix those users and re-run.
+- Direct table writes are still granted. Revoke `insert/update/delete` on the synced tables from `authenticated` once all clients use the RPC; only then is the version check unbypassable.
+- Merging works per column: two devices editing the same jsonb column (e.g. `bill_items`) get the newer one, not an item-level merge.
+- A transaction that stays open longer than the 5-minute pull overlap (F-25) could still be missed.
+- `stash-mobile/` is unchanged.
+
+## F-28 · Scale and schema hygiene — Low (fixed 2026-11-02)
+
+Fixed: UUIDv7 transaction ids, `(select auth.uid())` in every RLS policy, `calc_version` stamping with startup rebuild. Already in place: composite indexes on `(user_id, txn_date)`, `(user_id, cycle_id)`, `(user_id, updated_at)`; RPC batch push (F-27); category/event FKs (F-26); `cycles.status`.
+
+Reviewed and **not** built (no current feature needs them; each is a column plus mapper plus migration plus UI, so add it with the feature): `sync_seq`, partial `deleted_at` indexes, `device_id`/`schema_version` on every row, profile timezone/locale/phone fields, plan history fields (`effective_from`, `pay_frequency`...), cycle snapshots and `leftover_amount`, transaction `entry_type`/`currency`/`merchant`/`source`/`dedupe_hash`/`recurring_id`/`tags`/`attachment_url`, category limits and colours, event budgets/dates, `feature_data` size caps. Closing a day is already captured by `cycles.current_day`.
+**Re-run `supabase/schema.sql`** to apply the RLS change.
 
 ---
 
