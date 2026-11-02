@@ -4,7 +4,7 @@ import { BackIcon, GhostButton, IconButton, PrimaryButton } from '../ui/Button';
 import { logIn, signUp, validateUsername } from '@/lib/auth';
 
 export function AuthScreen({
-  initialMode = 'signup',
+  initialMode = 'login',
   onBack,
   onDone,
 }: {

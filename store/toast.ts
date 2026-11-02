@@ -15,7 +15,7 @@ export const useToast = create<ToastState>((set) => ({
   show: (message, tone = 'ink') => {
     clearTimeout(timer);
     set({ message, tone });
-    timer = setTimeout(() => set({ message: null }), 1500);
+    timer = setTimeout(() => set({ message: null }), 1400);
   },
   hide: () => set({ message: null }),
 }));

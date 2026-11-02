@@ -5,13 +5,11 @@ import { mkdirSync } from 'node:fs';
 const INK = '#1E1B4B';
 const TEAL = '#5EEAD4';
 
-// White rupee drawn from strokes in a 100x100 box, plus the short teal bar underneath.
+import { readFileSync } from 'node:fs';
+const WORDMARK = readFileSync('components/ui/logoPath.ts', 'utf8').match(/'([^']+)'/)[1];
 const glyph = `
-  <g transform="translate(0 -6)">
-    <path d="M30 28H72M30 43H72M32 28H48C68 28 68 55 48 55H32L64 82"
-      fill="none" stroke="#fff" stroke-width="7.5" stroke-linecap="round" stroke-linejoin="round"/>
-    <rect x="38" y="88" width="24" height="5" rx="2.5" fill="${TEAL}"/>
-  </g>`;
+  <path d="${WORDMARK}" fill="#fff"/>
+  <rect x="38" y="67" width="24" height="5" rx="2.5" fill="${TEAL}"/>`;
 
 function svg({ rounded, inset }) {
   const bg = rounded

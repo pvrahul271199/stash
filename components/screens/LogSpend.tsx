@@ -130,11 +130,7 @@ export function LogSpend({
         : (effectiveDay != null && effectiveDay !== cycle.currentDay
             ? ` on ${targetDateLabel} (Day ${effectiveDay})`
             : '');
-      toast(
-        p.label === 'Sort later'
-          ? `Saved ${inr(amount)}${suffix}`
-          : `Saved ${inr(amount)} for ${p.label}${suffix}`,
-      );
+      toast(`Saved ${inr(amount)}${suffix}`);
       onClose();
     } catch {
       toast('Failed to save spend. Please try again.', 'warm');

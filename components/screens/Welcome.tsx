@@ -1,4 +1,5 @@
 'use client';
+import { Logo } from '../ui/Logo';
 import { PrimaryButton, GhostButton } from '../ui/Button';
 
 export function Welcome({
@@ -13,7 +14,7 @@ export function Welcome({
   return (
     <main className="flex h-full flex-col justify-between px-6 pb-8 pt-14">
       <div>
-        <p className="mb-6 text-[15px] font-semibold text-good">Stash</p>
+        <Logo size={44} className="mb-6" />
         <h1 className="font-display text-[40px] font-semibold leading-[1.1] tracking-tight text-ink">
           Know what you can spend today.
         </h1>
