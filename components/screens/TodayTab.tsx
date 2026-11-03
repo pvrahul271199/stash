@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { PrimaryButton, SecondaryButton } from '../ui/Button';
 import { Note } from '../ui/Chip';
+import { Logo } from '../ui/Logo';
 import { HugeNumber } from '../ui/HugeNumber';
 import { SyncStatusPill } from '../ui/SyncStatusPill';
 import { WeekRow, weekWindow, type WeekDay } from '../ui/WeekRow';
@@ -87,18 +88,23 @@ export function TodayTab({ cycle, plan }: { cycle: Cycle; plan: Plan }) {
       <div className="flex-1 overflow-y-auto px-6 pb-4 pt-4">
         <IosHint />
         <header className="flex items-center justify-between">
-          <p className="text-[14px] text-soft">
-            {formatWithWeekday(dateOfDay(cycle.startDate, cycle.currentDay))} ·{' '}
-            <span className="num">
-              Day {cycle.currentDay}/{cycle.totalDays}
-            </span>
-          </p>
+          <div className="flex items-center gap-2">
+            <Logo size={30} />
+            <span className="font-display text-[22px] font-semibold tracking-tight text-[#1E1B4B]">Chelav</span>
+          </div>
           <div className="flex items-center gap-2">
             <SyncStatusPill />
           </div>
         </header>
 
-        <p className="mt-8 text-[15px] text-soft">You can still spend today</p>
+        <p className="mt-5 text-[14px] text-soft">
+          {formatWithWeekday(dateOfDay(cycle.startDate, cycle.currentDay))} ·{' '}
+          <span className="num">
+            Day {cycle.currentDay}/{cycle.totalDays}
+          </span>
+        </p>
+
+        <p className="mt-6 text-[15px] text-soft">You can still spend today</p>
         <HugeNumber value={left} className="mt-1" />
 
         <div className="mt-3 min-h-[48px]">
