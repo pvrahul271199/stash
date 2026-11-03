@@ -88,16 +88,16 @@ export function TodayTab({ cycle, plan }: { cycle: Cycle; plan: Plan }) {
       <div className="flex-1 overflow-y-auto px-6 pb-4 pt-4">
         <IosHint />
         <header className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Logo size={30} />
-            <span className="font-display text-[22px] font-semibold tracking-tight text-[#1E1B4B]">Chelav</span>
+          <div className="flex items-center gap-1.5">
+            <Logo size={24} />
+            <span className="font-display text-[17px] font-semibold tracking-tight text-[#1E1B4B]">Chelav</span>
           </div>
           <div className="flex items-center gap-2">
             <SyncStatusPill />
           </div>
         </header>
 
-        <p className="mt-5 text-[14px] text-soft">
+        <p className="mt-4 text-[14px] text-soft">
           {formatWithWeekday(dateOfDay(cycle.startDate, cycle.currentDay))} ·{' '}
           <span className="num">
             Day {cycle.currentDay}/{cycle.totalDays}

@@ -154,6 +154,8 @@ select:focus {
 /* Loader wordmark: letters appear one by one, like being written. */
 @keyframes stash-letter { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 .stash-letter { display: inline-block; opacity: 0; animation: stash-letter 0.28s ease-out forwards; }
+@keyframes stash-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+.stash-draw { stroke-dasharray: 1; stroke-dashoffset: 1; animation: stash-draw 0.9s ease-out forwards; }
 @keyframes stash-breathe { 0%, 100% { transform: scale(0.94); } 50% { transform: scale(1); } }
 .stash-breathe { animation: stash-breathe 3s ease-in-out infinite; }
 @keyframes stash-ripple { 0% { transform: scale(0.9); opacity: 0.9; } 100% { transform: scale(1.18); opacity: 0; } }

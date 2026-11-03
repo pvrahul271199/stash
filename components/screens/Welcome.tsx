@@ -16,7 +16,10 @@ export function Welcome({
   return (
     <main className="flex h-full flex-col justify-between px-6 pb-8 pt-14">
       <div>
-        <Logo size={44} className="mb-6" />
+        <div className="mb-6 flex items-center gap-3">
+          <Logo size={44} />
+          <span className="font-display text-[22px] font-semibold tracking-tight text-[#1E1B4B]">Chelav</span>
+        </div>
         <h1 className="font-display text-[40px] font-semibold leading-[1.1] tracking-tight text-ink">
           Know what you can spend today.
         </h1>
