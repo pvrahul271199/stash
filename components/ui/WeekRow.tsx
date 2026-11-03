@@ -17,7 +17,16 @@ export function weekWindow(currentDay: number, totalDays: number): number[] {
 
 const STATUS_LABEL = { closed: 'closed', estimated: 'estimated', today: 'today', future: 'upcoming' } as const;
 
-export function WeekRow({ days, startDate }: { days: WeekDay[]; startDate: string }) {
+export function WeekRow({
+  days,
+  startDate,
+  onSelect,
+}: {
+  days: WeekDay[];
+  startDate: string;
+  /** Tap a date to open the log screen for that day. */
+  onSelect?: (day: number) => void;
+}) {
   return (
     <ul className="flex justify-between" aria-label="This week">
       {days.map((d) => {
@@ -32,10 +41,13 @@ export function WeekRow({ days, startDate }: { days: WeekDay[]; startDate: strin
                 ? 'border-2 border-ink bg-white text-ink'
                 : 'border border-line bg-white text-faint';
         return (
-          <li
-            key={d.day}
-            className="flex flex-col items-center gap-1"
-            aria-label={`Day ${d.day}, ${wd} ${formatShort(iso)}, ${STATUS_LABEL[d.status]}`}
+          <li key={d.day}>
+          <button
+            type="button"
+            disabled={!onSelect}
+            onClick={() => onSelect?.(d.day)}
+            className="flex min-h-0 flex-col items-center gap-1 rounded-xl px-0.5 py-1 transition-transform active:scale-95"
+            aria-label={`Open day ${d.day}, ${wd} ${formatShort(iso)}, ${STATUS_LABEL[d.status]}`}
           >
             <span className={`text-[10px] font-medium leading-none ${isToday ? 'font-semibold text-ink' : 'text-faint'}`}>
               Day {d.day}
@@ -46,6 +58,7 @@ export function WeekRow({ days, startDate }: { days: WeekDay[]; startDate: strin
             <span className={`text-[10px] leading-none ${isToday ? 'font-medium text-soft' : 'text-faint'}`}>
               {wd}
             </span>
+          </button>
           </li>
         );
       })}

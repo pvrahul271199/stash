@@ -113,12 +113,39 @@ function SwipeRow({
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
   return (
-    <section className="mt-8">
-      <h2 className="mb-3 text-section font-semibold text-ink">{title}</h2>
+    <section className="mt-9">
+      <div className="mb-3.5">
+        <h2 className="text-section font-semibold text-ink">{title}</h2>
+        {hint && <p className="mt-0.5 text-[13px] text-soft">{hint}</p>}
+      </div>
       {children}
     </section>
+  );
+}
+
+function Stat({
+  label,
+  value,
+  sub,
+  status,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  /** Palette-only status: 'good' = soft indigo, 'alert' = solid ink. */
+  status?: 'good' | 'alert';
+}) {
+  const alert = status === 'alert';
+  return (
+    <div
+      className={`rounded-note p-3.5 ${alert ? 'bg-ink' : status === 'good' ? 'bg-ink2/20' : 'bg-tint'}`}
+    >
+      <p className={`text-[12px] font-medium uppercase tracking-wide ${alert ? 'text-white/70' : 'text-soft'}`}>{label}</p>
+      <p className={`num mt-1 text-[24px] leading-tight ${alert ? 'text-white' : 'text-ink'}`}>{value}</p>
+      {sub && <p className={`mt-0.5 text-[12px] ${alert ? 'text-white/70' : 'text-soft'}`}>{sub}</p>}
+    </div>
   );
 }
 
@@ -180,6 +207,7 @@ export function InsightsTab({ cycle, plan }: { cycle: Cycle | undefined; plan: P
       (a, b) => (sliceMap.get(b) ?? 0) - (sliceMap.get(a) ?? 0) || names.indexOf(a) - names.indexOf(b),
     );
 
+    const fullDays = buildDays(ic, rows, entries, null);
     return {
       ic,
       names: orderedNames,
@@ -191,7 +219,8 @@ export function InsightsTab({ cycle, plan }: { cycle: Cycle | undefined; plan: P
       activeEvent,
       evList,
       days: finalDays,
-      summary: summarize(ic, buildDays(ic, rows, entries, null)),
+      fullDays,
+      summary: summarize(ic, fullDays),
       slices,
       weekday: weekdayStats(finalDays, cycle.startDate),
       time: timeBuckets(scopedEntries, activeFocus),
@@ -222,6 +251,7 @@ export function InsightsTab({ cycle, plan }: { cycle: Cycle | undefined; plan: P
 
   const {
     summary,
+    fullDays,
     days,
     colorOf,
     activeFocus,
@@ -245,53 +275,89 @@ export function InsightsTab({ cycle, plan }: { cycle: Cycle | undefined; plan: P
   const tryAgain = 'Close a few days to see this.';
   const topEventTotal = evList.reduce((m, e) => Math.max(m, e.total), 0);
   const space = currency.symbol.length > 1 ? ' ' : '';
+  const daysLeft = Math.max(cycle.totalDays - summary.closedDays, 0);
+  const overPace = summary.closedDays >= MIN_CLOSED_DAYS && summary.spentOnClosed / summary.closedDays > cycle.planAmount / cycle.totalDays;
+  const projected =
+    summary.closedDays >= MIN_CLOSED_DAYS ? Math.round((summary.spentOnClosed / summary.closedDays) * cycle.totalDays) : null;
+  const noSpendDays = fullDays.filter((d) => (d.status === 'closed' || d.status === 'estimated') && d.totalSpent === 0).length;
 
   return (
     <div className="flex-1 overflow-y-auto px-6 pb-8 pt-6" style={{ overflowAnchor: 'none' }}>
       <h1 className="text-question font-semibold text-ink">Insights</h1>
 
       {/* 1. Summary */}
-      <section className="mt-5" aria-label="Summary">
-        <p className="text-[14px] text-soft">Spent this month so far</p>
-        <p className="num text-big text-ink">
+      <section className="mt-5 rounded-[20px] border border-line bg-white p-5 shadow-sm" aria-label="Summary">
+        <div className="flex items-start justify-between gap-3">
+          <p className="text-[13px] font-medium uppercase tracking-wide text-soft">Spent this month</p>
+          <span className="num rounded-full bg-tint px-2.5 py-1 text-[12px] font-medium text-ink">
+            {Math.round(fillPct)}% used
+          </span>
+        </div>
+        <p className="num mt-1 text-big text-ink">
           <span className="text-faint">{currency.symbol}{space}</span>
           {Math.round(summary.spentSoFar).toLocaleString(currency.locale)}
         </p>
         <p className="mt-1 text-[14px] text-soft">of {inr(cycle.planAmount)} to live on</p>
         <div
-          className="relative mt-4 h-2.5 rounded-full bg-tint"
+          className="relative mt-5 h-3 rounded-full bg-tint"
           role="progressbar"
           aria-valuemin={0}
           aria-valuemax={cycle.planAmount}
           aria-valuenow={Math.round(summary.spentSoFar)}
           aria-label="Spent so far"
         >
-          <div className="h-2.5 rounded-full bg-ink" style={{ width: `${fillPct}%` }} />
           <div
-            className="absolute -top-1 h-[18px] w-0.5 bg-good"
-            style={{ left: `calc(${summary.planMarker * 100}% - 1px)` }}
+            className="h-3 rounded-full transition-all"
+            style={{ width: `${fillPct}%`, background: overPace ? colors.warm : colors.ink }}
+          />
+          <div
+            className="absolute -top-1.5 h-[24px] w-[3px] rounded-full bg-good ring-2 ring-white"
+            style={{ left: `calc(${summary.planMarker * 100}% - 1.5px)` }}
             title="On plan for today"
             aria-hidden="true"
           />
         </div>
-        <p className="mt-3 text-[14px] text-soft">{summary.paceMessage ?? tryAgain}</p>
+        <div className="mt-2 flex items-center justify-between text-[12px] text-faint">
+          <span>Day {summary.closedDays} of {cycle.totalDays}</span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-2 w-0.5 rounded-full bg-good" /> on plan
+          </span>
+        </div>
+        <p
+          className={`mt-3 flex items-start gap-2.5 rounded-note px-3.5 py-2.5 text-[14px] ${
+            !summary.paceMessage ? 'bg-tint text-soft' : overPace ? 'bg-ink text-white' : 'bg-ink2/20 text-ink'
+          }`}
+        >
+          {summary.paceMessage && (
+            <span
+              aria-hidden="true"
+              className={`mt-[7px] h-2 w-2 shrink-0 rounded-full ${overPace ? 'bg-white' : 'bg-ink'}`}
+            />
+          )}
+          <span>{summary.paceMessage ?? tryAgain}</span>
+        </p>
       </section>
 
       {/* 2. Stat boxes */}
-      <div className="mt-5 grid grid-cols-2 gap-2.5">
-        <div className="rounded-note bg-tint p-3.5">
-          <p className="text-[13px] text-soft">Average day</p>
-          <p className="num text-[24px] text-ink">{summary.averageDay != null ? inr(summary.averageDay) : '—'}</p>
-        </div>
-        <div className="rounded-note bg-tint p-3.5">
-          <p className="text-[13px] text-soft">Left to live on</p>
-          <p className="num text-[24px] text-ink">{inr(summary.leftToLive)}</p>
-        </div>
+      <div className="mt-3 grid grid-cols-2 gap-2.5">
+        <Stat label="Average day" value={summary.averageDay != null ? inr(summary.averageDay) : '—'} sub="on closed days" />
+        <Stat label="Left to live on" value={inr(summary.leftToLive)} sub={`${daysLeft} ${daysLeft === 1 ? 'day' : 'days'} to go`} />
+        <Stat
+          label="Month-end pace"
+          value={projected != null ? inr(projected) : '—'}
+          sub={projected != null ? (projected > cycle.planAmount ? 'over your plan' : 'within your plan') : 'needs a few closed days'}
+          status={projected == null ? undefined : projected > cycle.planAmount ? 'alert' : 'good'}
+        />
+        <Stat
+          label="No-spend days"
+          value={String(noSpendDays)}
+          sub={summary.closedDays ? `of ${summary.closedDays} closed` : 'none closed yet'}
+        />
       </div>
 
       {/* 3. Spending over the month */}
-      <Section title="Spending over the month">
-        <div className="inline-flex rounded-key bg-tint p-1" role="group" aria-label="Chart view">
+      <Section title="Spending over the month" hint="Filter by category, type or event to zoom in.">
+        <div className="grid grid-cols-2 rounded-key bg-tint p-1" role="group" aria-label="Chart view">
           {([
             ['each', 'Each day'],
             ['running', 'Running total'],
@@ -300,7 +366,7 @@ export function InsightsTab({ cycle, plan }: { cycle: Cycle | undefined; plan: P
               key={id}
               onClick={() => setMode(id)}
               aria-pressed={mode === id}
-              className={`min-h-[40px] rounded-[10px] px-4 text-[14px] font-medium ${
+              className={`min-h-[40px] rounded-[10px] px-4 text-[14px] font-medium transition-all ${
                 mode === id ? 'bg-white text-ink shadow-sm' : 'text-soft'
               }`}
             >
@@ -330,7 +396,7 @@ export function InsightsTab({ cycle, plan }: { cycle: Cycle | undefined; plan: P
                   aria-pressed={isSelected}
                   className={`flex h-9 min-h-0 items-center gap-1.5 rounded-full border px-3 text-[13px] font-medium transition-colors ${
                     isSelected
-                      ? 'border-ink bg-tint text-ink'
+                      ? 'border-ink bg-tint font-semibold text-ink'
                       : catTotal > 0
                         ? 'border-line bg-white text-ink'
                         : 'border-line/70 bg-white text-faint'
@@ -412,7 +478,7 @@ export function InsightsTab({ cycle, plan }: { cycle: Cycle | undefined; plan: P
           </SwipeRow>
         )}
 
-        <div className="mt-3">
+        <div className="mt-3 rounded-[20px] border border-line bg-white p-3">
           <DayChart
             days={days}
             mode={mode}
@@ -426,7 +492,7 @@ export function InsightsTab({ cycle, plan }: { cycle: Cycle | undefined; plan: P
       </Section>
 
       {/* 4. Where it went */}
-      <Section title="Where it went">
+      <Section title="Where it went" hint="Tap a slice to focus the whole page on it.">
         {slices.length === 0 ? (
           <p className="text-body text-soft">Nothing to split up yet.</p>
         ) : (
@@ -445,7 +511,7 @@ export function InsightsTab({ cycle, plan }: { cycle: Cycle | undefined; plan: P
       </Section>
 
       {/* 4b. By event (with sub-categories breakdown) */}
-      <Section title="By event">
+      <Section title="By event" hint="Trips, parties, anything you tagged.">
         {evList.length === 0 ? (
           <p className="text-body text-soft">
             Tap the calendar button on Today to start an event. Spends you log inside it show up here, split by category.
@@ -522,23 +588,45 @@ export function InsightsTab({ cycle, plan }: { cycle: Cycle | undefined; plan: P
 
       {/* 4c. By payment mode */}
       {payments.length > 0 && (
-        <Section title="By payment mode">
-          <div className="grid grid-cols-3 gap-2.5">
-            {payments.map((p) => (
-              <div key={p.name} className="rounded-note border border-line bg-white p-3">
-                <p className="text-[13px] font-medium text-soft">{p.name}</p>
-                <p className="num mt-0.5 text-[18px] font-semibold text-ink">{inr(p.total)}</p>
-                <p className="mt-0.5 text-[12px] text-faint">
-                  {p.count} {p.count === 1 ? 'spend' : 'spends'} · {Math.round(p.pct)}%
-                </p>
-              </div>
-            ))}
+        <Section title="By payment mode" hint="How you paid, by share of spend.">
+          <div className="rounded-note border border-line bg-white p-4">
+            <div className="flex h-3 w-full overflow-hidden rounded-full bg-tint" aria-hidden="true">
+              {payments.map((p, i) => (
+                <div
+                  key={p.name}
+                  className="h-full border-r-2 border-white last:border-r-0"
+                  style={{ width: `${p.pct}%`, background: categoryRamp[i % categoryRamp.length] }}
+                />
+              ))}
+            </div>
+            <ul className="mt-4 flex flex-col gap-3">
+              {payments.map((p, i) => (
+                <li key={p.name} className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <span
+                      className="h-2.5 w-2.5 shrink-0 rounded-full"
+                      style={{ background: categoryRamp[i % categoryRamp.length] }}
+                    />
+                    <div>
+                      <p className="text-[14px] font-medium text-ink">{p.name}</p>
+                      <p className="text-[12px] text-faint">
+                        {p.count} {p.count === 1 ? 'spend' : 'spends'}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="num text-[16px] font-semibold text-ink">{inr(p.total)}</p>
+                    <p className="num text-[12px] text-soft">{Math.round(p.pct)}%</p>
+                  </div>
+                </li>
+              ))}
+            </ul>
           </div>
         </Section>
       )}
 
       {/* 5. By day of week */}
-      <Section title="By day of week">
+      <Section title="By day of week" hint="Which days run hotter than usual.">
         {weekday.closedCount >= MIN_CLOSED_DAYS ? (
           <WeekdayChart stats={weekday.stats} usual={weekday.usual} color={barColor} resetKey={activeFocus} />
         ) : (
@@ -547,7 +635,7 @@ export function InsightsTab({ cycle, plan }: { cycle: Cycle | undefined; plan: P
       </Section>
 
       {/* 6. By time of day */}
-      <Section title="By time of day">
+      <Section title="By time of day" hint="When in the day your money moves.">
         <TimeOfDayChart buckets={time} color={barColor} resetKey={activeFocus} />
       </Section>
 
@@ -556,7 +644,8 @@ export function InsightsTab({ cycle, plan }: { cycle: Cycle | undefined; plan: P
         <div className="flex flex-col gap-2.5">
           {frequent ? (
             <Note tone="neutral">
-              {frequent.label} is your most frequent spend: {frequent.count} times, {inr(frequent.total)} in total.
+              <span className="font-semibold">{frequent.label}</span> is your most frequent spend: {frequent.count} times,{' '}
+              {inr(frequent.total)} in total.
             </Note>
           ) : (
             <p className="text-body text-soft">Patterns show up once you have a few repeat spends.</p>
@@ -566,26 +655,35 @@ export function InsightsTab({ cycle, plan }: { cycle: Cycle | undefined; plan: P
       </Section>
 
       {/* 8. Biggest spends */}
-      <Section title="Biggest spends">
+      <Section title="Biggest spends" hint="Your five largest this month.">
         {biggest.length === 0 ? (
           <p className="text-body text-soft">Nothing here yet.</p>
         ) : (
-          <ol className="divide-y divide-line">
+          <ol className="flex flex-col gap-2.5">
             {biggest.map((e, i) => (
-              <li key={i} className="flex items-center justify-between py-3">
-                <div>
-                  <p className="text-[15px] font-medium text-ink">
+              <li key={i} className="flex items-center gap-3 rounded-note border border-line bg-white p-3.5">
+                <span
+                  className={`num flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[13px] font-semibold ${
+                    i === 0 ? 'bg-ink text-white' : 'bg-tint text-soft'
+                  }`}
+                >
+                  {i + 1}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[15px] font-medium text-ink">
                     {e.label}
-                    {e.fromSavings && <span className="ml-2 text-[12px] text-warm">from savings</span>}
+                    {e.fromSavings && (
+                      <span className="ml-2 rounded-full bg-tint px-2 py-0.5 text-[11px] text-soft">from savings</span>
+                    )}
                   </p>
-                  <p className="text-[13px] text-faint">
+                  <p className="truncate text-[12px] text-faint">
                     {formatWithWeekday(dateOfDay(cycle.startDate, e.day))} · {e.subcategory ?? e.category}
                     {e.payment ? ` · ${e.payment}` : ''}
                     {e.event ? ` · ${e.event}` : ''}
                   </p>
                   {e.note && <p className="mt-0.5 truncate text-[12px] text-soft">{e.note}</p>}
                 </div>
-                <p className="num text-[20px] text-ink">{inr(e.amount)}</p>
+                <p className="num text-[18px] font-semibold text-ink">{inr(e.amount)}</p>
               </li>
             ))}
           </ol>

@@ -35,7 +35,7 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${bricolage.variable} ${figtree.variable}`}>
-      <body>
+      <body suppressHydrationWarning>
         <div className="app-frame">
           <div className="app-root">{children}</div>
         </div>

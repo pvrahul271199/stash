@@ -1,6 +1,6 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { BackIcon, IconButton, PrimaryButton, SecondaryButton } from '../ui/Button';
+import { BackIcon, IconButton, PrimaryButton } from '../ui/Button';
 import { Chip } from '../ui/Chip';
 import { Keypad } from '../ui/Keypad';
 import { CategoryPicker } from './CategoryPicker';
@@ -52,7 +52,23 @@ export function LogSpend({
   const [eventMenuOpen, setEventMenuOpen] = useState(false);
   const [newEventName, setNewEventName] = useState('');
   const [eventErr, setEventErr] = useState<string | null>(null);
-  const [view, setView] = useState<'keypad' | 'picker' | 'big' | 'pastAdjust'>('keypad');
+  const [view, setView] = useState<'keypad' | 'picker' | 'big'>('keypad');
+  /** For past/upcoming days: spread the spend over the remaining days (remembered between sessions). */
+  const [spread, setSpread] = useState(true);
+  const [spreadInfo, setSpreadInfo] = useState(false);
+  useEffect(() => {
+    try {
+      if (localStorage.getItem('stash.spreadOtherDay') === '0') setSpread(false);
+    } catch {}
+  }, []);
+  function toggleSpread() {
+    setSpread((v) => {
+      try {
+        localStorage.setItem('stash.spreadOtherDay', v ? '0' : '1');
+      } catch {}
+      return !v;
+    });
+  }
   const [pending, setPending] = useState<Pending | null>(null);
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
@@ -153,8 +169,7 @@ export function LogSpend({
       return;
     }
     if (isOtherDay) {
-      setPending(p);
-      setView('pastAdjust');
+      await persist(p, false, spread);
       return;
     }
     if (isBigSpend(amount, todayAllowance(cycle), cycle)) {
@@ -214,96 +229,50 @@ export function LogSpend({
         />
       )}
 
-      {view === 'pastAdjust' && pending && (() => {
+      {spreadInfo && (() => {
         const remDays = Math.max(1, daysLeft(cycle));
         const currentDaily = todayAllowance(cycle);
         const newPool = Math.max(0, cycle.pool - amount);
-        const newDaily = remDays > 0 ? newPool / remDays : 0;
-        const perDayDelta = Math.max(0, currentDaily - newDaily);
+        const newDaily = newPool / remDays;
         return (
-          <div className="flex h-full flex-col">
-            <div className="flex items-center justify-between">
-              <IconButton label="Back to keypad" onClick={() => setView('keypad')} className="-ml-3">
-                <BackIcon />
-              </IconButton>
-              <span className="rounded-full bg-tint px-3 py-1 text-[12px] font-medium text-ink">
-                Day {effectiveDay} · {formatWithWeekday(targetIso)}
-              </span>
-            </div>
-
-            <div className="mt-3 flex-1 overflow-y-auto">
-              <p className="text-[14px] text-soft">{pending.label}</p>
-              <p className="num mt-1 text-big text-ink">
-                <span className="text-faint">{currency.symbol}{currency.symbol.length > 1 ? ' ' : ''}</span>
-                {num(amount)}
+          <div className="absolute inset-0 z-[60] flex items-end bg-ink/40" role="presentation" onClick={() => setSpreadInfo(false)}>
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-label="About spreading a spend"
+              onClick={(e) => e.stopPropagation()}
+              className="w-full rounded-t-[24px] bg-white px-6 pt-3"
+              style={{ paddingBottom: 'calc(var(--safe-bottom) + 20px)' }}
+            >
+              <div className="mx-auto mb-3 h-1 w-9 rounded-full bg-line" aria-hidden="true" />
+              <h2 className="text-section font-semibold text-ink">Spread over other days?</h2>
+              <p className="mt-1 text-[14px] text-soft">
+                You’re adding a spend to {isFutureDay ? 'an upcoming' : 'a past'} day ({targetDateLabel}, Day {effectiveDay}).
               </p>
-
-              <h2 className="mt-5 text-question font-semibold text-ink">
-                Adjust your daily limit for the other days?
-              </h2>
-              <p className="mt-1.5 text-body text-soft">
-                You’re adding a spend to {isFutureDay ? 'an upcoming' : 'a past'} day ({targetDateLabel}). Should it
-                be spread across your {remDays} remaining {remDays === 1 ? 'day' : 'days'}?
-              </p>
-
               <div className="mt-4 flex items-center justify-between rounded-note border border-line px-4 py-3">
                 <span className="text-[13px] text-soft">Daily limit</span>
                 <span className="num text-[15px] font-semibold text-ink">
                   {inr(currentDaily)} <span className="px-1 text-faint">→</span> {inr(newDaily)}
                 </span>
               </div>
-
-              <div className="mt-5 rounded-note border border-ink bg-tint/50 p-4">
-                <div className="flex items-start gap-3">
-                  <span
-                    className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-ink text-white"
-                    aria-hidden="true"
-                  >
-                    <svg
-                      width="14"
-                      height="14"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2.4"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <circle cx="12" cy="12" r="9" />
-                      <path d="M12 11v5" />
-                      <path d="M12 8h.01" />
-                    </svg>
-                  </span>
-                  <div className="min-w-0 flex-1 text-[13px] leading-relaxed text-soft">
-                    <p className="text-ink">
-                      <span className="font-semibold">If Yes:</span> Pool adjusts from{' '}
-                      <span className="num font-semibold">{inr(cycle.pool)}</span> to{' '}
-                      <span className="num font-semibold">{inr(newPool)}</span>, and your next {remDays}{' '}
-                      {remDays === 1 ? 'day becomes' : 'days become'}{' '}
-                      <span className="num font-semibold">{inr(newDaily)}/day</span> ({inr(perDayDelta)} less/day).
-                    </p>
-                    <div className="my-2.5 border-t border-line" />
-                    <p className="text-soft">
-                      <span className="font-semibold text-ink">If No:</span> Logs{' '}
-                      <span className="num font-semibold text-ink">{inr(amount)}</span> on{' '}
-                      <span className="font-medium text-ink">
-                        {targetDateLabel} (Day {effectiveDay})
-                      </span>{' '}
-                      while keeping your remaining days at{' '}
-                      <span className="num font-semibold text-ink">{inr(currentDaily)}/day</span>.
-                    </p>
-                  </div>
-                </div>
+              <div className="mt-3 rounded-note bg-tint p-4 text-[13px] leading-relaxed text-soft">
+                <p className="text-ink">
+                  <span className="font-semibold">On:</span> your pool goes from{' '}
+                  <span className="num font-semibold">{inr(cycle.pool)}</span> to{' '}
+                  <span className="num font-semibold">{inr(newPool)}</span>, so your next {remDays}{' '}
+                  {remDays === 1 ? 'day becomes' : 'days become'}{' '}
+                  <span className="num font-semibold">{inr(newDaily)}/day</span>.
+                </p>
+                <div className="my-2.5 border-t border-line" />
+                <p>
+                  <span className="font-semibold text-ink">Off:</span> it’s only recorded on{' '}
+                  <span className="font-medium text-ink">{targetDateLabel}</span>. Your remaining days stay at{' '}
+                  <span className="num font-semibold text-ink">{inr(currentDaily)}/day</span>.
+                </p>
               </div>
-            </div>
-
-            <div className="flex flex-col gap-2 pt-2">
-              <PrimaryButton disabled={saving} onClick={() => persist(pending, false, true)}>
-                {saving ? 'Saving…' : 'Yes, adjust the other days'}
-              </PrimaryButton>
-              <SecondaryButton disabled={saving} onClick={() => persist(pending, false, false)}>
-                {saving ? 'Saving…' : 'No, just log it'}
-              </SecondaryButton>
+              <div className="mt-4">
+                <PrimaryButton onClick={() => setSpreadInfo(false)}>Got it</PrimaryButton>
+              </div>
             </div>
           </div>
         );
@@ -515,7 +484,8 @@ export function LogSpend({
               </span>
             </div>
 
-            <div className="mt-2 inline-flex rounded-full bg-tint p-0.5" role="group" aria-label="Payment mode">
+            <div className="mt-2 flex w-fit flex-col items-stretch">
+            <div className="inline-flex rounded-full bg-tint p-0.5" role="group" aria-label="Payment mode">
               {PAYMENT_MODES.map((m) => (
                 <button
                   key={m}
@@ -531,7 +501,7 @@ export function LogSpend({
               ))}
             </div>
 
-            <div className="mt-1.5 flex h-7 w-full items-center justify-center">
+            <div className="mt-1.5 flex h-7 w-0 min-w-full items-center justify-center">
               {!noteOpen && !note.trim() && (
                 <button
                   type="button"
@@ -557,7 +527,7 @@ export function LogSpend({
               )}
 
               {!noteOpen && note.trim() && (
-                <div className="inline-flex h-6 min-h-0 max-w-[220px] items-center gap-1 rounded-full border border-ink/20 bg-tint pl-2.5 pr-1 text-[11px] text-ink">
+                <div className="inline-flex h-6 min-h-0 max-w-full items-center gap-1 rounded-full border border-ink/20 bg-tint pl-2.5 pr-1 text-[11px] text-ink">
                   <button
                     type="button"
                     onClick={() => setNoteOpen(true)}
@@ -578,7 +548,7 @@ export function LogSpend({
               )}
 
               {noteOpen && (
-                <div className="flex h-7 w-full max-w-[250px] items-center gap-1 rounded-full border border-line bg-tint/70 px-2.5">
+                <div className="flex h-7 w-full items-center gap-1 rounded-full border border-line bg-tint/70 px-2.5">
                   <svg
                     width="11"
                     height="11"
@@ -604,11 +574,11 @@ export function LogSpend({
                         setNoteOpen(false);
                       }
                     }}
-                    placeholder="What was this for?"
+                    placeholder="Note"
                     aria-label="Spend note"
                     autoFocus
                     maxLength={60}
-                    className="h-6 min-h-0 min-w-0 flex-1 bg-transparent text-[12px] text-ink placeholder:text-faint"
+                    className="h-6 min-h-0 w-0 min-w-0 flex-1 bg-transparent text-[12px] text-ink placeholder:text-faint"
                   />
                   {note && (
                     <button
@@ -630,14 +600,58 @@ export function LogSpend({
                 </div>
               )}
             </div>
+            </div>
+
+            {isOtherDay && !isOutsideActiveCycle && (
+              <div className="mt-5 flex flex-col items-center gap-1">
+                <div className="inline-flex items-center gap-2 rounded-full border border-line bg-white py-1 pl-1.5 pr-1">
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={spread}
+                    aria-label="Spread over remaining days"
+                    onClick={toggleSpread}
+                    className="flex min-h-0 items-center gap-2 rounded-full pr-1"
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={`relative h-4 w-7 shrink-0 rounded-full transition-colors ${spread ? 'bg-ink' : 'bg-line'}`}
+                    >
+                      <span
+                        className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow-sm transition-all ${spread ? 'left-[14px]' : 'left-0.5'}`}
+                      />
+                    </span>
+                    <span className="text-[12px] font-medium text-ink">Spread over other days</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSpreadInfo(true)}
+                    aria-label="What does this do?"
+                    className="flex h-5 w-5 min-h-0 min-w-0 items-center justify-center rounded-full bg-tint text-soft"
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+                      <circle cx="12" cy="12" r="9" />
+                      <path d="M12 11v5M12 8h.01" />
+                    </svg>
+                  </button>
+                </div>
+                <p className="num text-[11px] text-faint">
+                  {spread
+                    ? amount > 0
+                      ? `Daily ${inr(todayAllowance(cycle))} → ${inr(Math.max(0, cycle.pool - amount) / Math.max(1, daysLeft(cycle)))}`
+                      : 'Your daily amount will adjust'
+                    : `Just recorded. Daily stays ${inr(todayAllowance(cycle))}`}
+                </p>
+              </div>
+            )}
           </div>
 
-          <div className="mb-2.5 flex flex-wrap justify-center gap-1.5">
+          <div className="mb-2 flex flex-wrap justify-center gap-1">
             {labels.map((l) => (
               <Chip
                 key={l}
                 onClick={() => commit({ label: l })}
-                className="h-8 min-h-0 px-3 text-[12px]"
+                className="h-7 min-h-0 px-2.5 text-[11px]"
               >
                 {l}
               </Chip>
@@ -648,7 +662,7 @@ export function LogSpend({
                 if (amount <= 0) toast('Enter an amount first', 'warm');
                 else setView('picker');
               }}
-              className="h-8 min-h-0 px-3 text-[12px]"
+              className="h-7 min-h-0 px-2.5 text-[11px]"
             >
               More
             </Chip>

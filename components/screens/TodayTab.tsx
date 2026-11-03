@@ -6,6 +6,7 @@ import { HugeNumber } from '../ui/HugeNumber';
 import { SyncStatusPill } from '../ui/SyncStatusPill';
 import { WeekRow, weekWindow, type WeekDay } from '../ui/WeekRow';
 import { LogSpend } from './LogSpend';
+import { DayPeek } from './DayPeek';
 import { CloseDay } from './CloseDay';
 import { DayClosed } from './DayClosed';
 import { EditSpendSheet } from './EditSpendSheet';
@@ -36,6 +37,8 @@ type View = 'today' | 'log' | 'close' | 'closed';
 export function TodayTab({ cycle, plan }: { cycle: Cycle; plan: Plan }) {
   const [view, setView] = useState<View>('today');
   const [logReturn, setLogReturn] = useState<View>('today');
+  const [logDay, setLogDay] = useState<number | undefined>(undefined);
+  const [peekDay, setPeekDay] = useState<number | null>(null);
   const [result, setResult] = useState<CloseResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<Entry | null>(null);
@@ -111,7 +114,11 @@ export function TodayTab({ cycle, plan }: { cycle: Cycle; plan: Plan }) {
         </div>
 
         <div className="mt-6">
-          <WeekRow days={week} startDate={cycle.startDate} />
+          <WeekRow
+            days={week}
+            startDate={cycle.startDate}
+            onSelect={(day) => setPeekDay(day)}
+          />
         </div>
         <p className="mt-5 text-[15px] text-soft">
           <span className="num text-ink">{inr(remaining)}</span> left for {n} {n === 1 ? 'day' : 'days'}
@@ -154,6 +161,7 @@ export function TodayTab({ cycle, plan }: { cycle: Cycle; plan: Plan }) {
       <div className="flex shrink-0 flex-col gap-2 px-6 pb-4 pt-2">
         <PrimaryButton
           onClick={() => {
+            setLogDay(undefined);
             setLogReturn('today');
             setView('log');
           }}
@@ -170,12 +178,26 @@ export function TodayTab({ cycle, plan }: { cycle: Cycle; plan: Plan }) {
           onBack={() => setView('today')}
           onClose={close}
           onAddMore={() => {
+            setLogDay(undefined);
             setLogReturn('close');
             setView('log');
           }}
         />
       )}
-      {view === 'log' && <LogSpend cycle={cycle} plan={plan} onClose={() => setView(logReturn)} />}
+      {view === 'log' && <LogSpend cycle={cycle} plan={plan} targetDay={logDay} onClose={() => setView(logReturn)} />}
+      {peekDay != null && view === 'today' && (
+        <DayPeek
+          cycle={cycle}
+          day={peekDay}
+          onClose={() => setPeekDay(null)}
+          onLog={() => {
+            setLogDay(peekDay === cycle.currentDay ? undefined : peekDay);
+            setLogReturn('today');
+            setPeekDay(null);
+            setView('log');
+          }}
+        />
+      )}
       {editing && <EditSpendSheet entry={editing} onClose={() => setEditing(null)} />}
       {view === 'closed' && result && <DayClosed cycle={cycle} result={result} onNext={() => setView('today')} />}
     </>
