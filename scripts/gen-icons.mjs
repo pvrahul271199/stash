@@ -4,10 +4,9 @@ import { mkdirSync } from 'node:fs';
 
 const INK = '#1E1B4B';
 
-import { readFileSync } from 'node:fs';
-const WORDMARK = readFileSync('components/ui/logoPath.ts', 'utf8').match(/'([^']+)'/)[1];
+// Malayalam ച (cha) as one stroke + teal coin dot. Keep in sync with components/ui/Logo.tsx and public/logo.svg.
 const glyph = `
-  <path d="${WORDMARK}" fill="#fff"/>`;
+  <g transform="translate(50 50) scale(0.78) translate(-49 -46)"><path d="M74 22 V70 H24 M32 54 C30 40 40 33 50 36 C62 40 62 58 50 70" fill="none" stroke="#fff" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/></g>`;
 
 function svg({ rounded, inset }) {
   const bg = rounded

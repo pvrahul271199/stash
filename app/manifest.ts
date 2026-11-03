@@ -4,8 +4,8 @@ export const dynamic = 'force-static';
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: 'Stash: what can I spend today',
-    short_name: 'Stash',
+    name: 'Chelav: what can I spend today',
+    short_name: 'Chelav',
     description: 'A calm expense tracker built around one question: how much can I spend today?',
     start_url: '/',
     scope: '/',

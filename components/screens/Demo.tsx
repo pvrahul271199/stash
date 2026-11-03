@@ -541,7 +541,7 @@ export function Demo({ onClose }: { onClose: () => void }) {
   return (
     <main className="absolute inset-0 z-40 flex flex-col bg-white px-6 pb-6 pt-4">
       <div className="flex items-center justify-between">
-        <p className="text-[14px] font-medium text-soft">How Stash works</p>
+        <p className="text-[14px] font-medium text-soft">How Chelav works</p>
         <IconButton label="Close demo" onClick={onClose} className="-mr-3">
           <CloseIcon />
         </IconButton>

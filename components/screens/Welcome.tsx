@@ -21,7 +21,7 @@ export function Welcome({
           Know what you can spend today.
         </h1>
         <p className="mt-4 text-body text-soft">
-          Tell Stash what comes in and what goes out once. Every day you get one number: what you can
+          Tell Chelav what comes in and what goes out once. Every day you get one number: what you can
           still spend. No guilt, no points. Just clarity.
         </p>
       </div>

@@ -1,4 +1,4 @@
-/** Stash logo: ink tile, "Stash" wordmark in the display font, teal underline. Pure SVG, scales to any size. */
+/** Chelav logo: ink tile with the Malayalam letter ച (cha, as in ചെലവ്) drawn as one stroke. */
 export function Logo({ size = 40, className = '' }: { size?: number; className?: string }) {
   return (
     <svg
@@ -7,22 +7,20 @@ export function Logo({ size = 40, className = '' }: { size?: number; className?:
       width={size}
       height={size}
       role="img"
-      aria-label="Stash"
+      aria-label="Chelav"
       className={className}
     >
       <rect width="100" height="100" rx="22" fill="#1E1B4B" />
-      <text
-        x="50"
-        y="56"
-        textAnchor="middle"
-        fill="#fff"
-        fontSize="26"
-        fontWeight="600"
-        letterSpacing="-0.5"
-        style={{ fontFamily: "var(--font-bricolage), 'Bricolage Grotesque', system-ui, sans-serif" }}
-      >
-        Stash
-      </text>
+      <g transform="translate(50 50) scale(0.78) translate(-49 -46)">
+      <path
+        d="M74 22 V70 H24 M32 54 C30 40 40 33 50 36 C62 40 62 58 50 70"
+        fill="none"
+        stroke="#fff"
+        strokeWidth="8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      </g>
     </svg>
   );
 }

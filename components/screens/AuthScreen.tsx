@@ -44,7 +44,7 @@ export function AuthScreen({
           <span className="text-[13px] text-faint">{mode === 'signup' ? 'Create account' : 'Log in'}</span>
         </div>
         <h1 className="mt-2 text-question font-semibold text-ink">
-          {mode === 'signup' ? 'Create your Stash account' : 'Welcome back'}
+          {mode === 'signup' ? 'Create your Chelav account' : 'Welcome back'}
         </h1>
         <p className="mt-1.5 text-[14px] text-soft">
           {mode === 'signup'

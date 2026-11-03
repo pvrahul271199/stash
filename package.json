@@ -11,8 +11,7 @@
     "test:e2e": "playwright test",
     "icons": "node scripts/gen-icons.mjs",
     "storybook": "storybook dev -p 6006",
-    "build-storybook": "storybook build",
-    "logo": "node scripts/gen-logo.mjs"
+    "build-storybook": "storybook build"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",

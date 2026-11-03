@@ -1,6 +1,6 @@
 'use client';
 
-/** Calm loader: the Stash wordmark writes itself in over a softly breathing circle and a slow ripple.
+/** Calm loader: the Chelav wordmark writes itself in over a softly breathing circle and a slow ripple.
  *  A message is optional; the app-open loader shows none. */
 export function LoadingScreen({ message }: { message?: string }) {
   return (
@@ -8,7 +8,7 @@ export function LoadingScreen({ message }: { message?: string }) {
       role="status"
       aria-live="polite"
       aria-busy="true"
-      aria-label={message ?? 'Loading Stash'}
+      aria-label={message ?? 'Loading Chelav'}
       className="flex h-full flex-col items-center justify-center bg-bg px-6"
     >
       <div className="relative flex h-[240px] w-[240px] items-center justify-center">
@@ -20,7 +20,7 @@ export function LoadingScreen({ message }: { message?: string }) {
           style={{ animationDelay: '1.2s' }}
         />
         <p className="relative font-display text-[60px] font-semibold leading-none tracking-[-0.02em] text-ink">
-          {Array.from('Stash').map((ch, i) => (
+          {Array.from('Chelav').map((ch, i) => (
             <span key={i} aria-hidden="true" className="stash-letter" style={{ animationDelay: `${i * 90}ms` }}>
               {ch}
             </span>
