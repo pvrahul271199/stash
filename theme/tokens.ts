@@ -10,6 +10,7 @@ export const colors = {
   goodBg: '#E3F3F1',
   warm: '#B45309',
   warmBg: '#FDF1E4',
+  bad: '#B91C1C',
   frame: '#EEEEF6',
 } as const;
 

@@ -125,6 +125,10 @@ function Section({ title, hint, children }: { title: string; hint?: string; chil
   );
 }
 
+type Level = 'good' | 'warn' | 'bad';
+
+const LEVEL_DOT: Record<Level, string> = { good: 'bg-good', warn: 'bg-warm', bad: 'bg-bad' };
+
 function Stat({
   label,
   value,
@@ -134,17 +138,17 @@ function Stat({
   label: string;
   value: string;
   sub?: string;
-  /** Palette-only status: 'good' = soft indigo, 'alert' = solid ink. */
-  status?: 'good' | 'alert';
+  /** good = green text; warn / bad = light amber / red wash behind ink text. */
+  status?: Level;
 }) {
-  const alert = status === 'alert';
+  const bg = status === 'warn' ? 'bg-warm/10' : status === 'bad' ? 'bg-bad/10' : 'bg-tint';
   return (
-    <div
-      className={`rounded-note p-3.5 ${alert ? 'bg-ink' : status === 'good' ? 'bg-ink2/20' : 'bg-tint'}`}
-    >
-      <p className={`text-[12px] font-medium uppercase tracking-wide ${alert ? 'text-white/70' : 'text-soft'}`}>{label}</p>
-      <p className={`num mt-1 text-[24px] leading-tight ${alert ? 'text-white' : 'text-ink'}`}>{value}</p>
-      {sub && <p className={`mt-0.5 text-[12px] ${alert ? 'text-white/70' : 'text-soft'}`}>{sub}</p>}
+    <div className={`rounded-note p-3.5 ${bg}`}>
+      <p className="text-[12px] font-medium uppercase tracking-wide text-soft">{label}</p>
+      <p className={`num mt-1 text-[24px] leading-tight ${status === 'good' ? 'text-good' : 'text-ink'}`}>{value}</p>
+      {sub && (
+        <p className={`mt-0.5 text-[12px] ${status === 'good' ? 'text-good' : 'text-soft'}`}>{sub}</p>
+      )}
     </div>
   );
 }
@@ -276,7 +280,11 @@ export function InsightsTab({ cycle, plan }: { cycle: Cycle | undefined; plan: P
   const topEventTotal = evList.reduce((m, e) => Math.max(m, e.total), 0);
   const space = currency.symbol.length > 1 ? ' ' : '';
   const daysLeft = Math.max(cycle.totalDays - summary.closedDays, 0);
-  const overPace = summary.closedDays >= MIN_CLOSED_DAYS && summary.spentOnClosed / summary.closedDays > cycle.planAmount / cycle.totalDays;
+  const paceRatio =
+    summary.closedDays >= MIN_CLOSED_DAYS
+      ? summary.spentOnClosed / summary.closedDays / (cycle.planAmount / cycle.totalDays)
+      : null;
+  const paceLevel: Level | null = paceRatio == null ? null : paceRatio <= 1 ? 'good' : paceRatio <= 1.1 ? 'warn' : 'bad';
   const projected =
     summary.closedDays >= MIN_CLOSED_DAYS ? Math.round((summary.spentOnClosed / summary.closedDays) * cycle.totalDays) : null;
   const noSpendDays = fullDays.filter((d) => (d.status === 'closed' || d.status === 'estimated') && d.totalSpent === 0).length;
@@ -308,7 +316,7 @@ export function InsightsTab({ cycle, plan }: { cycle: Cycle | undefined; plan: P
         >
           <div
             className="h-3 rounded-full transition-all"
-            style={{ width: `${fillPct}%`, background: overPace ? colors.warm : colors.ink }}
+            style={{ width: `${fillPct}%`, background: paceLevel === 'bad' ? colors.bad : paceLevel === 'warn' ? colors.warm : colors.ink }}
           />
           <div
             className="absolute -top-1.5 h-[24px] w-[3px] rounded-full bg-good ring-2 ring-white"
@@ -325,14 +333,17 @@ export function InsightsTab({ cycle, plan }: { cycle: Cycle | undefined; plan: P
         </div>
         <p
           className={`mt-3 flex items-start gap-2.5 rounded-note px-3.5 py-2.5 text-[14px] ${
-            !summary.paceMessage ? 'bg-tint text-soft' : overPace ? 'bg-ink text-white' : 'bg-ink2/20 text-ink'
+            !summary.paceMessage || !paceLevel
+              ? 'bg-tint text-soft'
+              : paceLevel === 'good'
+                ? 'bg-tint text-good'
+                : paceLevel === 'warn'
+                  ? 'bg-warm/10 text-ink'
+                  : 'bg-bad/10 text-ink'
           }`}
         >
-          {summary.paceMessage && (
-            <span
-              aria-hidden="true"
-              className={`mt-[7px] h-2 w-2 shrink-0 rounded-full ${overPace ? 'bg-white' : 'bg-ink'}`}
-            />
+          {summary.paceMessage && paceLevel && (
+            <span aria-hidden="true" className={`mt-[7px] h-2 w-2 shrink-0 rounded-full ${LEVEL_DOT[paceLevel]}`} />
           )}
           <span>{summary.paceMessage ?? tryAgain}</span>
         </p>
@@ -346,11 +357,12 @@ export function InsightsTab({ cycle, plan }: { cycle: Cycle | undefined; plan: P
           label="Month-end pace"
           value={projected != null ? inr(projected) : '—'}
           sub={projected != null ? (projected > cycle.planAmount ? 'over your plan' : 'within your plan') : 'needs a few closed days'}
-          status={projected == null ? undefined : projected > cycle.planAmount ? 'alert' : 'good'}
+          status={projected == null || paceLevel == null ? undefined : paceLevel}
         />
         <Stat
           label="No-spend days"
           value={String(noSpendDays)}
+          status={noSpendDays > 0 ? 'good' : undefined}
           sub={summary.closedDays ? `of ${summary.closedDays} closed` : 'none closed yet'}
         />
       </div>
@@ -673,7 +685,7 @@ export function InsightsTab({ cycle, plan }: { cycle: Cycle | undefined; plan: P
                   <p className="truncate text-[15px] font-medium text-ink">
                     {e.label}
                     {e.fromSavings && (
-                      <span className="ml-2 rounded-full bg-tint px-2 py-0.5 text-[11px] text-soft">from savings</span>
+                      <span className="ml-2 rounded-full bg-warm/10 px-2 py-0.5 text-[11px] text-ink">from savings</span>
                     )}
                   </p>
                   <p className="truncate text-[12px] text-faint">
