@@ -87,7 +87,7 @@ export function TodayTab({ cycle, plan }: { cycle: Cycle; plan: Plan }) {
     <>
       <div className="flex-1 overflow-y-auto px-6 pb-4 pt-4">
         <IosHint />
-        <header className="flex items-center justify-between">
+        <header className="flex items-center justify-between pt-3">
           <div className="flex items-center gap-1.5">
             <Logo size={24} />
             <span className="font-display text-[17px] font-semibold tracking-tight text-[#1E1B4B]">Chelav</span>
@@ -97,17 +97,17 @@ export function TodayTab({ cycle, plan }: { cycle: Cycle; plan: Plan }) {
           </div>
         </header>
 
-        <p className="mt-4 text-[14px] text-soft">
+        <p className="mt-3 text-[14px] text-soft">
           {formatWithWeekday(dateOfDay(cycle.startDate, cycle.currentDay))} ·{' '}
           <span className="num">
             Day {cycle.currentDay}/{cycle.totalDays}
           </span>
         </p>
 
-        <p className="mt-6 text-[15px] text-soft">You can still spend today</p>
+        <p className="mt-4 text-[15px] text-soft">You can still spend today</p>
         <HugeNumber value={left} className="mt-1" />
 
-        <div className="mt-3 min-h-[48px]">
+        <div className="mt-2 min-h-[40px]">
           {used ? (
             <Note tone="adjust">{POOL_USED_UP_MESSAGE}</Note>
           ) : over ? (
@@ -119,7 +119,7 @@ export function TodayTab({ cycle, plan }: { cycle: Cycle; plan: Plan }) {
           )}
         </div>
 
-        <div className="mt-6">
+        <div className="mt-2">
           <WeekRow
             days={week}
             startDate={cycle.startDate}

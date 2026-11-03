@@ -56,6 +56,9 @@ export function AppShell() {
   const [ready, setReady] = useState(false);
   const [flow, setFlow] = useState<Flow>('welcome');
   const [draft, setDraft] = useState<PlanInput | null>(null);
+  // After log-out / account deletion the device falls back to the guest DB, which may hold a cycle;
+  // keep the first (Welcome) page up until the user picks an option instead of landing on its home.
+  const [forceWelcome, setForceWelcome] = useState(false);
   const [tab, setTab] = useState<Tab>('today');
   const [busy, setBusy] = useState(false);
   const [showDemo, setShowDemo] = useState(false);
@@ -120,6 +123,7 @@ export function AppShell() {
   }
 
   async function handleSample() {
+    setForceWelcome(false);
     await withLoading('Loading a sample month…', fillSample);
     setSheet('none');
     setTab('insights');
@@ -135,6 +139,7 @@ export function AppShell() {
       <AuthScreen
         onBack={() => setFlow('welcome')}
         onDone={async (mode, username) => {
+          setForceWelcome(false);
           if (mode === 'login') {
             restoredFor.current = getAuth().uid ?? null; // this handler owns the restore
             setRestoring(true);
@@ -189,7 +194,7 @@ export function AppShell() {
         }}
       />
     );
-  } else if (snap.cycle && snap.plan && flow !== 'onboarding' && flow !== 'summary') {
+  } else if (snap.cycle && snap.plan && flow !== 'onboarding' && flow !== 'summary' && !forceWelcome) {
     const cycleOver = isCycleOver(snap.cycle);
     if (catchUpGap && catchUpGap.cycleId === snap.cycle.id) {
       body = (
@@ -230,6 +235,7 @@ export function AppShell() {
                 onSwitchUser={() => {
                   void withLoading('Signing out…', logOut).then(() => {
                     setDraft(null);
+                    setForceWelcome(true);
                     setFlow('welcome');
                     setTab('today');
                   });
@@ -238,6 +244,7 @@ export function AppShell() {
                 onSampleDone={() => setTab('insights')}
                 onDeleted={() => {
                     setDraft(null);
+                    setForceWelcome(true);
                   setFlow('welcome');
                   setTab('today');
                 }}
@@ -255,6 +262,7 @@ export function AppShell() {
                 if (auth.status === 'signedIn') {
                   void withLoading('Signing out…', logOut).then(() => {
                     setDraft(null);
+                    setForceWelcome(true);
                     setFlow('welcome');
                     setTab('today');
                   });
@@ -281,6 +289,7 @@ export function AppShell() {
               onDeleted={() => {
                 setSheet('none');
                 setDraft(null);
+                setForceWelcome(true);
                 setFlow('welcome');
                 setTab('today');
               }}
@@ -304,7 +313,10 @@ export function AppShell() {
     } else {
       body = (
         <Welcome
-          onStart={() => setFlow('onboarding')}
+          onStart={() => {
+            if (snap.cycle) setForceWelcome(false); // resume the guest data already on this device
+            else setFlow('onboarding');
+          }}
           onAccount={() => setFlow('auth')}
           onSample={handleSample}
           onDemo={() => setShowDemo(true)}

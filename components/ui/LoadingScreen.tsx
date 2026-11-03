@@ -19,24 +19,22 @@ export function LoadingScreen({ message }: { message?: string }) {
           className="stash-ripple absolute inset-4 rounded-full border border-good/40"
           style={{ animationDelay: '1.2s' }}
         />
-        <div className="relative flex flex-col items-center gap-3">
-          <svg viewBox="16 14 66 64" width="96" height="93" aria-hidden="true" className="text-ink">
-            <path
-              d="M74 22 V70 H24 M32 54 C30 40 40 33 50 36 C62 40 62 58 50 70"
-              pathLength={1}
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="8"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="stash-draw"
-            />
-          </svg>
-          <p aria-hidden="true" className="stash-letter font-display text-[20px] font-semibold tracking-tight text-ink" style={{ animationDelay: '700ms' }}>
-            Chelav
-          </p>
-        </div>
+        <svg viewBox="16 14 66 64" width="64" height="62" aria-hidden="true" className="relative text-ink">
+          <path
+            d="M74 22 V70 H24 M32 54 C30 40 40 33 50 36 C62 40 62 58 50 70"
+            pathLength={1}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="stash-draw"
+          />
+        </svg>
       </div>
+      <p aria-hidden="true" className="stash-letter -mt-2 font-display text-[20px] font-semibold tracking-tight text-ink" style={{ animationDelay: '700ms' }}>
+        Chelav
+      </p>
       {message && (
         <p className="mt-2 animate-pulse font-display text-[15px] font-medium tracking-[-0.01em] text-soft motion-reduce:animate-none">
           {message}
