@@ -90,11 +90,11 @@ describe('spreading', () => {
 describe('big spend', () => {
   const s = fresh();
   const a = todayAllowance(s); // ~733
-  it('needs >= 500 and > 1.5x the amount', () => {
-    expect(isBigSpend(499, 100, s)).toBe(false);
-    expect(isBigSpend(500, 300, s)).toBe(true);
-    expect(isBigSpend(1000, a, s)).toBe(false);
-    expect(isBigSpend(1200, a, s)).toBe(true);
+  it('is big only when the amount is more than the pool', () => {
+    expect(isBigSpend(30000, 30000, s)).toBe(false);
+    expect(isBigSpend(30001, 30000, s)).toBe(true);
+    expect(isBigSpend(100, 80, s)).toBe(true);
+    expect(isBigSpend(1200, a * 30, s)).toBe(false);
   });
   it('is never big on the last day', () => {
     expect(isBigSpend(5000, 100, { ...s, currentDay: 30 })).toBe(false);

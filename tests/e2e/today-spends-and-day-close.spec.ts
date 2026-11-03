@@ -11,10 +11,10 @@ test.describe('Today Tab Spends & Day Close Flows', () => {
     await page.reload();
 
     // Standard fast onboarding setup
-    await page.getByRole('button', { name: 'Set up my month' }).click();
+    await page.getByRole('button', { name: 'Try without an account' }).click();
     await page.getByRole('button', { name: /Continue/ }).click();
 
-    const input = page.getByRole('textbox');
+    const input = page.getByRole('textbox').first();
     await input.fill('60000'); // Income
     await page.getByRole('button', { name: 'Continue' }).click();
 
@@ -94,23 +94,31 @@ test.describe('Today Tab Spends & Day Close Flows', () => {
     await expect(page.getByText('Pharmacy')).toBeVisible();
   });
 
-  test('detects big spend and provides options to spread or take from savings', async ({ page }) => {
+  test('prompts a bottom sheet when a spend is more than the whole pool', async ({ page }) => {
     await page.getByRole('button', { name: 'Log a spend' }).click();
 
-    // Enter 3500 (allowance is ~1,000, so 3,500 triggers Big Spend)
+    // Pool is 30,000: 3,500 is NOT big
     await page.getByRole('button', { name: '3', exact: true }).click();
     await page.getByRole('button', { name: '5', exact: true }).click();
     await page.getByRole('button', { name: '00', exact: true }).click();
+    await page.getByRole('button', { name: 'Save' }).click();
+    await expect(page.getByRole('dialog', { name: 'Bigger than what you have left' })).toHaveCount(0);
+    await expect(page.getByText(/You can still spend today|You spent/)).toBeVisible();
+  });
 
+  test('big spend sheet offers to keep the daily limit', async ({ page }) => {
+    await page.getByRole('button', { name: 'Log a spend' }).click();
+
+    // 40,000 > 30,000 pool
+    for (const k of ['4', '0', '00', '0']) await page.getByRole('button', { name: k, exact: true }).click();
     await page.getByRole('button', { name: 'Save' }).click();
 
-    // Big Spend prompt
-    await expect(page.getByText(/That's a bigger one/)).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Spread it over the month' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Take it from savings' })).toBeVisible();
-
-    await page.getByRole('button', { name: 'Spread it over the month' }).click();
-    await expect(page.getByText(/You can still spend today/)).toBeVisible();
+    const sheet = page.getByRole('dialog', { name: 'Bigger than what you have left' });
+    await expect(sheet).toBeVisible();
+    await expect(sheet.getByText('Recommended')).toBeVisible();
+    await sheet.getByRole('button', { name: 'Log it, keep my daily limit' }).click();
+    await expect(sheet).toHaveCount(0);
+    await expect(page.getByText(/₹1,000/).first()).toBeVisible();
   });
 
   test('closes the day and advances to day 2 with recalculated daily allowance', async ({ page }) => {

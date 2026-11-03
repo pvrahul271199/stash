@@ -114,10 +114,9 @@ export const POOL_USED_UP_MESSAGE =
 
 /* ---------- big spend ---------- */
 
-export const BIG_SPEND_MIN = 500;
-
-export function isBigSpend(amount: number, allowance: number, s: Pick<CycleState, 'totalDays' | 'currentDay'>): boolean {
-  return amount >= BIG_SPEND_MIN && amount > 1.5 * allowance && daysLeft(s) > 1;
+/** A spend is "big" when it is more than everything still available this cycle (the pool) and more than one day remains. */
+export function isBigSpend(amount: number, pool: number, s: Pick<CycleState, 'totalDays' | 'currentDay'>): boolean {
+  return amount > Math.max(pool, 0) && daysLeft(s) > 1;
 }
 
 /** Taking a spend from savings leaves the pool (and so the daily amount) untouched. */

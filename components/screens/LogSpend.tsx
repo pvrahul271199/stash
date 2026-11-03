@@ -168,13 +168,14 @@ export function LogSpend({
       await persist(p, false, false);
       return;
     }
-    if (isOtherDay) {
-      await persist(p, false, spread);
-      return;
-    }
-    if (isBigSpend(amount, todayAllowance(cycle), cycle)) {
+    // Spending record-only on another day (switch off) never touches the pool, so nothing to warn about.
+    if ((!isOtherDay || spread) && isBigSpend(amount, cycle.pool, cycle)) {
       setPending(p);
       setView('big');
+      return;
+    }
+    if (isOtherDay) {
+      await persist(p, false, spread);
       return;
     }
     await persist(p, false, true);
@@ -220,12 +221,12 @@ export function LogSpend({
         <BigSpend
           amount={amount}
           label={pending.label}
+          left={cycle.pool}
           allowance={todayAllowance(cycle)}
-          daysLeft={daysLeft(cycle)}
-          savingsSetAside={plan.savings}
-          onBack={() => setView('keypad')}
+          busy={saving}
+          onClose={() => setView('keypad')}
+          onKeep={() => persist(pending, true, true)}
           onSpread={() => persist(pending, false, true)}
-          onSavings={() => persist(pending, true, true)}
         />
       )}
 
@@ -278,7 +279,7 @@ export function LogSpend({
         );
       })()}
 
-      {view === 'keypad' && (
+      {(view === 'keypad' || view === 'big') && (
         <>
           <div className="relative flex items-center justify-between gap-2">
             <IconButton label="Close" onClick={onClose} className="-ml-2 h-9 w-9 min-h-0 shrink-0">
