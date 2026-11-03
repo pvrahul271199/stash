@@ -1017,7 +1017,7 @@ export function TodayTab({ cycle, plan }: { cycle: Cycle; plan: Plan }) {
             <Text style={styles.goodStatus}>
               {spent > 0
                 ? `${inr(spent)} spent so far. You're on plan.`
-                : `That's your amount for today, ${inr(allowance)}.`}
+                : `That's your amount for today is ${inr(allowance)}.`}
             </Text>
           )}
         </View>

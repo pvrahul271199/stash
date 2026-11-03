@@ -114,7 +114,7 @@ export function TodayTab({ cycle, plan }: { cycle: Cycle; plan: Plan }) {
             <Note tone="adjust">{over}</Note>
           ) : (
             <p className="text-[15px] text-good">
-              {spent > 0 ? `${inr(spent)} spent so far. You're on plan.` : `That's your amount for today, ${inr(allowance)}.`}
+              {spent > 0 ? `${inr(spent)} spent so far. You're on plan.` : `That's your amount for today is ${inr(allowance)}.`}
             </p>
           )}
         </div>
