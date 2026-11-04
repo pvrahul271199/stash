@@ -9,6 +9,7 @@ import { weekdayOfDay } from '@/lib/dates';
 import { inr } from '@/lib/format';
 import { categoryRamp } from '@/theme/tokens';
 import { Logo } from '../ui/Logo';
+import { usePWA } from '@/store/pwa';
 
 /* ---------- sample month: the same data "explore with sample data" uses ---------- */
 
@@ -517,11 +518,39 @@ function PlusIcon() {
 }
 
 function InstallStep() {
-  const [android, setAndroid] = useState(false);
+  const installEvent = usePWA((s) => s.installEvent);
+  const setPWA = usePWA((s) => s.set);
+  async function install() {
+    if (!installEvent) return;
+    await installEvent.prompt();
+    await installEvent.userChoice;
+    setPWA({ installEvent: null });
+  }
+  return <InstallStepView canInstall={!!installEvent} onInstall={install} />;
+}
+
+export type InstallPlatform = 'ios' | 'android' | 'other';
+
+/** `platform`/`installed` are auto-detected unless passed (used by Storybook). */
+export function InstallStepView({
+  platform: forcedPlatform,
+  installed: forcedInstalled,
+  canInstall,
+  onInstall,
+}: {
+  platform?: InstallPlatform;
+  installed?: boolean;
+  canInstall: boolean;
+  onInstall: () => void;
+}) {
+  const [platform, setPlatform] = useState<'ios' | 'android' | 'other'>('ios');
   const [installed, setInstalled] = useState(false);
   useEffect(() => {
+    if (forcedPlatform !== undefined || forcedInstalled !== undefined) return;
     try {
-      setAndroid(/Android/i.test(navigator.userAgent));
+      const ua = navigator.userAgent;
+      const iPadOS = navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
+      setPlatform(/Android/i.test(ua) ? 'android' : /iPhone|iPad|iPod/i.test(ua) || iPadOS ? 'ios' : 'other');
       setInstalled(
         (navigator as Navigator & { standalone?: boolean }).standalone === true ||
           window.matchMedia('(display-mode: standalone)').matches,
@@ -531,13 +560,16 @@ function InstallStep() {
     }
   }, []);
 
+  const plat = forcedPlatform ?? platform;
+  const isInstalled = forcedInstalled ?? installed;
+
   return (
     <div className="demo-fade">
       <h2 className="font-display text-[26px] font-semibold leading-tight text-ink">Keep Chelav one tap away</h2>
       <p className="mt-2 text-body text-soft">
         Add it to your home screen for a full-screen app that opens instantly and works offline.
       </p>
-      {installed ? (
+      {isInstalled ? (
         <div className="mt-5 flex flex-col items-center rounded-[18px] border border-line bg-white px-4 py-6">
           <div className="rounded-[22px] shadow-[0_8px_24px_-8px_rgba(30,27,75,0.45)]">
             <Logo size={72} />
@@ -545,8 +577,20 @@ function InstallStep() {
           <p className="mt-3 font-display text-[15px] font-semibold text-ink">Chelav</p>
           <p className="text-[12px] text-soft">Already on your home screen</p>
         </div>
+      ) : plat === 'other' ? (
+        <div className="mt-5 rounded-[18px] border border-line bg-white px-4 py-6 text-center text-[14px] text-soft">
+          Open Chelav on your phone, then come back to this step to see how to add it to your home screen.
+        </div>
       ) : (
-        <InstallAnim ios={!android} />
+        <>
+          {plat === 'android' && canInstall && (
+            <div className="mt-5">
+              <PrimaryButton onClick={onInstall}>Install Chelav</PrimaryButton>
+              <p className="mt-2 text-center text-[12px] text-soft">Or follow the steps below.</p>
+            </div>
+          )}
+          <InstallAnim ios={plat === 'ios'} />
+        </>
       )}
     </div>
   );
@@ -581,8 +625,9 @@ function InstallAnim({ ios }: { ios: boolean }) {
     return () => clearInterval(t);
   }, []);
 
-  const addLabel = ios ? 'Add to Home Screen' : 'Add to Home screen';
-  const rows = ios ? ['Copy', 'Add to Reading List', addLabel] : ['New tab', 'Bookmarks', addLabel];
+  // Chrome on Android labels this "Install app" for installable PWAs.
+  const addLabel = ios ? 'Add to Home Screen' : 'Install app';
+  const rows = ios ? ['Copy', 'Add to Reading List', addLabel] : ['New tab', 'Bookmarks', 'History', addLabel];
   const caption = phase === 0 ? (ios ? <>Tap <b className="font-semibold text-ink">Share</b></> : <>Tap the <b className="font-semibold text-ink">⋮ menu</b></>) : <>Tap <b className="font-semibold text-ink">{addLabel}</b></>;
 
   const page = (
@@ -670,7 +715,7 @@ function InstallAnim({ ios }: { ios: boolean }) {
         {phase === 1 && (
           <div
             className="absolute right-3 text-ink"
-            style={ios ? { bottom: 19 } : { top: 97 }}
+            style={ios ? { bottom: 19 } : { top: 138 }}
           >
             <div className="demo-nudge"><Arrow rotate={90} /></div>
           </div>

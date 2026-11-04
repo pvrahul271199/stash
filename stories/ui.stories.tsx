@@ -7,6 +7,7 @@ import { TabBar, type Tab } from '@/components/ui/TabBar';
 import { WeekRow } from '@/components/ui/WeekRow';
 import { Logo } from '@/components/ui/Logo';
 import { LoadingScreen } from '@/components/ui/LoadingScreen';
+import { InstallStepView } from '@/components/screens/Demo';
 
 const meta: Meta = { title: 'UI' };
 export default meta;
@@ -82,4 +83,17 @@ export const LogoMark = () => (
     <Logo size={64} />
     <Logo size={128} />
   </div>
+);
+
+export const InstallAndroidWithButton = () => (
+  <div className="w-[340px]"><InstallStepView platform="android" canInstall onInstall={() => alert('prompt()')} /></div>
+);
+export const InstallAndroidManual = () => (
+  <div className="w-[340px]"><InstallStepView platform="android" canInstall={false} onInstall={() => {}} /></div>
+);
+export const InstallIPhone = () => (
+  <div className="w-[340px]"><InstallStepView platform="ios" canInstall={false} onInstall={() => {}} /></div>
+);
+export const InstallDesktop = () => (
+  <div className="w-[340px]"><InstallStepView platform="other" canInstall={false} onInstall={() => {}} /></div>
 );
