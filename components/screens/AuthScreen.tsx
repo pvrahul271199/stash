@@ -51,7 +51,7 @@ export function AuthScreen({
       acceptSyncConsent(); // continuing means agreeing to the backup
       const res = await signInWithGoogleToken(idToken, nonce);
       setBusy(false);
-      if (res.ok) done0.current('login', getAuth().username ?? '');
+      if (res.ok) done0.current('login', getAuth().displayName ?? '');
       else setError(res.error);
     })
       .then(() => setGoogleReady(true))

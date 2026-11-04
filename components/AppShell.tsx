@@ -158,6 +158,7 @@ export function AppShell() {
         onBack={() => setFlow('welcome')}
         onDone={async (mode, username) => {
           setForceWelcome(false);
+          const who = getAuth().displayName || username; // always greet by display name, never by email
           if (mode === 'login') {
             restoredFor.current = getAuth().uid ?? null; // this handler owns the restore
             setRestoring(true);
@@ -166,11 +167,11 @@ export function AppShell() {
             await restoreFromCloud();
             await runSync();
             setRestoring(false);
-            toast(username ? `Welcome back, ${username}!` : 'Welcome back!');
+            toast(who ? `Welcome back, ${who}!` : 'Welcome back!');
             return;
           }
           setFlow('welcome');
-          toast(`Account created. Welcome, ${username}!`);
+          toast(`Account created. Welcome, ${who}!`);
         }}
       />
     );
