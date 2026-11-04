@@ -51,7 +51,7 @@ export function EventSheet({ onClose }: { onClose: () => void }) {
               onClick={() => endEvent().then(onClose)}
               aria-pressed={!active}
               className={`flex min-h-[48px] w-full items-center justify-between rounded-key border px-4 py-2.5 text-left transition-colors ${
-                !active ? 'border-ink bg-ink text-white' : 'border-line bg-tint/50 text-ink'
+                !active ? 'border-ink bg-ink text-white' : 'border-line bg-white text-ink'
               }`}
             >
               <div>

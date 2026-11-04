@@ -309,7 +309,7 @@ export function LogSpend({
                 className={`inline-flex h-8 min-h-0 max-w-[190px] items-center gap-1.5 rounded-full border pl-2.5 pr-2 text-[12px] font-medium transition-colors ${
                   activeEvent
                     ? 'border-ink bg-ink text-white'
-                    : 'border-line bg-tint/70 text-soft'
+                    : 'border-line bg-white text-soft'
                 }`}
               >
                 <svg
@@ -353,7 +353,7 @@ export function LogSpend({
                   }}
                   aria-label={`Stop logging in ${activeEvent}`}
                   title="Turn off event"
-                  className="flex h-6 w-6 min-h-0 shrink-0 items-center justify-center rounded-full border border-line bg-tint/70 text-[12px] text-soft"
+                  className="flex h-6 w-6 min-h-0 shrink-0 items-center justify-center rounded-full border border-line bg-white text-[12px] text-soft"
                 >
                   ×
                 </button>
@@ -401,7 +401,7 @@ export function LogSpend({
                       className={`h-7 min-h-0 rounded-full border px-2.5 text-[11px] font-medium transition-colors ${
                         !activeEvent
                           ? 'border-ink bg-ink text-white'
-                          : 'border-line bg-tint/50 text-soft hover:border-ink/40 hover:text-ink'
+                          : 'border-line bg-white text-soft hover:border-ink/40 hover:text-ink'
                       }`}
                     >
                       None
@@ -420,7 +420,7 @@ export function LogSpend({
                           className={`h-7 min-h-0 max-w-[150px] truncate rounded-full border px-2.5 text-[11px] font-medium transition-colors ${
                             isCurrent
                               ? 'border-ink bg-ink text-white'
-                              : 'border-line bg-tint/50 text-ink hover:border-ink/40'
+                              : 'border-line bg-white text-ink hover:border-ink/40'
                           }`}
                         >
                           {ev.name}
@@ -447,7 +447,7 @@ export function LogSpend({
                         placeholder="Create new event…"
                         aria-label="New event name"
                         maxLength={MAX_NAME + 6}
-                        className="h-7 min-h-0 min-w-0 flex-1 rounded-full border border-line bg-tint/40 px-3 text-[11px] text-ink placeholder:text-faint focus:border-ink focus:bg-white focus:outline-none"
+                        className="h-7 min-h-0 min-w-0 flex-1 rounded-full border border-line bg-white px-3 text-[11px] text-ink placeholder:text-faint focus:border-ink focus:bg-white focus:outline-none"
                       />
                       <button
                         type="button"
@@ -528,7 +528,7 @@ export function LogSpend({
               )}
 
               {!noteOpen && note.trim() && (
-                <div className="inline-flex h-6 min-h-0 max-w-full items-center gap-1 rounded-full border border-ink/20 bg-tint pl-2.5 pr-1 text-[11px] text-ink">
+                <div className="inline-flex h-6 min-h-0 max-w-full items-center gap-1 rounded-full border border-ink/20 bg-white pl-2.5 pr-1 text-[11px] text-ink">
                   <button
                     type="button"
                     onClick={() => setNoteOpen(true)}
@@ -549,7 +549,7 @@ export function LogSpend({
               )}
 
               {noteOpen && (
-                <div className="flex h-7 w-full items-center gap-1 rounded-full border border-line bg-tint/70 px-2.5">
+                <div className="flex h-7 w-full items-center gap-1 rounded-full border border-line bg-white px-2.5">
                   <svg
                     width="11"
                     height="11"

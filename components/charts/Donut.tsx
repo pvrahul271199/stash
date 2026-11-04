@@ -139,7 +139,7 @@ export function CategoryList({
                         onClick={() => onFocusType?.(t.name)}
                         aria-pressed={typeSelected}
                         className={`min-h-0 w-full rounded-[10px] px-2.5 py-1.5 text-left transition-colors ${
-                          typeSelected ? 'bg-tint ring-1 ring-ink/20' : 'hover:bg-tint/50'
+                          typeSelected ? 'bg-white' : ''
                         }`}
                       >
                         <div className="flex items-center justify-between text-[13px]">

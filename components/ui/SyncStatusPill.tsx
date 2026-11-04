@@ -37,7 +37,7 @@ export function SyncStatusPill({ className = '' }: { className?: string }) {
     return 'Synced';
   };
 
-  let style = 'border-line bg-tint/60 text-soft';
+  let style = 'border-line bg-white text-soft';
   let dotStyle = 'bg-soft';
   let label = 'Local mode';
 
@@ -53,7 +53,7 @@ export function SyncStatusPill({ className = '' }: { className?: string }) {
       label = 'Syncing…';
       break;
     case 'offline':
-      style = 'border-line bg-tint/70 text-faint';
+      style = 'border-line bg-white text-faint';
       dotStyle = 'bg-faint';
       label = 'Offline';
       break;
@@ -63,7 +63,7 @@ export function SyncStatusPill({ className = '' }: { className?: string }) {
       label = 'Sync retry';
       break;
     case 'local_only':
-      style = 'border-line bg-tint/60 text-faint';
+      style = 'border-line bg-white text-faint';
       dotStyle = 'bg-faint';
       label = 'Device only';
       break;

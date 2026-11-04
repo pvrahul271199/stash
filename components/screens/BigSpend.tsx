@@ -45,7 +45,7 @@ export function BigSpend({
           {over > 0 ? <> ({inr(over)} over)</> : null}.
         </p>
 
-        <div className="mt-4 rounded-note border border-ink bg-tint/60 p-4">
+        <div className="mt-4 rounded-note border border-ink bg-white p-4">
           <div className="flex items-center justify-between gap-2">
             <p className="text-[14px] font-semibold text-ink">Log it, keep my daily limit</p>
             <span className="rounded-full bg-ink px-2 py-0.5 text-[10px] font-semibold text-white">Recommended</span>

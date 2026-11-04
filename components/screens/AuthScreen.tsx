@@ -70,7 +70,7 @@ export function AuthScreen({
             autoCorrect="off"
             autoFocus
             maxLength={20}
-            className="h-12 w-full rounded-key border border-line bg-tint/40 px-4 text-[17px] font-medium text-ink placeholder:font-normal placeholder:text-faint"
+            className="h-12 w-full rounded-key border border-line bg-white px-4 text-[17px] font-medium text-ink placeholder:font-normal placeholder:text-faint"
           />
           {userHint && <p className="text-[12px] text-faint">{userHint}</p>}
           <input
@@ -80,7 +80,7 @@ export function AuthScreen({
             placeholder="Password (min 8 characters)"
             aria-label="Password"
             autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
-            className="h-12 w-full rounded-key border border-line bg-tint/40 px-4 text-[17px] text-ink placeholder:text-faint"
+            className="h-12 w-full rounded-key border border-line bg-white px-4 text-[17px] text-ink placeholder:text-faint"
           />
           {mode === 'signup' && (
             <p className="rounded-key bg-tint px-3 py-2 text-[12px] text-soft">

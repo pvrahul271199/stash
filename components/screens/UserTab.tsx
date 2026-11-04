@@ -123,7 +123,7 @@ export function UserTab({
       </div>
 
       {/* Profile Card */}
-      <section className="mt-5 rounded-note border border-line bg-tint/30 p-4" aria-label="User identity">
+      <section className="mt-5 rounded-note border border-line bg-white p-4" aria-label="User identity">
         <div className="flex items-center gap-4">
           <div
             className="relative flex h-14 w-14 shrink-0 items-center justify-center rounded-full border border-line shadow-sm"
@@ -272,7 +272,7 @@ export function UserTab({
           <button
             type="button"
             onClick={onChangePlan}
-            className="w-full rounded-btn border border-line bg-tint/40 py-2 text-[13px] font-medium text-ink transition-colors hover:bg-tint active:scale-[0.99]"
+            className="w-full rounded-btn border border-line bg-white py-2 text-[13px] font-medium text-ink transition-colors active:scale-[0.99]"
           >
             Edit budget plan
           </button>
@@ -480,7 +480,7 @@ export function UserTab({
               {events.length === 0 ? (
                 <p className="mt-2.5 text-[12px] text-soft">No events created yet.</p>
               ) : (
-                <ul className="mt-3 divide-y divide-line rounded-key border border-line/70 bg-tint/30 px-3">
+                <ul className="mt-3 divide-y divide-line rounded-key border border-line/70 bg-white px-3">
                   {events.map((ev) => (
                     <li key={ev.id} className="flex min-h-[44px] items-center justify-between gap-3 py-2">
                       <div className="min-w-0">

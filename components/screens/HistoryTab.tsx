@@ -115,7 +115,7 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: Cycle; plan?: P
           onChange={(e) => setQuery(e.target.value)}
           placeholder={`Search spends, category, UPI, Card, event, or ${currency.symbol}…`}
           aria-label="Search spends"
-          className="h-11 w-full rounded-key border border-line bg-tint/40 pl-3.5 pr-9 text-[14px] text-ink placeholder:text-faint"
+          className="h-11 w-full rounded-key border border-line bg-white pl-3.5 pr-9 text-[14px] text-ink placeholder:text-faint"
         />
         {query && (
           <button
@@ -151,7 +151,7 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: Cycle; plan?: P
                     setSelectedIso(c.startDate);
                   }}
                   className={`min-h-[36px] rounded-full border px-3.5 text-[13px] font-medium transition-colors ${
-                    isSel ? 'border-ink bg-ink text-white' : 'border-line bg-white text-ink hover:bg-tint/50'
+                    isSel ? 'border-ink bg-ink text-white' : 'border-line bg-white text-ink'
                   }`}
                 >
                   {startLbl} – {endLbl}
@@ -367,7 +367,7 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: Cycle; plan?: P
                           className={`rounded-key py-2 text-[12px] font-medium transition-all ${
                             isCurrent
                               ? 'bg-ink font-semibold text-white shadow-xs'
-                              : 'border border-line/60 bg-white text-ink hover:bg-tint active:scale-95'
+                              : 'border border-line/60 bg-white text-ink active:scale-95'
                           }`}
                         >
                           {mName}
@@ -407,7 +407,7 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: Cycle; plan?: P
                     if (isSelected) {
                       circleStyle = 'bg-ink text-white';
                     } else if (isFuture) {
-                      circleStyle = 'border border-line/60 bg-tint/30 text-faint';
+                      circleStyle = 'border border-line/60 bg-white text-faint';
                     } else if (row && isOver) {
                       circleStyle = 'border border-warm/40 bg-warmBg text-ink';
                     } else if (row) {
@@ -430,7 +430,7 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: Cycle; plan?: P
                         aria-label={ariaLabel}
                         className={`flex h-[66px] min-h-0 flex-col items-center justify-between rounded-[10px] px-0.5 py-1 text-center transition-colors ${
                           !cell.isCurrentMonth ? 'opacity-40' : ''
-                        } ${isSelected ? 'bg-tint/80 ring-1 ring-ink/20' : 'hover:bg-tint/40'}`}
+                        } ${isSelected ? 'bg-white ring-1 ring-ink/20' : ''}`}
                       >
                         <span
                           className={`text-[9px] font-medium leading-none ${
@@ -560,7 +560,7 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: Cycle; plan?: P
                 type="button"
                 onClick={() => setAddingForDate(selectedIso)}
                 aria-label={`Log for this date (${formatShort(selectedIso)})`}
-                className="flex h-10 min-h-0 w-full items-center justify-center gap-1.5 rounded-key border border-line bg-tint/50 text-[13px] font-medium text-ink transition-colors hover:bg-tint active:scale-[0.99]"
+                className="flex h-10 min-h-0 w-full items-center justify-center gap-1.5 rounded-key border border-line bg-white text-[13px] font-medium text-ink transition-colors active:scale-[0.99]"
               >
                 <svg
                   width="13"

@@ -198,7 +198,7 @@ function HistoryMock() {
           w={30}
           h={30}
           className={`justify-center rounded-full border text-[11px] ${
-            over.has(i) ? 'border-ink bg-[#F3D9B5] text-ink' : 'border-line bg-tint text-ink'
+            over.has(i) ? 'border-ink bg-[#F3D9B5] text-ink' : 'border-line bg-white text-ink'
           }`}
         >
           {i + 1}
@@ -559,7 +559,7 @@ function InstallStep() {
       <p className="mt-2 text-body text-soft">
         Add it to your home screen for a full-screen app that opens instantly and works offline.
       </p>
-      <div className="mt-5 flex flex-col items-center rounded-[18px] border border-line bg-tint px-4 py-6">
+      <div className="mt-5 flex flex-col items-center rounded-[18px] border border-line bg-white px-4 py-6">
         <div className="rounded-[22px] shadow-[0_8px_24px_-8px_rgba(30,27,75,0.45)]">
           <Logo size={72} />
         </div>

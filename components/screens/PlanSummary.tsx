@@ -89,7 +89,7 @@ export function PlanSummary({
           ))}
         </dl>
         {isEditing ? (
-          <div className="mt-6 rounded-note border border-line bg-tint/80 px-4 py-3 text-[13px] leading-relaxed text-soft">
+          <div className="mt-6 rounded-note border border-line bg-white px-4 py-3 text-[13px] leading-relaxed text-soft">
             <span className="font-semibold text-ink">Note:</span> Your day will not restart. Differences from previous days are divided equally across each remaining day.
           </div>
         ) : (
@@ -121,7 +121,7 @@ export function PlanSummary({
                 )}
               </div>
             )}
-          <div className="mt-6 rounded-note border border-line bg-tint/80 px-4 py-3 text-[13px] leading-relaxed text-soft">
+          <div className="mt-6 rounded-note border border-line bg-white px-4 py-3 text-[13px] leading-relaxed text-soft">
             Bills and savings are already set aside, so you won&apos;t log them again.
           </div>
           </>

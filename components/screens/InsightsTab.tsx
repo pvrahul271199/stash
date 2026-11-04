@@ -385,7 +385,7 @@ export function InsightsTab({ cycle, plan }: { cycle: Cycle | undefined; plan: P
                   aria-pressed={isSelected}
                   className={`flex h-9 min-h-0 items-center gap-1.5 rounded-full border px-3 text-[13px] font-medium transition-colors ${
                     isSelected
-                      ? 'border-ink bg-tint font-semibold text-ink'
+                      ? 'border-ink bg-white font-semibold text-ink'
                       : catTotal > 0
                         ? 'border-line bg-white text-ink'
                         : 'border-line/70 bg-white text-faint'
@@ -425,7 +425,7 @@ export function InsightsTab({ cycle, plan }: { cycle: Cycle | undefined; plan: P
                     onClick={() => setFocusType(isTypeSel ? null : t.name)}
                     aria-pressed={isTypeSel}
                     className={`flex h-8 min-h-0 items-center gap-1.5 rounded-full border px-3 text-[12px] font-medium transition-colors ${
-                      isTypeSel ? 'border-ink bg-tint text-ink' : 'border-line bg-white text-ink'
+                      isTypeSel ? 'border-ink bg-white text-ink' : 'border-line bg-white text-ink'
                     }`}
                   >
                     <span>{t.name}</span>
@@ -456,7 +456,7 @@ export function InsightsTab({ cycle, plan }: { cycle: Cycle | undefined; plan: P
                   onClick={() => setFocusEvent(activeEvent === ev.name ? null : ev.name)}
                   aria-pressed={activeEvent === ev.name}
                   className={`flex h-8 min-h-0 items-center gap-1.5 rounded-full border px-3 text-[12px] font-medium ${
-                    activeEvent === ev.name ? 'border-ink bg-tint text-ink' : 'border-line bg-white text-ink'
+                    activeEvent === ev.name ? 'border-ink bg-white text-ink' : 'border-line bg-white text-ink'
                   }`}
                 >
                   <span>{ev.name}</span>
@@ -515,7 +515,7 @@ export function InsightsTab({ cycle, plan }: { cycle: Cycle | undefined; plan: P
                 <li
                   key={ev.name}
                   className={`rounded-note border p-4 transition-colors ${
-                    isSelected ? 'border-ink bg-tint/60' : 'border-line bg-white'
+                    isSelected ? 'border-ink bg-white' : 'border-line bg-white'
                   }`}
                 >
                   <button
@@ -554,7 +554,7 @@ export function InsightsTab({ cycle, plan }: { cycle: Cycle | undefined; plan: P
                             activeFocus === cat.name
                               ? 'border-ink bg-ink text-white'
                               : cat.total > 0
-                                ? 'border-line bg-tint/40 text-ink'
+                                ? 'border-line bg-white text-ink'
                                 : 'border-line bg-white text-faint'
                           }`}
                         >

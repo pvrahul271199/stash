@@ -198,7 +198,7 @@ export function Onboarding({
         </p>
 
         {isItemStep && (
-          <div className="mt-3 rounded-note border border-line bg-tint/50 p-3.5">
+          <div className="mt-3 rounded-note border border-line bg-white p-3.5">
             <p className="text-[13px] font-semibold text-ink">
               {step === 1 ? 'Or log item-wise (EMIs, rent, bills)' : 'Or log item-wise (SIP, RD, insurance)'}
             </p>
