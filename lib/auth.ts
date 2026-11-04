@@ -9,7 +9,7 @@ export const EMAIL_DOMAIN = 'stash.app';
 const USERNAME_RE = /^[a-z0-9_]{3,20}$/;
 const SESSION_KEY = 'stash:auth';
 
-export type AuthState = { status: 'loading' | 'guest' | 'signedIn'; uid?: string; username?: string };
+export type AuthState = { status: 'loading' | 'guest' | 'signedIn'; uid?: string; username?: string; provider?: 'email' | 'google' };
 type Result = { ok: true } | { ok: false; error: string };
 
 export function validateUsername(raw: string): string | null {
@@ -34,16 +34,57 @@ function setState(next: AuthState) {
   listeners.forEach((l) => l());
 }
 
+interface AuthUser {
+  id?: string;
+  email?: string;
+  created_at?: string;
+  last_sign_in_at?: string;
+  app_metadata?: { provider?: string };
+  user_metadata?: { username?: string; full_name?: string; name?: string };
+}
+
+/** Signed-in state for a Supabase user. Google accounts have no username: show their name (or email name) instead. */
+function fromUser(u: AuthUser): AuthState {
+  const google = u.app_metadata?.provider === 'google';
+  const name = u.user_metadata?.username ?? (google ? (u.user_metadata?.full_name ?? u.user_metadata?.name ?? u.email?.split('@')[0]) : undefined);
+  return { status: 'signedIn', uid: u.id, username: name, provider: google ? 'google' : 'email' };
+}
+
+/** A Google sign-in that created the account just now (as opposed to logging into an existing one). */
+function isNewAccount(u: AuthUser): boolean {
+  const a = Date.parse(u.created_at ?? '');
+  const b = Date.parse(u.last_sign_in_at ?? '');
+  return Number.isFinite(a) && Number.isFinite(b) && Math.abs(b - a) < 60_000;
+}
+
+/** Called when Google sends the user back with a session: switch to their database, and move guest data in only for a brand-new account. */
+let adopting: { uid: string; p: Promise<void> } | null = null;
+function adoptGoogleUser(u: AuthUser): Promise<void> {
+  if (!u.id || state.uid === u.id) return Promise.resolve();
+  if (adopting?.uid === u.id) return adopting.p; // the sign-in call and the auth event both arrive: run once
+  const uid = u.id;
+  const p = (async () => {
+    await openUserDB(uid);
+    if (isNewAccount(u)) {
+      const { claimGuestData } = await import('@/db/claim');
+      await claimGuestData(uid);
+    }
+    setState(fromUser(u));
+  })().finally(() => {
+    adopting = null;
+  });
+  adopting = { uid, p };
+  return p;
+}
+
 /** Reads the persisted session synchronously (no network) so boot works offline. */
 function readPersisted(): AuthState {
   if (typeof window === 'undefined') return { status: 'loading' };
   try {
     const raw = window.localStorage.getItem(SESSION_KEY);
     if (!raw) return { status: 'guest' };
-    const s = JSON.parse(raw) as { user?: { id?: string; user_metadata?: { username?: string } } };
-    if (s.user?.id) {
-      return { status: 'signedIn', uid: s.user.id, username: s.user.user_metadata?.username };
-    }
+    const s = JSON.parse(raw) as { user?: AuthUser };
+    if (s.user?.id) return fromUser(s.user);
   } catch {
     /* corrupt session: treat as guest */
   }
@@ -62,9 +103,13 @@ export function initAuth(): Promise<AuthState> {
     setState(initial);
     const sb = getSupabase();
     if (sb) {
-      sb.auth.onAuthStateChange((event) => {
+      sb.auth.onAuthStateChange((event, session) => {
         // Only an invalid/expired refresh token signs out; network errors never do.
         if (event === 'SIGNED_OUT' && state.status === 'signedIn') void dropToGuest();
+        // Coming back from Google (password sign-ups set their own state, so only Google is adopted here)
+        if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session?.user?.app_metadata?.provider === 'google') {
+          void adoptGoogleUser(session.user as AuthUser);
+        }
       });
       void sb.auth.getSession().catch(() => {});
     }
@@ -122,6 +167,23 @@ export async function signUp(username: string, password: string): Promise<Result
     await openUserDB(data.user.id);
     await claimGuestData(data.user.id);
     setState({ status: 'signedIn', uid: data.user.id, username: name });
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: friendly(e instanceof Error ? e.message : String(e)) };
+  }
+}
+
+/**
+ * Finishes Google sign-in with the ID token from Google Identity Services (see lib/googleSignIn.ts).
+ * Supabase verifies the token against the Google client ID set in its dashboard and returns a normal session.
+ */
+export async function signInWithGoogleToken(idToken: string, rawNonce: string): Promise<Result> {
+  const sb = getSupabase();
+  if (!sb) return { ok: false, error: 'Cloud accounts are not configured' };
+  try {
+    const { data, error } = await sb.auth.signInWithIdToken({ provider: 'google', token: idToken, nonce: rawNonce });
+    if (error || !data.user) return { ok: false, error: friendly(error?.message ?? 'Google sign-in failed') };
+    await adoptGoogleUser(data.user as AuthUser);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: friendly(e instanceof Error ? e.message : String(e)) };
@@ -190,10 +252,13 @@ export async function logOut(opts: LogOutOptions = {}): Promise<void> {
  */
 export async function deleteAccount(password: string): Promise<Result> {
   const sb = getSupabase();
-  if (!sb || state.status !== 'signedIn' || !state.username) return { ok: false, error: 'You are not signed in' };
+  if (!sb || state.status !== 'signedIn') return { ok: false, error: 'You are not signed in' };
   try {
-    const again = await sb.auth.signInWithPassword({ email: usernameToEmail(state.username), password });
-    if (again.error) return { ok: false, error: friendly(again.error.message) };
+    if (state.provider !== 'google') {
+      if (!state.username) return { ok: false, error: 'You are not signed in' };
+      const again = await sb.auth.signInWithPassword({ email: usernameToEmail(state.username), password });
+      if (again.error) return { ok: false, error: friendly(again.error.message) };
+    } // Google accounts have no password: the dialog asks them to type DELETE instead
     const { error } = await sb.rpc('delete_my_account');
     if (error) return { ok: false, error: 'Could not delete the account. Check your connection and try again.' };
   } catch (e) {

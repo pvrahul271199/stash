@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { addSpend, closeCurrentDay, createPlanAndCycle, ensureSeed, syncCalendar, updateActivePlan } from '@/db/queries';
 import { getDB, openUserDB } from '@/db/schema';
 import { vetToday } from '@/lib/dates';
+import { shouldNudge } from '@/components/ui/BackupPrompt';
 
 const store = new Map<string, string>();
 const plan = { income: 80000, bills: 25000, savings: 15000, monthLength: 30 };
@@ -85,5 +86,15 @@ describe('client guards that mirror the server constraints', () => {
     expect(vetToday(first.next, '2030-01-01', t0 + 60_000).use).toBe(false);
     expect(vetToday(first.next, '2030-01-01', t0 + 11 * 60_000)).toMatchObject({ use: true, next: { date: '2030-01-01' } });
     expect(vetToday(first.next, '2026-10-06', t0 + 60_000)).toMatchObject({ use: true, next: { date: '2026-10-06' } }); // clock fixed
+  });
+
+  it('backup prompt: guests only, from the 4th spend, and not while snoozed', () => {
+    const D = 24 * 60 * 60 * 1000;
+    const t = 100 * D;
+    expect(shouldNudge(true, 3, 0, t)).toBe(false);
+    expect(shouldNudge(true, 4, 0, t)).toBe(true);
+    expect(shouldNudge(true, 9, t + D, t)).toBe(false); // snoozed
+    expect(shouldNudge(true, 9, t - 1, t)).toBe(true); // snooze over
+    expect(shouldNudge(false, 9, 0, t)).toBe(false); // signed in
   });
 });

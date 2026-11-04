@@ -465,6 +465,11 @@ export async function updateActivePlan(p: PlanInput): Promise<void> {
   requestSync();
 }
 
+/** Real (not rough-total) spends logged so far; drives the "back up your month" prompt. */
+export function useSpendCount(): number {
+  return useLiveQuery(async () => (await getDB().transactions.toArray()).filter((t) => alive(t) && !t.isEstimate).length, [], 0);
+}
+
 /** How many rows the server rejected and sync has set aside (shown as "N items couldn't sync"). */
 export function useSyncFailureCount(): number {
   return useLiveQuery(async () => Object.keys((await getDB().meta.get('main'))?.syncFailures ?? {}).length, [], 0);

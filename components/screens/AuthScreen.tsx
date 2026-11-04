@@ -1,9 +1,10 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { BackIcon, GhostButton, IconButton, PrimaryButton } from '../ui/Button';
-import { logIn, signUp, validateUsername } from '@/lib/auth';
-import { acceptSyncConsent, hasSyncConsent } from '@/lib/consent';
-import { PrivacyNotice } from '../ui/PrivacyNotice';
+import { getAuth, logIn, signInWithGoogleToken, signUp, validateUsername } from '@/lib/auth';
+import { googleEnabled } from '@/config/google';
+import { renderGoogleButton } from '@/lib/googleSignIn';
+import { acceptSyncConsent } from '@/lib/consent';
 
 export function AuthScreen({
   initialMode = 'login',
@@ -19,13 +20,12 @@ export function AuthScreen({
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [agreed, setAgreed] = useState(hasSyncConsent());
 
   const name = username.trim().toLowerCase();
   const userHint = name ? validateUsername(name) : null;
 
   async function submit() {
-    if (busy || !agreed) return;
+    if (busy) return;
     setBusy(true);
     setError(null);
     const res = mode === 'signup' ? await signUp(name, password) : await logIn(name, password);
@@ -37,6 +37,26 @@ export function AuthScreen({
     acceptSyncConsent(); // recorded only after the account exists, i.e. before the first sync can run
     onDone(mode, name);
   }
+
+  const googleRef = useRef<HTMLDivElement>(null);
+  const [googleOk, setGoogleOk] = useState(googleEnabled());
+  const [googleReady, setGoogleReady] = useState(false);
+  const done0 = useRef(onDone);
+  done0.current = onDone;
+  useEffect(() => {
+    if (!googleEnabled() || !googleRef.current) return;
+    renderGoogleButton(googleRef.current, googleRef.current.clientWidth, async (idToken, nonce) => {
+      setBusy(true);
+      setError(null);
+      acceptSyncConsent(); // continuing means agreeing to the backup
+      const res = await signInWithGoogleToken(idToken, nonce);
+      setBusy(false);
+      if (res.ok) done0.current('login', getAuth().username ?? '');
+      else setError(res.error);
+    })
+      .then(() => setGoogleReady(true))
+      .catch(() => setGoogleOk(false)); // offline or blocked: the username form still works
+  }, []);
 
   return (
     <main className="flex h-full flex-col justify-between px-6 pb-8 pt-6">
@@ -86,27 +106,6 @@ export function AuthScreen({
             autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
             className="h-12 w-full rounded-key border border-line bg-white px-4 text-[17px] text-ink placeholder:text-faint"
           />
-          {mode === 'signup' && (
-            <p className="rounded-key bg-tint px-3 py-2 text-[12px] text-soft">
-              There is no password reset yet. If you forget it, the account cannot be recovered. Export a CSV
-              from Settings for a safe copy.
-            </p>
-          )}
-          <details className="rounded-key border border-line bg-white px-3 py-2">
-            <summary className="cursor-pointer text-[13px] font-medium text-ink">How your data is used</summary>
-            <div className="mt-2">
-              <PrivacyNotice />
-            </div>
-          </details>
-          <label className="flex items-start gap-2.5 text-[13px] text-soft">
-            <input
-              type="checkbox"
-              checked={agreed}
-              onChange={(e) => setAgreed(e.target.checked)}
-              className="mt-0.5 h-4 w-4 shrink-0"
-            />
-            <span>I have read how my data is used and agree to it being backed up to my account.</span>
-          </label>
           {error && (
             <p role="alert" className="text-[13px] text-warm">
               {error}
@@ -116,9 +115,41 @@ export function AuthScreen({
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <PrimaryButton disabled={busy || !name || !password || !agreed} onClick={() => void submit()}>
+        <p className="text-center text-[12px] text-faint">By continuing you agree to your data being backed up to your account.</p>
+        <PrimaryButton disabled={busy || !name || !password} onClick={() => void submit()}>
           {busy ? 'Please wait…' : mode === 'signup' ? 'Create account' : 'Log in'}
         </PrimaryButton>
+        {googleOk && (
+          <>
+            <div className="my-2 flex items-center gap-3" aria-hidden="true">
+              <span className="h-px flex-1 bg-line" />
+              <span className="text-[12px] text-faint">or</span>
+              <span className="h-px flex-1 bg-line" />
+            </div>
+            <div className="relative min-h-[44px] w-full">
+              <div ref={googleRef} className="flex w-full justify-center" aria-label="Continue with Google" />
+              {!googleReady && (
+                <div
+                  className="absolute inset-0 flex animate-pulse items-center justify-center rounded-full border border-line bg-white text-[14px] text-faint"
+                  aria-hidden="true"
+                >
+                  Continue with Google
+                </div>
+              )}
+            </div>
+          </>
+        )}
+        {process.env.NODE_ENV !== 'production' && !googleEnabled() && (
+          <p className="rounded-key bg-tint px-3 py-2 text-[12px] text-soft">
+            Developer note: the Google button is hidden because NEXT_PUBLIC_GOOGLE_CLIENT_ID is not set (see docs/GOOGLE_AUTH.md).
+            Not shown in production.
+          </p>
+        )}
+        {process.env.NODE_ENV !== 'production' && googleEnabled() && !googleOk && (
+          <p className="rounded-key bg-tint px-3 py-2 text-[12px] text-soft">
+            Developer note: Google&apos;s sign-in script could not load (offline, blocked or an ad-blocker).
+          </p>
+        )}
         <GhostButton
           disabled={busy}
           onClick={() => {

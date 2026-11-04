@@ -1,9 +1,11 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { deleteAccount } from '@/lib/auth';
+import { deleteAccount, useAuth } from '@/lib/auth';
+import { PrivacyNotice } from './PrivacyNotice';
 
 /** Account erasure. Needs the password again, and says plainly that it cannot be undone. */
 export function DeleteAccountDialog({ onDone, onCancel }: { onDone: () => void; onCancel: () => void }) {
+  const google = useAuth().provider === 'google';
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -15,8 +17,10 @@ export function DeleteAccountDialog({ onDone, onCancel }: { onDone: () => void; 
     return () => window.removeEventListener('keydown', onKey);
   }, [onCancel, busy]);
 
+  const ready = google ? password.trim().toUpperCase() === 'DELETE' : !!password;
+
   async function submit() {
-    if (busy || !password) return;
+    if (busy || !ready) return;
     setBusy(true);
     setError(null);
     const res = await deleteAccount(password);
@@ -35,6 +39,12 @@ export function DeleteAccountDialog({ onDone, onCancel }: { onDone: () => void; 
           This permanently erases your account and everything in it from the cloud and from every device you used.
           It cannot be undone and the username cannot be recovered. Export a CSV first if you want a copy.
         </p>
+        <details className="mt-3 text-[13px]">
+          <summary className="cursor-pointer font-medium text-ink">What we store and what gets erased</summary>
+          <div className="mt-2">
+            <PrivacyNotice />
+          </div>
+        </details>
         <form
           className="mt-4"
           onSubmit={(e) => {
@@ -43,12 +53,12 @@ export function DeleteAccountDialog({ onDone, onCancel }: { onDone: () => void; 
           }}
         >
           <input
-            type="password"
+            type={google ? 'text' : 'password'}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            placeholder="Enter your password to confirm"
-            aria-label="Password"
-            autoComplete="current-password"
+            placeholder={google ? 'Type DELETE to confirm' : 'Enter your password to confirm'}
+            aria-label={google ? 'Type DELETE' : 'Password'}
+            autoComplete={google ? 'off' : 'current-password'}
             className="h-12 w-full rounded-key border border-line bg-white px-4 text-[16px] text-ink placeholder:text-faint"
           />
           {error && (
@@ -60,7 +70,7 @@ export function DeleteAccountDialog({ onDone, onCancel }: { onDone: () => void; 
         <div className="mt-5 flex flex-col gap-2">
           <button
             onClick={() => void submit()}
-            disabled={busy || !password}
+            disabled={busy || !ready}
             className="h-[54px] w-full rounded-btn bg-warmBg text-[16px] font-semibold text-warm disabled:opacity-60"
           >
             {busy ? 'Deleting…' : 'Delete my account forever'}

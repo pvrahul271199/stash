@@ -1,13 +1,15 @@
 # Cloudflare Pages / Netlify headers file. `next build` copies public/ into out/, so this ships with the site.
 # Other hosts: set the same headers in their config.
 #
+# (Vercel ignores this file: it reads vercel.json at the repo root. Keep the two in step.)
 # CSP notes:
+#  - the accounts.google.com entries are for Google sign-in (Google Identity Services script, button iframe, styles).
 #  - script-src needs 'unsafe-inline' because the Next.js static export inlines its bootstrap (self.__next_f.push).
 #    That weakens XSS protection; moving to hashes/nonces needs a build step that lists the inline script hashes.
 #  - connect-src allows the Supabase project only (auth + PostgREST). Tighten the wildcard to your exact
 #    https://<project-ref>.supabase.co once the project is final.
 /*
-  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://*.supabase.co; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style; img-src 'self' data: blob: https://*.googleusercontent.com; font-src 'self' data:; connect-src 'self' https://*.supabase.co https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
   Referrer-Policy: strict-origin-when-cross-origin

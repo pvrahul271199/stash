@@ -12,6 +12,7 @@ import { CloseDay } from './CloseDay';
 import { DayClosed } from './DayClosed';
 import { EditSpendSheet } from './EditSpendSheet';
 import { IosHint } from '../pwa/IosHint';
+import { BackupPrompt } from '../ui/BackupPrompt';
 import {
   closeCurrentDay,
   useCycleEntries,
@@ -35,7 +36,7 @@ import { useUI } from '@/store/ui';
 
 type View = 'today' | 'log' | 'close' | 'closed';
 
-export function TodayTab({ cycle, plan }: { cycle: Cycle; plan: Plan }) {
+export function TodayTab({ cycle, plan, onCreateAccount }: { cycle: Cycle; plan: Plan; onCreateAccount: () => void }) {
   const [view, setView] = useState<View>('today');
   const [logReturn, setLogReturn] = useState<View>('today');
   const [logDay, setLogDay] = useState<number | undefined>(undefined);
@@ -204,6 +205,7 @@ export function TodayTab({ cycle, plan }: { cycle: Cycle; plan: Plan }) {
           }}
         />
       )}
+      {view === 'today' && peekDay == null && !editing && <BackupPrompt onCreate={onCreateAccount} />}
       {editing && <EditSpendSheet entry={editing} onClose={() => setEditing(null)} />}
       {view === 'closed' && result && <DayClosed cycle={cycle} result={result} onNext={() => setView('today')} />}
     </>

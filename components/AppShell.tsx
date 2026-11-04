@@ -19,6 +19,7 @@ import { LoadingScreen } from './ui/LoadingScreen';
 import { LogoutDialog } from './ui/LogoutDialog';
 import { ConsentScreen } from './screens/ConsentScreen';
 import { acceptSyncConsent, hasSyncConsent } from '@/lib/consent';
+import { preloadGoogle } from '@/lib/googleSignIn';
 import {
   applyCatchUp,
   createPlanAndCycle,
@@ -68,7 +69,13 @@ export function AppShell() {
   const [startDate, setStartDate] = useState(() => todayISO());
   const [catchUpGap, setCatchUpGap] = useState<PendingCatchUp | null>(null);
   const [askLogout, setAskLogout] = useState(false);
+  const [authMode, setAuthMode] = useState<'signup' | 'login'>('login');
   const [consented, setConsented] = useState(() => hasSyncConsent());
+
+  // Guests may open the sign-in screen soon: fetch Google's script in idle time so its button appears instantly.
+  useEffect(() => {
+    if (ready && getAuth().status === 'guest') preloadGoogle();
+  }, [ready]);
 
   const auth = useAuth();
   const [restoring, setRestoring] = useState(false);
@@ -147,6 +154,7 @@ export function AppShell() {
   } else if (flow === 'auth') {
     body = (
       <AuthScreen
+        initialMode={authMode}
         onBack={() => setFlow('welcome')}
         onDone={async (mode, username) => {
           setForceWelcome(false);
@@ -158,7 +166,7 @@ export function AppShell() {
             await restoreFromCloud();
             await runSync();
             setRestoring(false);
-            toast(`Welcome back, ${username}!`);
+            toast(username ? `Welcome back, ${username}!` : 'Welcome back!');
             return;
           }
           setFlow('welcome');
@@ -224,7 +232,10 @@ export function AppShell() {
       body = (
         <>
           <div className="flex min-h-0 flex-1 flex-col">
-            {tab === 'today' && <TodayTab cycle={snap.cycle} plan={snap.plan} />}
+            {tab === 'today' && <TodayTab cycle={snap.cycle} plan={snap.plan} onCreateAccount={() => {
+                setAuthMode('signup');
+                setFlow('auth');
+              }} />}
             {tab === 'history' && <HistoryTab activeCycle={snap.cycle} plan={snap.plan} />}
             {tab === 'insights' && <InsightsTab cycle={snap.cycle} plan={snap.plan} />}
             {tab === 'user' && (
@@ -243,7 +254,10 @@ export function AppShell() {
                   setFlow('changePlan');
                 }}
                 onSwitchUser={() => setAskLogout(true)}
-                onLogIn={() => setFlow('auth')}
+                onLogIn={() => {
+                  setAuthMode('login');
+                  setFlow('auth');
+                }}
                 onSampleDone={() => setTab('insights')}
                 onDeleted={() => {
                     setDraft(null);
@@ -265,6 +279,7 @@ export function AppShell() {
                 if (auth.status === 'signedIn') {
                   setAskLogout(true);
                 } else {
+                  setAuthMode('login');
                   setFlow('auth');
                 }
               }}
@@ -315,7 +330,10 @@ export function AppShell() {
             if (snap.cycle) setForceWelcome(false); // resume the guest data already on this device
             else setFlow('onboarding');
           }}
-          onAccount={() => setFlow('auth')}
+          onAccount={() => {
+            setAuthMode('login');
+            setFlow('auth');
+          }}
           onSample={handleSample}
           onDemo={() => setShowDemo(true)}
         />
