@@ -9,6 +9,7 @@ import { cycleEndDate, formatWithWeekday } from '@/lib/dates';
 import { inr } from '@/lib/format';
 import { useToast } from '@/store/toast';
 import { usePWA } from '@/store/pwa';
+import { useAuth } from '@/lib/auth';
 
 export function PlanScreen({
   plan,
@@ -28,6 +29,7 @@ export function PlanScreen({
   onDeleted: () => void;
 }) {
   const toast = useToast((s) => s.show);
+  const auth = useAuth();
   const installEvent = usePWA((s) => s.installEvent);
   const setPWA = usePWA((s) => s.set);
   const [confirm, setConfirm] = useState<'delete' | 'sample' | null>(null);
@@ -102,7 +104,9 @@ export function PlanScreen({
           <PrimaryButton onClick={onChangePlan}>Change my plan</PrimaryButton>
           {onSwitchUser && <SecondaryButton onClick={onSwitchUser}>Log out or log in</SecondaryButton>}
           {installEvent && <SecondaryButton onClick={install}>Install Chelav</SecondaryButton>}
-          <SecondaryButton onClick={() => setConfirm('sample')}>Fill with a sample month</SecondaryButton>
+          {auth.status !== 'signedIn' && (
+            <SecondaryButton onClick={() => setConfirm('sample')}>Fill with a sample month</SecondaryButton>
+          )}
           <SecondaryButton onClick={doExport}>Export to CSV</SecondaryButton>
           <button
             onClick={() => setConfirm('delete')}

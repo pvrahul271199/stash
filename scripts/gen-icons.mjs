@@ -2,7 +2,7 @@
 import sharp from 'sharp';
 import { mkdirSync } from 'node:fs';
 
-const INK = '#1E1B4B';
+const GRAD = '<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3B3790"/><stop offset="1" stop-color="#17143D"/></linearGradient></defs>';
 
 // Malayalam ച (cha) as one stroke + teal coin dot. Keep in sync with components/ui/Logo.tsx and public/logo.svg.
 const glyph = `
@@ -10,11 +10,11 @@ const glyph = `
 
 function svg({ rounded, inset }) {
   const bg = rounded
-    ? `<rect width="100" height="100" rx="22" fill="${INK}"/>`
-    : `<rect width="100" height="100" fill="${INK}"/>`;
+    ? `<rect width="100" height="100" rx="22" fill="url(#g)"/>`
+    : `<rect width="100" height="100" fill="url(#g)"/>`;
   const s = inset; // 1 = normal, <1 keeps content inside the maskable safe zone
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-    ${bg}
+    ${GRAD}${bg}
     <g transform="translate(50 50) scale(${s}) translate(-50 -50)">${glyph}</g>
   </svg>`;
 }

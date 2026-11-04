@@ -560,7 +560,9 @@ export function UserTab({
           <SecondaryButton onClick={onLogIn}>Sign up or log in (guest data is not backed up)</SecondaryButton>
         )}
         {installEvent && <SecondaryButton onClick={install}>Install Chelav as PWA</SecondaryButton>}
-        <SecondaryButton onClick={() => setConfirm('sample')}>Fill with a sample month</SecondaryButton>
+        {auth.status !== 'signedIn' && (
+          <SecondaryButton onClick={() => setConfirm('sample')}>Fill with a sample month</SecondaryButton>
+        )}
         <button
           type="button"
           onClick={() => setConfirm('delete')}

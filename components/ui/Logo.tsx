@@ -10,7 +10,13 @@ export function Logo({ size = 40, className = '' }: { size?: number; className?:
       aria-label="Chelav"
       className={className}
     >
-      <rect width="100" height="100" rx="22" fill="#1E1B4B" />
+      <defs>
+        <linearGradient id="chelav-g" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#3B3790" />
+          <stop offset="1" stopColor="#17143D" />
+        </linearGradient>
+      </defs>
+      <rect width="100" height="100" rx="22" fill="url(#chelav-g)" />
       <g transform="translate(50 50) scale(0.78) translate(-52 -49)">
       <path
         d="M74 22 V70 H24 M32 54 C30 40 40 33 50 36 C62 40 62 58 50 70"

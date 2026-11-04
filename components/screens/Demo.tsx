@@ -8,6 +8,8 @@ import { DEFAULT_SAMPLE_PLAN, SAMPLE_DAYS, generateSampleSpends } from '@/lib/sa
 import { weekdayOfDay } from '@/lib/dates';
 import { inr } from '@/lib/format';
 import { categoryRamp } from '@/theme/tokens';
+import { Logo } from '../ui/Logo';
+import { usePWA } from '@/store/pwa';
 
 /* ---------- sample month: the same data "explore with sample data" uses ---------- */
 
@@ -495,6 +497,94 @@ function Basics({ step }: { step: number }) {
   );
 }
 
+/* ---------- install (last chapter) ---------- */
+
+function ShareIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 15V3M8 7l4-4 4 4" />
+      <path d="M6 11H5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1h-1" />
+    </svg>
+  );
+}
+
+function PlusIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+      <rect x="4" y="4" width="16" height="16" rx="4" />
+      <path d="M12 8v8M8 12h8" />
+    </svg>
+  );
+}
+
+function InstallStep() {
+  const installEvent = usePWA((s) => s.installEvent);
+  const setPWA = usePWA((s) => s.set);
+  const [ios, setIos] = useState(false);
+  const [installed, setInstalled] = useState(false);
+  useEffect(() => {
+    try {
+      const ua = navigator.userAgent;
+      setIos(/iPhone|iPad|iPod/.test(ua));
+      setInstalled(
+        (navigator as Navigator & { standalone?: boolean }).standalone === true ||
+          window.matchMedia('(display-mode: standalone)').matches,
+      );
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  async function install() {
+    if (!installEvent) return;
+    await installEvent.prompt();
+    await installEvent.userChoice;
+    setPWA({ installEvent: null });
+  }
+
+  const steps: { icon: ReactNode; text: ReactNode }[] = ios
+    ? [
+        { icon: <ShareIcon />, text: <>Tap <b className="font-semibold text-ink">Share</b> in Safari&apos;s toolbar.</> },
+        { icon: <PlusIcon />, text: <>Choose <b className="font-semibold text-ink">Add to Home Screen</b>.</> },
+        { icon: <Logo size={18} />, text: <>Open <b className="font-semibold text-ink">Chelav</b> from your home screen.</> },
+      ]
+    : [
+        { icon: <PlusIcon />, text: <>Open your browser menu and tap <b className="font-semibold text-ink">Install app</b> or <b className="font-semibold text-ink">Add to Home screen</b>.</> },
+        { icon: <Logo size={18} />, text: <>Open <b className="font-semibold text-ink">Chelav</b> from your home screen.</> },
+      ];
+
+  return (
+    <div className="demo-fade">
+      <h2 className="font-display text-[26px] font-semibold leading-tight text-ink">Keep Chelav one tap away</h2>
+      <p className="mt-2 text-body text-soft">
+        Add it to your home screen for a full-screen app that opens instantly and works offline.
+      </p>
+      <div className="mt-5 flex flex-col items-center rounded-[18px] border border-line bg-tint px-4 py-6">
+        <div className="rounded-[22px] shadow-[0_8px_24px_-8px_rgba(30,27,75,0.45)]">
+          <Logo size={72} />
+        </div>
+        <p className="mt-3 font-display text-[15px] font-semibold text-ink">Chelav</p>
+        <p className="text-[12px] text-soft">{installed ? 'Already on your home screen' : 'On your home screen'}</p>
+      </div>
+      {!installed && (
+        <ol className="mt-4 flex flex-col gap-2">
+          {steps.map((st, i) => (
+            <li key={i} className="flex items-center gap-3 rounded-[14px] border border-line bg-white px-3 py-2.5 text-[14px] text-soft">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-tint text-ink">{st.icon}</span>
+              <span>{st.text}</span>
+            </li>
+          ))}
+        </ol>
+      )}
+      {!installed && installEvent && (
+        <div className="mt-3">
+          <PrimaryButton onClick={install}>Install Chelav</PrimaryButton>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ---------- shell ---------- */
 
 export function Demo({ onClose }: { onClose: () => void }) {
@@ -513,7 +603,7 @@ export function Demo({ onClose }: { onClose: () => void }) {
     return () => clearTimeout(t);
   }, [ch, step, playing]);
 
-  const names = ['Basics', ...CHAPTERS.map((c) => c.name)];
+  const names = ['Basics', ...CHAPTERS.map((c) => c.name), 'Install'];
   const goChapter = (i: number) => {
     setCh(i);
     setHot(0);
@@ -523,8 +613,9 @@ export function Demo({ onClose }: { onClose: () => void }) {
     }
   };
 
-  const tour = ch > 0 ? CHAPTERS[ch - 1] : null;
-  const lastInChapter = tour ? hot >= tour.callouts.length - 1 : step >= BASICS.length - 1;
+  const isInstall = ch === names.length - 1;
+  const tour = ch > 0 && !isInstall ? CHAPTERS[ch - 1] : null;
+  const lastInChapter = isInstall ? true : tour ? hot >= tour.callouts.length - 1 : step >= BASICS.length - 1;
   const lastChapter = ch === names.length - 1;
 
   function next() {
@@ -565,7 +656,7 @@ export function Demo({ onClose }: { onClose: () => void }) {
       </div>
 
       <div className="mt-5 flex-1 overflow-y-auto">
-        {tour ? <Tour key={tour.name} chapter={tour} hot={hot} setHot={setHot} /> : <Basics step={step} />}
+        {isInstall ? <InstallStep /> : tour ? <Tour key={tour.name} chapter={tour} hot={hot} setHot={setHot} /> : <Basics step={step} />}
       </div>
 
       <div className="mt-3 flex flex-col gap-1">
