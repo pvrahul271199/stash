@@ -5,7 +5,7 @@ import { Note } from '../ui/Chip';
 import { Logo } from '../ui/Logo';
 import { HugeNumber } from '../ui/HugeNumber';
 import { SyncStatusPill } from '../ui/SyncStatusPill';
-import { WeekRow, weekWindow, type WeekDay } from '../ui/WeekRow';
+import { WeekRow, type WeekDay } from '../ui/WeekRow';
 import { LogSpend } from './LogSpend';
 import { DayPeek } from './DayPeek';
 import { CloseDay } from './CloseDay';
@@ -62,7 +62,7 @@ export function TodayTab({ cycle, plan }: { cycle: Cycle; plan: Plan }) {
   const over = overMessage(allowance, spent, state);
   const used = state.pool <= 0;
 
-  const week: WeekDay[] = weekWindow(cycle.currentDay, cycle.totalDays).map((day) => {
+  const week: WeekDay[] = Array.from({ length: cycle.totalDays }, (_, i) => i + 1).map((day) => {
     const row = dayRows.find((r) => r.day === day);
     return {
       day,
