@@ -9,7 +9,6 @@ import { weekdayOfDay } from '@/lib/dates';
 import { inr } from '@/lib/format';
 import { categoryRamp } from '@/theme/tokens';
 import { Logo } from '../ui/Logo';
-import { usePWA } from '@/store/pwa';
 
 /* ---------- sample month: the same data "explore with sample data" uses ---------- */
 
@@ -518,14 +517,11 @@ function PlusIcon() {
 }
 
 function InstallStep() {
-  const installEvent = usePWA((s) => s.installEvent);
-  const setPWA = usePWA((s) => s.set);
-  const [ios, setIos] = useState(false);
+  const [android, setAndroid] = useState(false);
   const [installed, setInstalled] = useState(false);
   useEffect(() => {
     try {
-      const ua = navigator.userAgent;
-      setIos(/iPhone|iPad|iPod/.test(ua));
+      setAndroid(/Android/i.test(navigator.userAgent));
       setInstalled(
         (navigator as Navigator & { standalone?: boolean }).standalone === true ||
           window.matchMedia('(display-mode: standalone)').matches,
@@ -535,52 +531,156 @@ function InstallStep() {
     }
   }, []);
 
-  async function install() {
-    if (!installEvent) return;
-    await installEvent.prompt();
-    await installEvent.userChoice;
-    setPWA({ installEvent: null });
-  }
-
-  const steps: { icon: ReactNode; text: ReactNode }[] = ios
-    ? [
-        { icon: <ShareIcon />, text: <>Tap <b className="font-semibold text-ink">Share</b> in Safari&apos;s toolbar.</> },
-        { icon: <PlusIcon />, text: <>Choose <b className="font-semibold text-ink">Add to Home Screen</b>.</> },
-        { icon: <Logo size={18} />, text: <>Open <b className="font-semibold text-ink">Chelav</b> from your home screen.</> },
-      ]
-    : [
-        { icon: <PlusIcon />, text: <>Open your browser menu and tap <b className="font-semibold text-ink">Install app</b> or <b className="font-semibold text-ink">Add to Home screen</b>.</> },
-        { icon: <Logo size={18} />, text: <>Open <b className="font-semibold text-ink">Chelav</b> from your home screen.</> },
-      ];
-
   return (
     <div className="demo-fade">
       <h2 className="font-display text-[26px] font-semibold leading-tight text-ink">Keep Chelav one tap away</h2>
       <p className="mt-2 text-body text-soft">
         Add it to your home screen for a full-screen app that opens instantly and works offline.
       </p>
-      <div className="mt-5 flex flex-col items-center rounded-[18px] border border-line bg-white px-4 py-6">
-        <div className="rounded-[22px] shadow-[0_8px_24px_-8px_rgba(30,27,75,0.45)]">
-          <Logo size={72} />
+      {installed ? (
+        <div className="mt-5 flex flex-col items-center rounded-[18px] border border-line bg-white px-4 py-6">
+          <div className="rounded-[22px] shadow-[0_8px_24px_-8px_rgba(30,27,75,0.45)]">
+            <Logo size={72} />
+          </div>
+          <p className="mt-3 font-display text-[15px] font-semibold text-ink">Chelav</p>
+          <p className="text-[12px] text-soft">Already on your home screen</p>
         </div>
-        <p className="mt-3 font-display text-[15px] font-semibold text-ink">Chelav</p>
-        <p className="text-[12px] text-soft">{installed ? 'Already on your home screen' : 'On your home screen'}</p>
+      ) : (
+        <InstallAnim ios={!android} />
+      )}
+    </div>
+  );
+}
+
+const INSTALL_PHASE_MS = 2800;
+
+function DotsIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <circle cx="12" cy="5" r="1.8" />
+      <circle cx="12" cy="12" r="1.8" />
+      <circle cx="12" cy="19" r="1.8" />
+    </svg>
+  );
+}
+
+/** Arrow pointing down (rotate for other directions). */
+function Arrow({ rotate = 0 }: { rotate?: number }) {
+  return (
+    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ transform: `rotate(${rotate}deg)` }}>
+      <path d="M12 3v16M5 12l7 7 7-7" />
+    </svg>
+  );
+}
+
+/** Looping mock of a mobile browser: an arrow points at Share (Android: the ⋮ menu), then at "Add to Home Screen". */
+function InstallAnim({ ios }: { ios: boolean }) {
+  const [phase, setPhase] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setPhase((p) => (p + 1) % 2), INSTALL_PHASE_MS);
+    return () => clearInterval(t);
+  }, []);
+
+  const addLabel = ios ? 'Add to Home Screen' : 'Add to Home screen';
+  const rows = ios ? ['Copy', 'Add to Reading List', addLabel] : ['New tab', 'Bookmarks', addLabel];
+  const caption = phase === 0 ? (ios ? <>Tap <b className="font-semibold text-ink">Share</b></> : <>Tap the <b className="font-semibold text-ink">⋮ menu</b></>) : <>Tap <b className="font-semibold text-ink">{addLabel}</b></>;
+
+  const page = (
+    <div className={`px-4 ${ios ? 'pt-5' : 'pt-16'}`}>
+      <div className="flex items-center gap-2">
+        <Logo size={24} />
+        <span className="font-display text-[14px] font-semibold text-ink">Chelav</span>
       </div>
-      {!installed && (
-        <ol className="mt-4 flex flex-col gap-2">
-          {steps.map((st, i) => (
-            <li key={i} className="flex items-center gap-3 rounded-[14px] border border-line bg-white px-3 py-2.5 text-[14px] text-soft">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-tint text-ink">{st.icon}</span>
-              <span>{st.text}</span>
-            </li>
-          ))}
-        </ol>
-      )}
-      {!installed && installEvent && (
-        <div className="mt-3">
-          <PrimaryButton onClick={install}>Install Chelav</PrimaryButton>
-        </div>
-      )}
+      <div className="mt-4 h-2.5 w-3/4 rounded-full bg-line" />
+      <div className="mt-2 h-2.5 w-1/2 rounded-full bg-line" />
+      <div className="mt-2 h-2.5 w-2/3 rounded-full bg-line" />
+    </div>
+  );
+
+  const menu = (
+    <ul className="flex flex-col">
+      {rows.map((r, i) => {
+        const hot = i === rows.length - 1;
+        return (
+          <li
+            key={r}
+            className={`flex items-center gap-2 px-3 py-2.5 text-[13px] ${i > 0 ? 'border-t border-line' : ''} ${hot ? 'bg-tint font-semibold text-ink' : 'text-soft'}`}
+          >
+            {hot && <PlusIcon />}
+            <span>{r}</span>
+          </li>
+        );
+      })}
+    </ul>
+  );
+
+  return (
+    <div className="mt-5">
+      <div className="relative h-[260px] overflow-hidden rounded-[22px] border border-line bg-white" aria-hidden="true">
+        {page}
+
+        {ios ? (
+          <>
+            {/* Safari bottom toolbar */}
+            <div className="absolute inset-x-0 bottom-0 flex h-12 items-center justify-around border-t border-line bg-tint text-soft">
+              <span className="text-[18px]">‹</span>
+              <span className="text-[18px]">›</span>
+              <span className={`relative flex h-8 w-8 items-center justify-center rounded-full ${phase === 0 ? 'text-ink' : ''}`}>
+                {phase === 0 && <span className="demo-pulse absolute inset-0 rounded-full bg-ink/15" />}
+                <ShareIcon />
+              </span>
+              <span className="h-4 w-4 rounded-[3px] border-2 border-current" />
+              <span className="h-4 w-4 rounded-[4px] border-2 border-current" />
+            </div>
+            {phase === 0 && (
+              <div className="absolute bottom-[52px] left-1/2 -translate-x-1/2 text-ink">
+                <div className="demo-bob"><Arrow /></div>
+              </div>
+            )}
+            {phase === 1 && (
+              <div key="sheet" className="demo-sheet absolute inset-x-0 bottom-0 rounded-t-[18px] border-t border-line bg-white pb-3 pt-2 shadow-[0_-8px_24px_-12px_rgba(30,27,75,0.35)]">
+                <div className="mx-auto mb-2 h-1 w-9 rounded-full bg-line" />
+                {menu}
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            {/* Chrome top bar */}
+            <div className="absolute inset-x-0 top-0 flex h-12 items-center gap-2 border-b border-line bg-tint px-3 text-soft">
+              <div className="h-7 flex-1 rounded-full bg-white" />
+              <span className={`relative flex h-8 w-8 items-center justify-center rounded-full ${phase === 0 ? 'text-ink' : ''}`}>
+                {phase === 0 && <span className="demo-pulse absolute inset-0 rounded-full bg-ink/15" />}
+                <DotsIcon />
+              </span>
+            </div>
+            {phase === 0 && (
+              <div className="absolute right-[10px] top-[52px] text-ink">
+                <div className="demo-bob"><Arrow rotate={180} /></div>
+              </div>
+            )}
+            {phase === 1 && (
+              <div key="menu" className="demo-fade absolute right-2 top-2 w-[224px] overflow-hidden rounded-[14px] border border-line bg-white shadow-[0_8px_24px_-8px_rgba(30,27,75,0.35)]">
+                {menu}
+              </div>
+            )}
+          </>
+        )}
+
+        {phase === 1 && (
+          <div
+            className="absolute right-3 text-ink"
+            style={ios ? { bottom: 19 } : { top: 97 }}
+          >
+            <div className="demo-nudge"><Arrow rotate={90} /></div>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-6 flex items-center justify-center gap-2 text-[14px] text-soft">
+        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-ink text-[12px] font-semibold text-white">{phase + 1}</span>
+        <span key={phase} className="demo-fade">{caption}</span>
+      </div>
     </div>
   );
 }

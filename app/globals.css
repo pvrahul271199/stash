@@ -162,3 +162,11 @@ select:focus {
 .stash-ripple { animation: stash-ripple 2.4s ease-out infinite; }
 @keyframes demo-caret { 50% { opacity: 0; } }
 .demo-caret { animation: demo-caret 0.9s steps(1) infinite; }
+
+/* Install demo: arrow nudging toward the thing to tap. */
+@keyframes demo-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(6px); } }
+.demo-bob { animation: demo-bob 0.9s ease-in-out infinite; }
+@keyframes demo-nudge { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(-6px); } }
+.demo-nudge { animation: demo-nudge 0.9s ease-in-out infinite; }
+@keyframes demo-sheet { from { transform: translateY(100%); } to { transform: none; } }
+.demo-sheet { animation: demo-sheet 0.4s ease-out both; }
