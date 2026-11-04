@@ -125,27 +125,56 @@ function Section({ title, hint, children }: { title: string; hint?: string; chil
   );
 }
 
+const HOT = '#D98324';
+
 type Level = 'good' | 'warn' | 'bad';
 
 const LEVEL_DOT: Record<Level, string> = { good: 'bg-good', warn: 'bg-warm', bad: 'bg-bad' };
+
+const LEVEL_TEXT: Record<Level, string> = { good: 'text-good', warn: 'text-warm', bad: 'text-bad' };
+
+/** Direction arrow: points up/down vs a benchmark; colour carries the judgement (green fine, amber watch, red over). */
+function TrendArrow({ dir, level }: { dir: 'up' | 'down'; level: Level }) {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={`shrink-0 ${LEVEL_TEXT[level]}`}
+    >
+      {dir === 'up' ? <path d="M12 19V5M6 11l6-6 6 6" /> : <path d="M12 5v14M6 13l6 6 6-6" />}
+    </svg>
+  );
+}
 
 function Stat({
   label,
   value,
   sub,
   status,
+  trend,
 }: {
   label: string;
   value: string;
   sub?: string;
   /** good = green text; warn / bad = light amber / red wash behind ink text. */
   status?: Level;
+  trend?: { dir: 'up' | 'down'; level: Level };
 }) {
   const bg = status === 'warn' ? 'bg-warm/10' : status === 'bad' ? 'bg-bad/10' : 'bg-tint';
   return (
     <div className={`rounded-note p-3.5 ${bg}`}>
       <p className="text-[12px] font-medium uppercase tracking-wide text-soft">{label}</p>
-      <p className={`num mt-1 text-[24px] leading-tight ${status === 'good' ? 'text-good' : 'text-ink'}`}>{value}</p>
+      <p className={`num mt-1 flex items-center gap-1.5 text-[24px] leading-tight ${status === 'good' ? 'text-good' : 'text-ink'}`}>
+        {value}
+        {trend && <TrendArrow dir={trend.dir} level={trend.level} />}
+      </p>
       {sub && (
         <p className={`mt-0.5 text-[12px] ${status === 'good' ? 'text-good' : 'text-soft'}`}>{sub}</p>
       )}
@@ -279,6 +308,7 @@ export function InsightsTab({ cycle, plan }: { cycle: Cycle | undefined; plan: P
   const tryAgain = 'Close a few days to see this.';
   const topEventTotal = evList.reduce((m, e) => Math.max(m, e.total), 0);
   const space = currency.symbol.length > 1 ? ' ' : '';
+  const dailyBase = cycle.planAmount / Math.max(cycle.totalDays, 1);
   const daysLeft = Math.max(cycle.totalDays - summary.closedDays, 0);
   const paceRatio =
     summary.closedDays >= MIN_CLOSED_DAYS
@@ -351,13 +381,44 @@ export function InsightsTab({ cycle, plan }: { cycle: Cycle | undefined; plan: P
 
       {/* 2. Stat boxes */}
       <div className="mt-3 grid grid-cols-2 gap-2.5">
-        <Stat label="Average day" value={summary.averageDay != null ? inr(summary.averageDay) : '—'} sub="on closed days" />
-        <Stat label="Left to live on" value={inr(summary.leftToLive)} sub={`${daysLeft} ${daysLeft === 1 ? 'day' : 'days'} to go`} />
+        <Stat
+          label="Average day"
+          value={summary.averageDay != null ? inr(summary.averageDay) : '—'}
+          sub="on closed days"
+          trend={
+            summary.averageDay == null
+              ? undefined
+              : summary.averageDay > dailyBase * 1.1
+                ? { dir: 'up', level: 'bad' }
+                : summary.averageDay > dailyBase
+                  ? { dir: 'up', level: 'warn' }
+                  : { dir: 'down', level: 'good' }
+          }
+        />
+        <Stat
+          label="Left to live on"
+          value={inr(summary.leftToLive)}
+          sub={`${daysLeft} ${daysLeft === 1 ? 'day' : 'days'} to go`}
+          trend={
+            summary.closedDays === 0
+              ? undefined
+              : summary.leftToLive >= cycle.planAmount * (1 - summary.planMarker)
+                ? { dir: 'up', level: 'good' }
+                : { dir: 'down', level: summary.leftToLive < 0 ? 'bad' : 'warn' }
+          }
+        />
         <Stat
           label="Month-end pace"
           value={projected != null ? inr(projected) : '—'}
           sub={projected != null ? (projected > cycle.planAmount ? 'over your plan' : 'within your plan') : 'needs a few closed days'}
           status={projected == null || paceLevel == null ? undefined : paceLevel}
+          trend={
+            projected == null || paceLevel == null
+              ? undefined
+              : projected > cycle.planAmount
+                ? { dir: 'up', level: paceLevel === 'good' ? 'warn' : paceLevel }
+                : { dir: 'down', level: 'good' }
+          }
         />
         <Stat
           label="No-spend days"
@@ -640,7 +701,7 @@ export function InsightsTab({ cycle, plan }: { cycle: Cycle | undefined; plan: P
       {/* 5. By day of week */}
       <Section title="By day of week" hint="Which days run hotter than usual.">
         {weekday.closedCount >= MIN_CLOSED_DAYS ? (
-          <WeekdayChart stats={weekday.stats} usual={weekday.usual} color={barColor} resetKey={activeFocus} />
+          <WeekdayChart stats={weekday.stats} usual={weekday.usual} color={barColor} hotColor={activeFocus ? undefined : HOT} resetKey={activeFocus} />
         ) : (
           <p className="text-body text-soft">{tryAgain}</p>
         )}
@@ -648,7 +709,7 @@ export function InsightsTab({ cycle, plan }: { cycle: Cycle | undefined; plan: P
 
       {/* 6. By time of day */}
       <Section title="By time of day" hint="When in the day your money moves.">
-        <TimeOfDayChart buckets={time} color={barColor} resetKey={activeFocus} />
+        <TimeOfDayChart buckets={time} color={barColor} hotColor={activeFocus ? undefined : HOT} resetKey={activeFocus} />
       </Section>
 
       {/* 7. Patterns */}

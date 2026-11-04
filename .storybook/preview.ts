@@ -6,6 +6,6 @@ document.documentElement.style.setProperty('--font-bricolage', "'Bricolage Grote
 document.documentElement.style.setProperty('--font-figtree', "'Figtree'");
 
 const preview: Preview = {
-  parameters: { layout: 'centered', backgrounds: { default: 'frame', values: [{ name: 'frame', value: '#EEEEF6' }, { name: 'white', value: '#FFFFFF' }] } },
+  parameters: { layout: 'centered', backgrounds: { default: 'frame', values: [{ name: 'frame', value: '#EFEDEA' }, { name: 'white', value: '#FFFFFF' }] } },
 };
 export default preview;

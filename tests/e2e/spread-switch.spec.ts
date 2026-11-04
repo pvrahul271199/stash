@@ -11,7 +11,7 @@ test.describe('Spread switch only on non-today days', () => {
     await page.reload();
 
     // Standard fast onboarding setup
-    await page.getByRole('button', { name: 'Try without an account' }).click();
+    await page.getByRole('button', { name: 'Try now' }).click();
     await page.getByRole('button', { name: /Continue/ }).click();
 
     const input = page.getByRole('textbox').first();

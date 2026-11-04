@@ -76,7 +76,7 @@ select:focus {
 
 @media (min-width: 421px) and (display-mode: browser) {
   body {
-    background: #eeeef6;
+    background: #efedea;
   }
   .app-frame {
     min-height: 100dvh;

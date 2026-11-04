@@ -176,7 +176,7 @@ function EventsMock() {
       ))}
       <Box x={16} y={288} w={200} h={14} className={heading}>By event</Box>
       <Box x={16} y={308} w={220} h={16} className="rounded-full bg-ink" />
-      <Box x={16} y={332} w={70} h={16} className="rounded-full bg-[#7E7BBF]" />
+      <Box x={16} y={332} w={70} h={16} className="rounded-full bg-[#D98324]" />
       <Box x={244} y={307} w={64} h={18} className="num text-[11px] text-ink">{inr(2340)}</Box>
       <Box x={94} y={331} w={64} h={18} className="num text-[11px] text-ink">{inr(680)}</Box>
     </>
@@ -198,7 +198,7 @@ function HistoryMock() {
           w={30}
           h={30}
           className={`justify-center rounded-full border text-[11px] ${
-            over.has(i) ? 'border-ink bg-[#B5B3DA] text-ink' : 'border-line bg-tint text-ink'
+            over.has(i) ? 'border-ink bg-[#F3D9B5] text-ink' : 'border-line bg-tint text-ink'
           }`}
         >
           {i + 1}
@@ -274,7 +274,7 @@ function InsightsMock() {
 
       <Box x={16} y={196} w={200} h={14} className={heading}>Projected spending</Box>
       <Box x={BAR_X} y={216} w={BAR_W} h={14} plain className="overflow-hidden rounded-full bg-tint">
-        <div className="absolute inset-y-0 left-0 bg-[#7E7BBF]" style={{ width: `${(at(projected) / BAR_W) * 100}%` }} />
+        <div className="absolute inset-y-0 left-0 bg-[#C9C5BC]" style={{ width: `${(at(projected) / BAR_W) * 100}%` }} />
         <div className="absolute inset-y-0 left-0 bg-ink" style={{ width: `${(at(SAMPLE_SPENT) / BAR_W) * 100}%` }} />
       </Box>
       <Box x={BAR_X + at(SAMPLE_PLAN_AMOUNT) - 1} y={211} w={2} h={24} plain className="bg-ink" />
@@ -284,7 +284,7 @@ function InsightsMock() {
       <Box x={16} y={316} w={150} h={14} className={heading}>By day of week</Box>
       <Box x={16} y={336} w={150} h={50} plain className="flex items-end gap-1.5">
         {WEEKDAY_TOTALS.map((t, i) => (
-          <div key={i} className="flex-1 rounded-[3px] bg-[#7E7BBF]" style={{ height: `${Math.max(8, (t / wdMax) * 100)}%` }} />
+          <div key={i} className="flex-1 rounded-[3px] bg-[#9C9486]" style={{ height: `${Math.max(8, (t / wdMax) * 100)}%` }} />
         ))}
       </Box>
     </>
@@ -479,7 +479,7 @@ function Basics({ step }: { step: number }) {
                     style={{ height: barPct(track), transitionDelay: step === 0 ? '0ms' : `${i * 12}ms` }}
                   />
                   <div
-                    className={`absolute bottom-0 w-full rounded-[3px] transition-all duration-700 ease-out ${fill > track ? 'bg-[#4B47A0]' : 'bg-ink'}`}
+                    className={`absolute bottom-0 w-full rounded-[3px] transition-all duration-700 ease-out ${fill > track ? 'bg-[#B45309]' : 'bg-ink'}`}
                     style={{ height: barPct(fill) }}
                   />
                 </div>

@@ -7,11 +7,14 @@ export function WeekdayChart({
   stats,
   usual,
   color,
+  hotColor,
   resetKey,
 }: {
   stats: WeekdayStat[];
   usual: number;
   color: string;
+  /** Colour for the hottest day when it runs clearly above usual. */
+  hotColor?: string;
   resetKey: string | null;
 }) {
   const [sel, setSel] = useState<number | null>(null);
@@ -35,7 +38,7 @@ export function WeekdayChart({
               style={{ opacity: dim ? 0.3 : 1, transition: 'opacity .15s' }}
             >
               <span className="num h-[18px] text-[13px] text-ink">{on ? inr(s.avg) : ''}</span>
-              <span className="w-full rounded-t-md" style={{ height: `${Math.max((s.avg / max) * 100, s.avg > 0 ? 3 : 1)}px`, background: color, maxHeight: 96 }} />
+              <span className="w-full rounded-t-md" style={{ height: `${Math.max((s.avg / max) * 100, s.avg > 0 ? 3 : 1)}px`, background: hotColor && s.avg === max && s.avg > usual * 1.15 ? hotColor : color, maxHeight: 96 }} />
               <span
                 className={`flex h-7 w-7 items-center justify-center rounded-full text-[12px] font-semibold ${
                   on ? 'bg-ink text-white' : 'text-soft'
@@ -54,7 +57,17 @@ export function WeekdayChart({
   );
 }
 
-export function TimeOfDayChart({ buckets, color, resetKey }: { buckets: TimeBucket[]; color: string; resetKey: string | null }) {
+export function TimeOfDayChart({
+  buckets,
+  color,
+  hotColor,
+  resetKey,
+}: {
+  buckets: TimeBucket[];
+  color: string;
+  hotColor?: string;
+  resetKey: string | null;
+}) {
   const [sel, setSel] = useState<string | null>(null);
   useEffect(() => setSel(null), [resetKey]);
   const max = Math.max(1, ...buckets.map((b) => b.total));
@@ -77,7 +90,7 @@ export function TimeOfDayChart({ buckets, color, resetKey }: { buckets: TimeBuck
                   <span className="block text-[11px] text-faint">{b.range}</span>
                 </span>
                 <span className="h-3 flex-1 rounded-full bg-tint">
-                  <span className="block h-3 rounded-full" style={{ width: `${(b.total / max) * 100}%`, background: color }} />
+                  <span className="block h-3 rounded-full" style={{ width: `${(b.total / max) * 100}%`, background: hotColor && b.total === max && buckets.filter((x) => x.total > 0).length > 1 ? hotColor : color }} />
                 </span>
                 <span className="num w-[72px] text-right text-[16px] text-ink">{inr(b.total)}</span>
               </button>
