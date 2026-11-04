@@ -29,7 +29,7 @@ Keep these three up to date when behaviour changes. `FINDINGS.md` has a status c
 ```bash
 npm run dev        # next dev --webpack -H 0.0.0.0  (http://localhost:3000)
 npm run lint       # tsc --noEmit  (there is no ESLint)
-npm test           # vitest run   (103 tests, fake-indexeddb)
+npm test           # vitest run   (139 tests, fake-indexeddb)
 npm run build      # next build --webpack && node scripts/build-sw.mjs  → out/
 npm start          # node scripts/serve-out.mjs → http://127.0.0.1:3100
 npm run test:e2e   # Playwright; needs `npm run build` first, mobile 390x844 + desktop

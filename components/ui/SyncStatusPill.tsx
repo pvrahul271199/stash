@@ -1,10 +1,12 @@
 'use client';
 import { useSyncStatus } from '@/lib/syncState';
 import { useToast } from '@/store/toast';
+import { useSyncFailureCount } from '@/db/queries';
 
 export function SyncStatusPill({ className = '' }: { className?: string }) {
   const { status, triggerSync } = useSyncStatus();
   const toast = useToast((s) => s.show);
+  const failed = useSyncFailureCount();
 
   async function handleClick() {
     if (status.state === 'offline') {
@@ -69,13 +71,22 @@ export function SyncStatusPill({ className = '' }: { className?: string }) {
       break;
   }
 
+  // Some rows were refused by the server: say so instead of a reassuring "Synced".
+  if (failed > 0 && (status.state === 'synced' || status.state === 'error')) {
+    style = 'border-warm/40 bg-warmBg text-warm hover:bg-warmBg/80';
+    dotStyle = 'bg-warm';
+    label = failed === 1 ? "1 item couldn't sync" : `${failed} items couldn't sync`;
+  }
+
   return (
     <button
       type="button"
       onClick={handleClick}
       aria-label={`Cloud sync status: ${status.state}. Tap to sync.`}
       title={
-        status.state === 'error' && status.errorMessage
+        failed > 0
+          ? 'These items stay on this device. Edit them to try again.'
+          : status.state === 'error' && status.errorMessage
           ? `Error: ${status.errorMessage}. Tap to retry.`
           : 'Tap to sync with Supabase'
       }

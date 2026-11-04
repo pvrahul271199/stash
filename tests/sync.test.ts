@@ -26,6 +26,9 @@ let loseResponseOnce = false;
 const mutations = new Map<string, unknown>();
 const rpcCalls: { id: string; tables: string[] }[] = [];
 let unauthorizedOnce = false;
+const rejectIds = new Set<string>();
+let patchCount = 0;
+let pushRequests = 0;
 
 function fakeFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   return (async () => {
@@ -47,6 +50,8 @@ function fakeFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Respon
           p_changes: Record<string, (Row & { _base_version: number | null })[]>;
         };
         rpcCalls.push({ id: p_mutation_id, tables: Object.keys(p_changes) });
+        pushRequests++;
+        if (Object.values(p_changes).some((rows) => rows.some((r) => rejectIds.has(r.id)))) return new Response('{"code":"23514"}', { status: 400 });
         if (failTable && p_changes[failTable]?.length) return new Response('boom', { status: 500 });
         if (mutations.has(p_mutation_id)) return new Response(JSON.stringify(mutations.get(p_mutation_id)), { status: 200 });
         const order = ['plans', 'cycles', 'categories', 'events', 'transactions'];
@@ -92,7 +97,10 @@ function fakeFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Respon
       }
       const t = server.get(table) ?? new Map();
       server.set(table, t);
-      if (method === 'PATCH') return new Response('', { status: 204 });
+      if (method === 'PATCH') {
+        patchCount++;
+        return new Response(null, { status: 204 });
+      }
       calls.push({ method, table });
       const or = u.searchParams.get('or');
       const m = or?.match(/updated_at\.gt\.([^,]+),/);
@@ -136,12 +144,15 @@ describe('sync engine', () => {
     vi.stubGlobal('fetch', fakeFetch);
     vi.stubGlobal('navigator', { onLine: true });
     vi.stubGlobal('window', {
-      localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+      localStorage: { getItem: (k: string) => (k === 'stash:consent' ? JSON.stringify({ v: 1 }) : null), setItem: () => {}, removeItem: () => {} },
       addEventListener: () => {},
     });
     token = 'tok-1';
     refreshSession.mockClear();
     failTable = null;
+    rejectIds.clear();
+    patchCount = 0;
+    pushRequests = 0;
     uniqueNames = false;
     loseResponseOnce = false;
     await freshUser();
@@ -346,7 +357,7 @@ describe('pull cursor', () => {
   it('re-reads a row that committed late with an older updated_at, and pages past 1000 rows', async () => {
     vi.stubGlobal('fetch', fakeFetch);
     vi.stubGlobal('navigator', { onLine: true });
-    vi.stubGlobal('window', { localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} }, addEventListener: () => {} });
+    vi.stubGlobal('window', { localStorage: { getItem: (k: string) => (k === 'stash:consent' ? JSON.stringify({ v: 1 }) : null), setItem: () => {}, removeItem: () => {} }, addEventListener: () => {} });
     await freshUser();
     const t = new Map<string, Row & { updated_at: string; version: number }>();
     server.set('categories', t);
@@ -394,5 +405,121 @@ describe('mergeRows', () => {
   it('never moves a cycle day cursor backwards', () => {
     const b = { id: 'c', client_updated_at: 1, current_day: 3 };
     expect(mergeRows('cycles', { ...b, client_updated_at: 9, current_day: 4 }, b, { ...b, current_day: 6 }).current_day).toBe(6);
+  });
+});
+
+
+describe('sync robustness (B1, B2, M2)', () => {
+  beforeEach(async () => {
+    vi.stubGlobal('fetch', fakeFetch);
+    vi.stubGlobal('navigator', { onLine: true });
+    vi.stubGlobal('window', {
+      localStorage: { getItem: (k: string) => (k === 'stash:consent' ? JSON.stringify({ v: 1 }) : null), setItem: () => {}, removeItem: () => {} },
+      addEventListener: () => {},
+    });
+    token = 'tok-1';
+    failTable = null;
+    rejectIds.clear();
+    uniqueNames = false;
+    loseResponseOnce = false;
+    await freshUser();
+    patchCount = 0;
+    pushRequests = 0;
+  });
+
+
+  it('B1: an edit made while the phone clock runs backwards is still pushed', async () => {
+    await createPlanAndCycle(plan, '2026-10-01');
+    const cycle = (await getDB().cycles.toArray())[0];
+    await addSpend(cycle, { amount: 20, label: 'Tea', category: 'Food' });
+    await settle();
+    const real = Date.now;
+    try {
+      Date.now = () => real() - 3 * 24 * 60 * 60 * 1000; // clock set back three days
+      await addSpend(cycle, { amount: 33, label: 'Back in time', category: 'Food' });
+      await new Promise((r) => setTimeout(r, 4));
+      calls.length = 0;
+      await syncNow();
+    } finally {
+      Date.now = real;
+    }
+    const sent = calls.filter((c) => c.method === 'POST' && c.table === 'transactions').flatMap((c) => c.rows ?? []);
+    expect(sent.map((r) => r.amount)).toEqual([33]);
+    expect([...(server.get('transactions')?.values() ?? [])].some((r) => r.amount === 33)).toBe(true);
+  });
+
+  it('B1: localRev never goes down, even when Date.now does', async () => {
+    const { nextRev } = await import('@/db/schema');
+    const a = nextRev();
+    const real = Date.now;
+    try {
+      Date.now = () => 5;
+      expect(nextRev()).toBeGreaterThan(a);
+    } finally {
+      Date.now = real;
+    }
+  });
+
+  it('B2: one rejected row is quarantined and the rest of the batch still syncs', async () => {
+    await createPlanAndCycle(plan, '2026-10-01');
+    const cycle = (await getDB().cycles.toArray())[0];
+    for (let i = 1; i <= 6; i++) await addSpend(cycle, { amount: i * 10, label: `t${i}`, category: 'Food' });
+    const txns = await getDB().transactions.toArray();
+    const bad = txns.find((t) => t.amount === 40)!;
+    rejectIds.add(bad.id);
+    await settle(); // must not throw
+    const onServer = server.get('transactions')!;
+    expect(onServer.size).toBe(5);
+    expect(onServer.has(bad.id)).toBe(false);
+    const { getSyncFailures } = await import('@/lib/sync');
+    expect((await getSyncFailures()).map((f) => f.id)).toEqual([bad.id]);
+    // the cursor moved on: a later sync with nothing new sends nothing and does not hunt again
+    pushRequests = 0;
+    await settle();
+    expect(pushRequests).toBe(0);
+    // editing the bad row to something valid sends it and clears the failure
+    rejectIds.clear();
+    await updateEntry(bad.id, { amount: 41 });
+    await settle();
+    expect(server.get('transactions')!.has(bad.id)).toBe(true);
+    expect(await getSyncFailures()).toHaveLength(0);
+  });
+
+  it('B2: finding the bad row among N rows costs about 2·log2(N) requests, not N', async () => {
+    await createPlanAndCycle(plan, '2026-10-01');
+    const cycle = (await getDB().cycles.toArray())[0];
+    for (let i = 1; i <= 64; i++) await addSpend(cycle, { amount: i, label: `t${i}`, category: 'Food' });
+    const bad = (await getDB().transactions.toArray()).find((t) => t.amount === 17)!;
+    rejectIds.add(bad.id);
+    pushRequests = 0;
+    await settle();
+    expect(server.get('transactions')!.size).toBe(63);
+    expect(pushRequests).toBeLessThan(30);
+  });
+
+  it('M2: the profile is only PATCHed when the currency changed', async () => {
+    await createPlanAndCycle(plan, '2026-10-01');
+    await settle();
+    expect(patchCount).toBe(1);
+    const cycle = (await getDB().cycles.toArray())[0];
+    await addSpend(cycle, { amount: 5, label: 'x', category: 'Food' });
+    await settle();
+    await settle();
+    expect(patchCount).toBe(1);
+  });
+
+  it('H2: nothing is uploaded until the privacy notice is accepted', async () => {
+    vi.stubGlobal('window', { localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} }, addEventListener: () => {} });
+    await createPlanAndCycle(plan, '2026-10-01');
+    await expect(syncNow()).rejects.toThrow(/Privacy notice/);
+    expect(rpcCalls).toHaveLength(0);
+  });
+
+  it('M5: countUnsynced reflects pending changes and drops to zero after a sync', async () => {
+    const { countUnsynced } = await import('@/lib/sync');
+    await createPlanAndCycle(plan, '2026-10-01');
+    expect(await countUnsynced()).toBeGreaterThan(0);
+    await settle();
+    expect(await countUnsynced()).toBe(0);
   });
 });

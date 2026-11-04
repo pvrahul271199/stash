@@ -152,10 +152,8 @@ create table if not exists public.transactions (
   hour int not null default 0,
   created_at bigint not null
 );
-create index if not exists idx_transactions_user_updated on public.transactions (user_id, updated_at);
+create index if not exists idx_transactions_user_updated_id on public.transactions (user_id, updated_at, id);
 alter table public.transactions add column if not exists version bigint not null default 1;
-create index if not exists idx_transactions_user_date on public.transactions (user_id, txn_date);
-create index if not exists idx_transactions_user_cycle on public.transactions (user_id, cycle_id);
 drop trigger if exists trg_transactions_lww on public.transactions;
 create trigger trg_transactions_lww before update on public.transactions
   for each row execute function public.stash_lww_guard();
@@ -307,8 +305,6 @@ do $$ begin
       add constraint transactions_event_id_fkey foreign key (event_id) references public.events(id) on delete set null;
   end if;
 end $$;
-create index if not exists idx_transactions_user_category on public.transactions (user_id, category_id);
-create index if not exists idx_transactions_user_event on public.transactions (user_id, event_id);
 
 -- ---------- integrity constraints ----------
 -- Added NOT VALID: they bind every new write but don't fail on rows that predate them.
@@ -510,6 +506,74 @@ revoke all on public.feature_data from anon;
 drop policy if exists feature_data_own on public.feature_data;
 create policy feature_data_own on public.feature_data for all
   using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
+
+-- ---------- L1: indexes ----------
+-- The server only ever reads transactions by (user_id, updated_at, id) (the pull's keyset order), so that is
+-- the one general index. Every extra index is paid for on each write and in storage; drop the ones no query uses.
+-- idx_transactions_event is kept (partial, so tiny) only because the events FK is "on delete set null": without
+-- an index on event_id, hard-deleting an event would scan the whole transactions table.
+create index if not exists idx_transactions_user_updated_id on public.transactions (user_id, updated_at, id);
+create index if not exists idx_transactions_event on public.transactions (event_id) where event_id is not null;
+drop index if exists public.idx_transactions_user_updated;
+drop index if exists public.idx_transactions_user_date;
+drop index if exists public.idx_transactions_user_cycle;
+drop index if exists public.idx_transactions_user_category;
+drop index if exists public.idx_transactions_user_event;
+
+-- ---------- H2: real erasure ----------
+-- Soft-deleted rows (tombstones) must reach other devices, then go. This hard-deletes them after 30 days
+-- (the client keeps its own copies for the same period). A device that stays offline for longer than that and
+-- then pushes an old copy would bring a deleted row back: accepted, it is the cost of not keeping tombstones forever.
+--  * categories with base_id set are "the user removed a built-in category" markers, not deleted data: kept.
+--  * a cycle is only purged once nothing references it.
+create or replace function public.purge_deleted_data(p_older_than interval default interval '30 days')
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+  v_cut timestamptz := now() - p_older_than;
+  v_tx bigint; v_ev bigint; v_cat bigint; v_cy bigint; v_pl bigint; v_mut bigint;
+begin
+  delete from public.transactions where deleted_at is not null and deleted_at < v_cut;
+  get diagnostics v_tx = row_count;
+  delete from public.events where deleted_at is not null and deleted_at < v_cut;
+  get diagnostics v_ev = row_count;
+  delete from public.categories where deleted_at is not null and deleted_at < v_cut and base_id is null;
+  get diagnostics v_cat = row_count;
+  delete from public.cycles c where c.deleted_at is not null and c.deleted_at < v_cut
+    and not exists (select 1 from public.transactions t where t.user_id = c.user_id and t.cycle_id = c.id);
+  get diagnostics v_cy = row_count;
+  delete from public.plans where deleted_at is not null and deleted_at < v_cut;
+  get diagnostics v_pl = row_count;
+  delete from public.push_mutations where created_at < now() - interval '14 days';
+  get diagnostics v_mut = row_count;
+  return jsonb_build_object('transactions', v_tx, 'events', v_ev, 'categories', v_cat, 'cycles', v_cy, 'plans', v_pl, 'push_mutations', v_mut);
+end $$;
+revoke all on function public.purge_deleted_data(interval) from public, anon, authenticated;
+
+-- Daily at 21:30 UTC (03:00 IST). Needs the pg_cron extension (Dashboard -> Database -> Extensions); skipped with a notice otherwise.
+do $$ begin
+  if exists (select 1 from pg_available_extensions where name = 'pg_cron') then
+    create extension if not exists pg_cron;
+    perform cron.schedule('stash-purge-deleted', '30 21 * * *', 'select public.purge_deleted_data()');
+  else
+    raise notice 'pg_cron is not available: schedule public.purge_deleted_data() daily some other way';
+  end if;
+exception when others then
+  raise notice 'could not schedule stash-purge-deleted (%): enable pg_cron and re-run', sqlerrm;
+end $$;
+
+-- "Delete my account": removes the signed-in user's auth row; every table above references it with
+-- "on delete cascade", so all of their data goes with it. SECURITY DEFINER because users cannot touch auth.users.
+create or replace function public.delete_my_account()
+returns void language plpgsql security definer set search_path = public, auth as $$
+declare v_uid uuid := auth.uid();
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+  delete from auth.users where id = v_uid;
+end $$;
+revoke all on function public.delete_my_account() from public, anon;
+grant execute on function public.delete_my_account() to authenticated;
 
 -- ============================================================================
 -- CUTOVER (run once): the old username-keyed tables and their data are dropped.

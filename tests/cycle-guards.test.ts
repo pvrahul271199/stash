@@ -1,7 +1,8 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { addSpend, createPlanAndCycle, ensureSeed, updateActivePlan } from '@/db/queries';
+import { addSpend, closeCurrentDay, createPlanAndCycle, ensureSeed, syncCalendar, updateActivePlan } from '@/db/queries';
 import { getDB, openUserDB } from '@/db/schema';
+import { vetToday } from '@/lib/dates';
 
 const store = new Map<string, string>();
 const plan = { income: 80000, bills: 25000, savings: 15000, monthLength: 30 };
@@ -52,5 +53,37 @@ describe('client guards that mirror the server constraints', () => {
     const p = (await getDB().plans.toArray())[0];
     expect(c.totalDays).toBeLessThanOrEqual(366);
     expect(p.income).toBe(0);
+  });
+
+  it('M3: a day cannot be closed before it has begun', async () => {
+    await createPlanAndCycle(plan, '2026-10-01');
+    const c = (await getDB().cycles.toArray())[0];
+    await addSpend(c, { amount: 10, label: 'x', category: 'Food', date: '2026-10-01' } as never);
+    expect(await closeCurrentDay(c.id, '2026-10-01')).not.toBeNull(); // day 1 on day 1
+    expect(await closeCurrentDay(c.id, '2026-10-01')).toBeNull(); // day 2 has not begun
+    expect(await closeCurrentDay(c.id, '2026-09-20')).toBeNull(); // clock set back
+    expect((await getDB().cycles.get(c.id))!.currentDay).toBe(2);
+    expect(await closeCurrentDay(c.id, '2026-10-02')).not.toBeNull();
+  });
+
+  it('M3: a date jumped far into the future is not believed at once', async () => {
+    await createPlanAndCycle(plan, '2026-10-01');
+    const c = (await getDB().cycles.toArray())[0];
+    await syncCalendar('2026-10-01'); // remembers the date
+    await addSpend(c, { amount: 10, label: 'x', category: 'Food' });
+    await syncCalendar('2031-01-01'); // clock jumped five years
+    expect((await getDB().cycles.get(c.id))!.currentDay).toBe(1);
+  });
+
+  it('M3: vetToday accepts normal days, ignores a clock going back, and confirms a stable far date later', () => {
+    const t0 = 1_000_000;
+    expect(vetToday(null, '2026-10-05', t0)).toEqual({ use: true, next: { date: '2026-10-05' } });
+    expect(vetToday({ date: '2026-10-05' }, '2026-10-06', t0).use).toBe(true);
+    expect(vetToday({ date: '2026-10-05' }, '2026-10-01', t0)).toMatchObject({ use: true, next: { date: '2026-10-05' } });
+    const first = vetToday({ date: '2026-10-05' }, '2030-01-01', t0);
+    expect(first.use).toBe(false);
+    expect(vetToday(first.next, '2030-01-01', t0 + 60_000).use).toBe(false);
+    expect(vetToday(first.next, '2030-01-01', t0 + 11 * 60_000)).toMatchObject({ use: true, next: { date: '2030-01-01' } });
+    expect(vetToday(first.next, '2026-10-06', t0 + 60_000)).toMatchObject({ use: true, next: { date: '2026-10-06' } }); // clock fixed
   });
 });

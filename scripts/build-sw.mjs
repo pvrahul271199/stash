@@ -18,7 +18,7 @@ function walk(dir) {
 
 const files = walk(OUT)
   .map((p) => relative(OUT, p).split(sep).join('/'))
-  .filter((f) => f !== 'sw.js' && !f.endsWith('.map') && !f.endsWith('.DS_Store'))
+  .filter((f) => f !== 'sw.js' && f !== '_headers' && !f.endsWith('.map') && !f.endsWith('.DS_Store'))
   .sort();
 
 const hash = createHash('sha1');

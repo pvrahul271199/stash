@@ -1,0 +1,23 @@
+# Cloudflare Pages / Netlify headers file. `next build` copies public/ into out/, so this ships with the site.
+# Other hosts: set the same headers in their config.
+#
+# CSP notes:
+#  - script-src needs 'unsafe-inline' because the Next.js static export inlines its bootstrap (self.__next_f.push).
+#    That weakens XSS protection; moving to hashes/nonces needs a build step that lists the inline script hashes.
+#  - connect-src allows the Supabase project only (auth + PostgREST). Tighten the wildcard to your exact
+#    https://<project-ref>.supabase.co once the project is final.
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://*.supabase.co; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+
+# The service worker must never be served from a stale HTTP cache, or app updates stop arriving.
+/sw.js
+  Cache-Control: no-cache
+
+# Hashed build output never changes.
+/_next/static/*
+  Cache-Control: public, max-age=31536000, immutable

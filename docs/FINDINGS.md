@@ -18,14 +18,14 @@ Status values: `open` · `fixed` · `wontfix` · `by-design` (update this column
 | F-10 | Medium | Budget | Pool clamping is asymmetric (add clamps, delete refunds in full; negative pool is reset to 0) | open |
 | F-11 | Medium | Budget | `updateEntry` ≠ `addSpend` bookkeeping; `day=0` entries | open |
 | F-12 | Medium | Sync | Double push, no mutex, swallowed child-table errors, false "synced", retry drops `user_id` | fixed (2026-11-01) |
-| F-13 | Medium | Budget | "Close the day" has no calendar guard | open |
+| F-13 | Medium | Budget | "Close the day" has no calendar guard | fixed (2026-11-04) |
 | F-14 | Medium | Budget | Changing plan can shorten the cycle below `currentDay`; plan history overwritten | open |
 | F-15 | Medium | Data | Sample data wipes real history and is pushed to the cloud | open |
 | F-16 | Medium | Sync | Deletes are not durable (no tombstones, `days`/`plans` never deleted remotely) | open |
 | F-17 | Low | Product | "Move leftover to savings" is cosmetic | open |
 | F-18 | Low | Product | Currency is a label only; thresholds are not currency-aware | open |
 | F-19 | Low | Product | Active event never expires and tags back-dated spends | open |
-| F-20 | Low | PWA | Service-worker edge cases | open |
+| F-20 | Low | PWA | Service-worker edge cases | partly fixed (2026-11-04): cache-first pages, per-asset precache |
 | F-21 | Low | Schema | `schema.sql` issues (backfill unique violation, claimed FKs absent, `created_at` overwritten) | open |
 | F-22 | Low | Quality | Doc/test drift, duplicated mobile logic, test gaps | open |
 | F-23 | Low | Misc | Small UI/logic nits | open |
@@ -34,6 +34,15 @@ Status values: `open` · `fixed` · `wontfix` · `by-design` (update this column
 | F-26 | Medium | Data | Transactions link to categories/events by name, not id | fixed (2026-11-02) |
 | F-28 | Low | Scale | UUIDv4 keys, per-row RLS function calls, no cache version stamp | fixed (2026-11-02) |
 | F-27 | High | Sync | Client-clock LWW, whole-row overwrites, non-atomic multi-request push, missing DB constraints | fixed (2026-11-02) |
+| F-29 | Blocker | Sync | Push decided "unsynced" by comparing the phone clock (`updatedAt > lastPushedAt`) | fixed (2026-11-04) |
+| F-30 | Blocker | Sync | One server-rejected row (4xx) wedged the user's sync forever | fixed (2026-11-04) |
+| F-31 | High | Privacy | Deleting data was soft only; no account deletion; no consent/notice before sync (DPDP) | fixed in code (2026-11-04); needs the SQL run + pg_cron enabled |
+| F-32 | Medium | PWA | Service worker network-first navigations hang on slow networks | fixed (2026-11-04) |
+| F-33 | Medium | Sync | Unconditional profile PATCH on every sync | fixed (2026-11-04) |
+| F-34 | Medium | Security | No security headers / CSP | fixed in repo (2026-11-04) via `public/_headers`; applies on hosts that read it (Cloudflare Pages, Netlify) |
+| F-35 | Medium | Privacy | Logout left all finances readable on the device | fixed (2026-11-04) |
+| F-36 | Low | Scale | Five unused secondary indexes on `transactions` | fixed (2026-11-04) |
+| F-09b | High | Budget | "Merge accidental cycle" (F-09) | deliberately left as is (owner decision, 2026-11-04) |
 
 ---
 
@@ -286,3 +295,15 @@ Reviewed and **not** built (no current feature needs them; each is a column plus
 4. **F-08/F-10/F-09** fix budget bookkeeping with property tests (add→remove idempotent; catch-up respects real entries; no accidental-merge for normal users).
 5. **F-12/F-16** rebuild sync as a serialized, delta-based queue with soft deletes.
 6. Rest as polish.
+
+
+## 2026-11-04 changes (from the design review)
+
+- **F-29 / B1**: `localRev` (db/schema.ts `nextRev`) is a monotonic counter stamped by Dexie hooks on every real change to the five synced tables; `meta.lastPushedRev` is the push cursor. Wall-clock time is only used inside the counter as a floor, so a clock moved backwards cannot hide an edit. Rows from before v10 use the old `updatedAt` cutoff once.
+- **F-30 / B2**: a 400/409/413/422 from `push_changes` halves the batch (max 40 extra requests per sync) until the bad row is found; it goes to `meta.syncFailures`, the pill says "N items couldn't sync", everything else syncs. Retried when edited again and once per session.
+- **F-31 / H2**: `purge_deleted_data()` + pg_cron (30 days), `delete_my_account()` RPC (deletes the auth user; every table cascades), password-confirmed "Delete my account" in Settings, privacy notice + consent gate (`lib/consent.ts`; `syncNow` refuses without it).
+- **F-13 / M3**: `closeCurrentDay` is capped at today's cycle day; `syncCalendar` does not trust a date more than 45 days ahead of the last accepted one until it has stayed the same for 10 minutes (`vetToday`).
+- **F-35 / M5**: log-out dialog offers "remove my data from this phone" after a final sync, warning if changes could not be uploaded.
+- **F-36 / L1**: only `(user_id, updated_at, id)` plus a tiny partial `event_id` index remain (the events FK is `on delete set null`).
+- Also fixed: the client purge of old tombstones deleted "built-in category removed" markers (`baseId` set), which would bring the built-in back.
+- Not done: B3 (merge button), H1, H3-H5, M-level server work beyond the above, L2/L3. `supabase/schema.sql` must be re-run in the Supabase SQL editor.

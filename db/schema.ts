@@ -29,8 +29,12 @@ export interface Meta {
   lastPayment?: string | null;
   /** Result of the v4 -> v5 data migration (old vs derived pool, counts). */
   migrationReport?: unknown;
-  /** Last local updatedAt cutoff successfully pushed. */
+  /** Legacy dirty cutoff (client ms). Only used for rows written before `localRev` existed. */
   lastPushedAt?: number;
+  /** Highest `localRev` already handed to the server. Rows with a larger `localRev` are unsynced. Never depends on the wall clock. */
+  lastPushedRev?: number;
+  /** Rows the server rejected (4xx). Kept out of the push batch so one bad row cannot wedge sync; retried on edit and once per session. */
+  syncFailures?: Record<string, SyncFailure>;
   /** Per remote table keyset cursor for pulls. */
   pullCursors?: Record<string, { ts: string; id: string } | null>;
   /** Batch sent to `push_changes` whose outcome is unknown (offline / 5xx). Resent with the same id so the retry is idempotent. */
@@ -41,8 +45,19 @@ export interface Meta {
   sampleLoaded?: boolean;
   /** Set on a DB created from the legacy shared `stash` DB. */
   migratedFrom?: string | null;
+  /** Latest device date accepted for closing days, plus a pending suspicious one (see `vetToday`). */
+  calendarSeen?: { date: string; suspect?: { date: string; since: number } | null } | null;
+  /** Currency last written to the server profile; the profile is only PATCHed when this differs. */
+  profileCurrencyPushed?: string | null;
   /** Active display currency (e.g. 'INR', 'USD', 'EUR'). */
   currency?: string | null;
+}
+
+export interface SyncFailure {
+  table: string;
+  id: string;
+  message: string;
+  at: number;
 }
 
 /* ---------- v5 tables (uuid ids, soft delete, derived day rows) ---------- */
@@ -63,6 +78,8 @@ export interface Syncable {
   updatedAt: number;
   /** Tombstone ms; reads must ignore rows where this is set. */
   deletedAt?: number | null;
+  /** Local-only monotonic revision stamped on every real change; decides what still needs pushing (see `nextRev`). */
+  localRev?: number;
 }
 
 export interface Plan extends Syncable {
@@ -177,7 +194,37 @@ export interface Entry {
 export const PAYMENT_MODES = ['UPI', 'Card', 'Cash'] as const;
 export type PaymentMode = (typeof PAYMENT_MODES)[number];
 
-export const SCHEMA_VERSION = 9;
+export const SCHEMA_VERSION = 10;
+
+/* ---------- local revisions ----------
+ * "What still needs pushing" must not depend on the phone's clock: a clock that moves backwards would
+ * make new edits look older than the last push and they would be skipped silently. `nextRev` is a hybrid
+ * counter, max(previous + 1, Date.now()), so it never goes down within a device even if the clock does.
+ * It is re-seeded from the database on open (highest stored localRev / lastPushedRev). */
+let lastRev = 0;
+export function nextRev(): number {
+  lastRev = Math.max(lastRev + 1, Date.now());
+  return lastRev;
+}
+export function seedRev(n: number): void {
+  if (n > lastRev) lastRev = n;
+}
+
+/** Tables whose rows sync; each gets `localRev` stamped by Dexie hooks. */
+export const SYNCED_TABLES = ['plans', 'cycles', 'transactions', 'cats', 'evts'] as const;
+/** Fields that are local caches (written by recompute): changing only these is not a user edit. */
+const CACHE_FIELDS = new Set(['pool', 'fromSavingsTotal', 'calcVersion', 'localRev']);
+let stampingOff = false;
+
+/** Runs `fn` without stamping `localRev`: for writing server state we already have (applyRemote). */
+export async function withoutRevStamp<T>(fn: () => Promise<T>): Promise<T> {
+  stampingOff = true;
+  try {
+    return await fn();
+  } finally {
+    stampingOff = false;
+  }
+}
 
 export class StashDB extends Dexie {
   users!: Table<UserRecord, string>;
@@ -226,6 +273,34 @@ export class StashDB extends Dexie {
       .upgrade((tx) => migrateTxnLinks(tx));
     // v9: per-row server version + last-synced snapshot (optimistic concurrency, field-level merge).
     this.version(9).stores({ syncBase: 'key' });
+    // v10: monotonic localRev on every synced table decides what is unsynced (replaces the clock-based updatedAt cutoff).
+    this.version(10).stores({
+      plans: 'id, updatedAt, localRev',
+      cycles: 'id, startDate, updatedAt, localRev',
+      transactions: 'id, cycleId, txnDate, [cycleId+txnDate], type, event, categoryId, eventId, updatedAt, localRev',
+      cats: 'id, name, updatedAt, baseId, localRev',
+      evts: 'id, name, updatedAt, localRev',
+    });
+
+    for (const name of SYNCED_TABLES) {
+      const t = this.table(name) as Table<Record<string, unknown>, string>;
+      t.hook('creating', (_key, obj) => {
+        if (!stampingOff) obj.localRev = nextRev();
+      });
+      t.hook('updating', (mods) => {
+        if (stampingOff) return undefined;
+        return Object.keys(mods).some((k) => !CACHE_FIELDS.has(k)) ? { localRev: nextRev() } : undefined;
+      });
+    }
+    this.on('ready', async (vip) => {
+      const db = vip as StashDB;
+      let max = (await db.meta.get('main'))?.lastPushedRev ?? 0;
+      for (const name of SYNCED_TABLES) {
+        const top = (await db.table(name).orderBy('localRev').last()) as { localRev?: number } | undefined;
+        if (top?.localRev && top.localRev > max) max = top.localRev;
+      }
+      seedRev(max);
+    });
   }
 }
 

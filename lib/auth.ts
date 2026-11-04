@@ -1,7 +1,8 @@
 'use client';
 import { useSyncExternalStore } from 'react';
+import Dexie from 'dexie';
 import { getSupabase } from './supabaseClient';
-import { openUserDB } from '@/db/schema';
+import { dbNameFor, openUserDB } from '@/db/schema';
 import { initDB } from '@/db/migrate';
 
 export const EMAIL_DOMAIN = 'stash.app';
@@ -144,7 +145,23 @@ export async function logIn(username: string, password: string): Promise<Result>
   }
 }
 
-export async function logOut(): Promise<void> {
+export interface LogOutOptions {
+  /** Also delete this user's database from the device (shared / family phones). */
+  removeLocalData?: boolean;
+}
+
+/**
+ * How many changes on this device the cloud does not have yet. Tries one last sync first, so the answer
+ * is only non-zero when the changes really cannot be uploaded (offline, or rejected by the server).
+ */
+export async function unsyncedBeforeLogout(): Promise<number> {
+  const { countUnsynced, syncNow } = await import('./sync');
+  await syncNow().catch(() => {});
+  return countUnsynced().catch(() => 0);
+}
+
+export async function logOut(opts: LogOutOptions = {}): Promise<void> {
+  const uid = state.uid;
   const sb = getSupabase();
   try {
     await sb?.auth.signOut({ scope: 'local' });
@@ -156,7 +173,36 @@ export async function logOut(): Promise<void> {
   } catch {
     /* ignore */
   }
-  await dropToGuest();
+  await dropToGuest(); // opens the guest DB, which closes the user's handle
+  if (opts.removeLocalData && uid) {
+    try {
+      await Dexie.delete(dbNameFor(uid));
+    } catch {
+      /* best effort: the data is still protected by the browser profile */
+    }
+  }
+}
+
+/**
+ * Permanently erases the account and every row it owns on the server (DPDP erasure), then removes the local
+ * copy. Asks for the password again first, so a borrowed unlocked phone cannot do it. The server side is the
+ * `delete_my_account()` function in supabase/schema.sql (deleting the auth user cascades to all tables).
+ */
+export async function deleteAccount(password: string): Promise<Result> {
+  const sb = getSupabase();
+  if (!sb || state.status !== 'signedIn' || !state.username) return { ok: false, error: 'You are not signed in' };
+  try {
+    const again = await sb.auth.signInWithPassword({ email: usernameToEmail(state.username), password });
+    if (again.error) return { ok: false, error: friendly(again.error.message) };
+    const { error } = await sb.rpc('delete_my_account');
+    if (error) return { ok: false, error: 'Could not delete the account. Check your connection and try again.' };
+  } catch (e) {
+    return { ok: false, error: friendly(e instanceof Error ? e.message : String(e)) };
+  }
+  const { clearSyncConsent } = await import('./consent');
+  clearSyncConsent();
+  await logOut({ removeLocalData: true });
+  return { ok: true };
 }
 
 export async function getAccessToken(): Promise<string | null> {

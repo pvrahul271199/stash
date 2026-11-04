@@ -2,6 +2,8 @@
 import { useState } from 'react';
 import { BackIcon, GhostButton, IconButton, PrimaryButton } from '../ui/Button';
 import { logIn, signUp, validateUsername } from '@/lib/auth';
+import { acceptSyncConsent, hasSyncConsent } from '@/lib/consent';
+import { PrivacyNotice } from '../ui/PrivacyNotice';
 
 export function AuthScreen({
   initialMode = 'login',
@@ -17,12 +19,13 @@ export function AuthScreen({
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [agreed, setAgreed] = useState(hasSyncConsent());
 
   const name = username.trim().toLowerCase();
   const userHint = name ? validateUsername(name) : null;
 
   async function submit() {
-    if (busy) return;
+    if (busy || !agreed) return;
     setBusy(true);
     setError(null);
     const res = mode === 'signup' ? await signUp(name, password) : await logIn(name, password);
@@ -31,6 +34,7 @@ export function AuthScreen({
       setError(res.error);
       return;
     }
+    acceptSyncConsent(); // recorded only after the account exists, i.e. before the first sync can run
     onDone(mode, name);
   }
 
@@ -88,6 +92,21 @@ export function AuthScreen({
               from Settings for a safe copy.
             </p>
           )}
+          <details className="rounded-key border border-line bg-white px-3 py-2">
+            <summary className="cursor-pointer text-[13px] font-medium text-ink">How your data is used</summary>
+            <div className="mt-2">
+              <PrivacyNotice />
+            </div>
+          </details>
+          <label className="flex items-start gap-2.5 text-[13px] text-soft">
+            <input
+              type="checkbox"
+              checked={agreed}
+              onChange={(e) => setAgreed(e.target.checked)}
+              className="mt-0.5 h-4 w-4 shrink-0"
+            />
+            <span>I have read how my data is used and agree to it being backed up to my account.</span>
+          </label>
           {error && (
             <p role="alert" className="text-[13px] text-warm">
               {error}
@@ -97,7 +116,7 @@ export function AuthScreen({
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <PrimaryButton disabled={busy || !name || !password} onClick={() => void submit()}>
+        <PrimaryButton disabled={busy || !name || !password || !agreed} onClick={() => void submit()}>
           {busy ? 'Please wait…' : mode === 'signup' ? 'Create account' : 'Log in'}
         </PrimaryButton>
         <GhostButton

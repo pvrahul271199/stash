@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { PrimaryButton, SecondaryButton } from '../ui/Button';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
+import { DeleteAccountDialog } from '../ui/DeleteAccountDialog';
 import { SyncStatusPill } from '../ui/SyncStatusPill';
 import {
   addCategory,
@@ -66,7 +67,7 @@ export function UserTab({
 
   const canMerge = useCanMergeCycle();
   const [merging, setMerging] = useState(false);
-  const [confirm, setConfirm] = useState<'delete' | 'sample' | null>(null);
+  const [confirm, setConfirm] = useState<'delete' | 'sample' | 'account' | null>(null);
   const auth = useAuth();
   const username = auth.username ?? '';
 
@@ -570,6 +571,15 @@ export function UserTab({
         >
           Delete all data and start over
         </button>
+        {auth.status === 'signedIn' && (
+          <button
+            type="button"
+            onClick={() => setConfirm('account')}
+            className="min-h-[48px] w-full rounded-btn border border-warm/30 text-[14px] font-semibold text-warm transition-colors hover:bg-warmBg active:scale-[0.99]"
+          >
+            Delete my account
+          </button>
+        )}
       </section>
 
       {removingCat && (
@@ -620,6 +630,16 @@ export function UserTab({
           onConfirm={async () => {
             setConfirm(null);
             await withLoading('Deleting your data…', deleteAllData);
+            onDeleted();
+          }}
+        />
+      )}
+
+      {confirm === 'account' && (
+        <DeleteAccountDialog
+          onCancel={() => setConfirm(null)}
+          onDone={() => {
+            setConfirm(null);
             onDeleted();
           }}
         />

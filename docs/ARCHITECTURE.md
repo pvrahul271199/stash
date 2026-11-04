@@ -9,7 +9,7 @@ Browser (static export, no server)
  │    └─ writes : async fns in db/queries.ts (Dexie transactions) ─► then push/scheduleSync
  ├─ Zustand    : sheet/ui state, toast, pwa-waiting-SW, currency
  ├─ localStorage / sessionStorage : username, avatar theme, currency, supabase-config, last-synced-at
- └─ Service worker (prod only): precache + network-first navigations + cache-first assets
+ └─ Service worker (prod only): precache + cache-first navigations + cache-first assets
                 │
                 ▼ (fetch, anon key, no auth header besides the key itself)
         Supabase PostgREST  /rest/v1/stash_*   (RLS = allow all)
@@ -21,7 +21,7 @@ One database **per user**: `stash-<auth uid>`; guest = `stash-default` (never sy
 
 | Table | Key | Notes |
 |---|---|---|
-| `users`, `meta` | `userId`, `'main'` | profile mirror; lastUsedLabel, activeEvent, lastPayment, sync cursors (`lastPushedAt`, `pullCursors`), `guestClaimPending`, `migrationReport` |
+| `users`, `meta` | `userId`, `'main'` | profile mirror; lastUsedLabel, activeEvent, lastPayment, sync cursors (`lastPushedRev`, legacy `lastPushedAt`, `pullCursors`), `syncFailures`, `calendarSeen`, `profileCurrencyPushed`, `guestClaimPending`, `migrationReport` |
 | `plans` | `id` | income, bills, savings, monthLength, items, currency |
 | `cycles` | `id` | startDate, totalDays, planAmount, `currentDay` (cursor), `estimatedDays[]`; `pool`/`fromSavingsTotal` are caches written by `recompute` |
 | `transactions` | `id` | cycleId\|null, `txnDate`, amount, type, subtype, label, event, payment, note, fromSavings, adjustsPool, isEstimate, hour, createdAt. Day is derived (`dayOfTxn`) |
@@ -71,7 +71,7 @@ Every money write changes a transaction/cycle and calls `recompute(db, cycleId)`
 ## 6. Sync design (`lib/sync.ts`)
 
 - Enabled only while signed in. Queries call only `requestSync()` (debounced 300 ms); `syncNow()` serialises push then pull on one promise chain.
-- Push: rows with `updatedAt` in `(meta.lastPushedAt, now-1]` and a real field change since their `syncBase`, tombstones included, parents first (plans, cycles, categories, events, transactions), sent as 500-row batches to the `push_changes` RPC (one Postgres transaction each). The cursor advances only if every batch succeeded. See "Versioned, atomic push" below.
+- Push: rows with `localRev > meta.lastPushedRev` (a local counter that only goes up; stamped by Dexie hooks, see `nextRev` in `db/schema.ts`) and a real field change since their `syncBase`, tombstones included, parents first (plans, cycles, categories, events, transactions), sent as 500-row batches to the `push_changes` RPC (one Postgres transaction each). The cursor advances only if every batch succeeded or was quarantined: a batch the server rejects as bad data (400/409/413/422) is halved until the offending row is found, which is recorded in `meta.syncFailures` and skipped. See "Versioned, atomic push" below.
 - Pull: per table keyset `(updated_at, id)` pages of 1000, applied by a field-level three-way merge against the last synced row (`mergeRows`); `currentDay` merges as max; touched cycles are re-derived. Pull never clears local data.
 - 401: refresh the session once and retry. Offline: stays dirty, retried on `online`/next write. Errors report `'error'`, never `'synced'`.
 - Deletes are tombstones both ways, purged locally after 30 days. The guest DB is deleted after the first successful sync following a claim.
@@ -84,7 +84,7 @@ Every money write changes a transaction/cycle and calls `recompute(db, cycleId)`
 - **Full pull is paginated.** `pullTable` (`lib/sync.ts`) requests `PAGE = 1000` rows per call and loops until a page comes back short, so PostgREST's 1000-row cap cannot truncate a new device's history.
 - **Cursor is `(updated_at, id)`.** Each pull's first page starts 5 minutes behind the stored cursor (`PULL_OVERLAP_MS`) so rows from slow transactions that committed late are still seen; re-read rows are skipped via their version. Rows are ordered `updated_at.asc,id.asc` and the next page filters `updated_at > ts OR (updated_at = ts AND id > lastId)`. Rows committed in one transaction share `now()`, and the id tiebreak stops a plain `>` from skipping them. Cursors persist in `meta.pullCursors` only after every table succeeded.
 - **Client clock is clamped server-side.** `stash_clamp_client_ts` caps `client_updated_at` at `now() + 60 s`. It runs in `stash_lww_guard` (which fires first, as `trg_*_lww` sorts before `trg_*_touch`) and in `stash_touch`. A phone with its clock set far ahead can therefore win a conflict by at most one minute. It clamps instead of rejecting, so that device's queued offline writes still sync.
-- **One write path.** Mutations call only `requestSync()` (300 ms debounce, serialized through one promise chain in `syncNow`), and each sync is a delta push of rows changed since `lastPushedAt`. The old double `push()` + `scheduleSync()` is gone (F-12).
+- **One write path.** Mutations call only `requestSync()` (300 ms debounce, serialized through one promise chain in `syncNow`), and each sync is a delta push of rows changed since `lastPushedRev`. The old double `push()` + `scheduleSync()` is gone (F-12).
 
 ### Category / event links (2026-11-02, Dexie v8)
 
@@ -122,7 +122,7 @@ Replaces "whole-row last-write-wins on the client clock" and "one PostgREST requ
 ## 7. PWA
 
 - `public/sw.js` is copied to `out/sw.js`; `scripts/build-sw.mjs` injects a content hash version and the precache list of every file in `out/`. Registered only when `NODE_ENV==='production'`.
-- Navigations: network-first with cache fallback (`/`). Same-origin assets: cache-first. Cross-origin (Supabase) bypasses the SW.
+- Navigations: cache-first (the precached page matches the precached JS of that version; updates arrive via the worker update + Reload toast). Precache is per-asset so one failed request does not abort the install. Same-origin assets: cache-first. Cross-origin (Supabase) bypasses the SW.
 - New SW waits; `PWAManager` shows a "Reload" toast that posts `SKIP_WAITING`.
 - Desktop shows a 380×780 phone frame (CSS); ≤420px or standalone fills the screen.
 

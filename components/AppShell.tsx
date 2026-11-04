@@ -16,6 +16,9 @@ import { InsightsTab } from './screens/InsightsTab';
 import { UserTab } from './screens/UserTab';
 import { PWAManager } from './pwa/PWAManager';
 import { LoadingScreen } from './ui/LoadingScreen';
+import { LogoutDialog } from './ui/LogoutDialog';
+import { ConsentScreen } from './screens/ConsentScreen';
+import { acceptSyncConsent, hasSyncConsent } from '@/lib/consent';
 import {
   applyCatchUp,
   createPlanAndCycle,
@@ -64,6 +67,8 @@ export function AppShell() {
   const [showDemo, setShowDemo] = useState(false);
   const [startDate, setStartDate] = useState(() => todayISO());
   const [catchUpGap, setCatchUpGap] = useState<PendingCatchUp | null>(null);
+  const [askLogout, setAskLogout] = useState(false);
+  const [consented, setConsented] = useState(() => hasSyncConsent());
 
   const auth = useAuth();
   const [restoring, setRestoring] = useState(false);
@@ -72,12 +77,12 @@ export function AppShell() {
   // Returning user on a fresh device/reload with nothing local yet: pull before deciding what to show.
   const hasCycle = snap ? !!snap.cycle : null;
   useEffect(() => {
-    if (!ready || hasCycle !== false || auth.status !== 'signedIn' || !auth.uid) return;
+    if (!ready || !consented || hasCycle !== false || auth.status !== 'signedIn' || !auth.uid) return;
     if (restoredFor.current === auth.uid) return;
     restoredFor.current = auth.uid;
     setRestoring(true);
     void restoreFromCloud().finally(() => setRestoring(false));
-  }, [ready, hasCycle, auth.status, auth.uid]);
+  }, [ready, consented, hasCycle, auth.status, auth.uid]);
 
   const runSync = useCallback(async () => {
     const gap = await syncCalendar(todayISO());
@@ -94,9 +99,14 @@ export function AppShell() {
       .then(() => setReady(true));
   }, [runSync]);
 
+  // The auth screen records consent when an account is created or logged into: pick that up.
   useEffect(() => {
-    if (ready && auth.status === 'signedIn') requestSync();
-  }, [ready, auth.status, auth.uid]);
+    setConsented(hasSyncConsent());
+  }, [auth.status, auth.uid]);
+
+  useEffect(() => {
+    if (ready && auth.status === 'signedIn' && consented) requestSync();
+  }, [ready, auth.status, auth.uid, consented]);
 
   useEffect(() => {
     const onVis = () => {
@@ -232,14 +242,7 @@ export function AppShell() {
                   });
                   setFlow('changePlan');
                 }}
-                onSwitchUser={() => {
-                  void withLoading('Signing out…', logOut).then(() => {
-                    setDraft(null);
-                    setForceWelcome(true);
-                    setFlow('welcome');
-                    setTab('today');
-                  });
-                }}
+                onSwitchUser={() => setAskLogout(true)}
                 onLogIn={() => setFlow('auth')}
                 onSampleDone={() => setTab('insights')}
                 onDeleted={() => {
@@ -260,12 +263,7 @@ export function AppShell() {
               onSwitchUser={() => {
                 setSheet('none');
                 if (auth.status === 'signedIn') {
-                  void withLoading('Signing out…', logOut).then(() => {
-                    setDraft(null);
-                    setForceWelcome(true);
-                    setFlow('welcome');
-                    setTab('today');
-                  });
+                  setAskLogout(true);
                 } else {
                   setFlow('auth');
                 }
@@ -352,6 +350,29 @@ export function AppShell() {
         <div className="absolute inset-0 z-[60] bg-bg">
           <LoadingScreen message={busyMessage} />
         </div>
+      )}
+      {ready && auth.status === 'signedIn' && !consented && (
+        <ConsentScreen
+          onAccept={() => {
+            acceptSyncConsent();
+            setConsented(true);
+          }}
+          onDecline={() => setAskLogout(true)}
+        />
+      )}
+      {askLogout && (
+        <LogoutDialog
+          onCancel={() => setAskLogout(false)}
+          onLogout={(removeLocalData) => {
+            setAskLogout(false);
+            void withLoading('Signing out…', () => logOut({ removeLocalData })).then(() => {
+              setDraft(null);
+              setForceWelcome(true);
+              setFlow('welcome');
+              setTab('today');
+            });
+          }}
+        />
       )}
       {showDemo && <Demo onClose={() => setShowDemo(false)} />}
       <Toast />

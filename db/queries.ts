@@ -30,7 +30,7 @@ import {
   type PlanInput,
 } from '@/lib/budget';
 import { resolveLabel } from '@/lib/suggestions';
-import { addDays, calendarDay, dateOfDay, daysBetween, todayISO } from '@/lib/dates';
+import { addDays, calendarDay, dateOfDay, daysBetween, todayISO, vetToday } from '@/lib/dates';
 import { DEFAULT_SAMPLE_PLAN, SAMPLE_DAYS, generateSampleSpends } from '@/lib/sample';
 import { buildCSV, type CsvRow } from '@/lib/csv';
 import { resolveCategories, validateName, type ResolvedCategory } from '@/lib/categories';
@@ -465,6 +465,11 @@ export async function updateActivePlan(p: PlanInput): Promise<void> {
   requestSync();
 }
 
+/** How many rows the server rejected and sync has set aside (shown as "N items couldn't sync"). */
+export function useSyncFailureCount(): number {
+  return useLiveQuery(async () => Object.keys((await getDB().meta.get('main'))?.syncFailures ?? {}).length, [], 0);
+}
+
 export function useCanMergeCycle(): boolean {
   const count = useLiveQuery(async () => (await getDB().cycles.toArray()).filter(alive).length, []);
   return (count ?? 0) > 1;
@@ -676,11 +681,13 @@ export async function removeEntry(id: string): Promise<void> {
 
 /* ---------- closing days ---------- */
 
-export async function closeCurrentDay(cycleId: string): Promise<CloseResult | null> {
+/** A day can only be closed once it has begun: closing is capped at today's cycle day, so a clock moved backwards cannot close tomorrow. */
+export async function closeCurrentDay(cycleId: string, onDate: string = todayISO()): Promise<CloseResult | null> {
   const db = getDB();
   const res = await db.transaction('rw', [db.cycles, db.transactions, db.dayRows], async () => {
     const c = await db.cycles.get(cycleId);
     if (!c || c.deletedAt != null || c.currentDay > c.totalDays) return null;
+    if (c.currentDay > calendarDay(c.startDate, onDate, c.totalDays)) return null;
     const date = dateOfDay(c.startDate, c.currentDay);
     const today = (await db.transactions.where('[cycleId+txnDate]').equals([cycleId, date]).toArray()).filter(alive);
     const r = closeDay(c, spentToday(today));
@@ -703,7 +710,12 @@ export interface PendingCatchUp {
 export async function syncCalendar(today: string = todayISO()): Promise<PendingCatchUp | null> {
   const db = getDB();
   let changed = false;
-  const result = await db.transaction('rw', [db.cycles, db.transactions, db.dayRows], async () => {
+  const result = await db.transaction('rw', [db.cycles, db.transactions, db.dayRows, db.meta], async () => {
+    // A date far in the future is not believed at once: closing days is permanent.
+    const meta = await db.meta.get('main');
+    const vet = vetToday(meta?.calendarSeen, today, Date.now());
+    if (meta && vet.next !== meta.calendarSeen) await db.meta.update('main', { calendarSeen: vet.next });
+    if (!vet.use) return null;
     const c = await latestCycle(db);
     if (!c || c.currentDay > c.totalDays) return null;
     const cal = calendarDay(c.startDate, today, c.totalDays);

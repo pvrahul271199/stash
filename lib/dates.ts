@@ -100,3 +100,29 @@ export function formatMonthYear(year: number, month: number): string {
 export function cycleEndDate(startDate: string, totalDays: number): string {
   return dateOfDay(startDate, totalDays);
 }
+
+/** A forward jump of the device date bigger than this is treated as a possible clock error. */
+export const MAX_PLAUSIBLE_JUMP_DAYS = 45;
+/** A suspicious date is accepted once it has stayed the same for this long (a mis-set clock is usually fixed quickly). */
+export const SUSPECT_CONFIRM_MS = 10 * 60 * 1000;
+
+export interface CalendarSeen {
+  /** Latest device date that was accepted. */
+  date: string;
+  /** A suspicious later date, and the clock reading when it was first seen. */
+  suspect?: { date: string; since: number } | null;
+}
+
+/**
+ * Decides whether `today` can be used to close days automatically. Closing a day is permanent, so a phone whose
+ * date was moved far forward must not be believed straight away. Returns the date to use (null = don't act yet)
+ * and the bookkeeping to store.
+ */
+export function vetToday(seen: CalendarSeen | null | undefined, today: string, nowMs: number): { use: boolean; next: CalendarSeen } {
+  if (!seen) return { use: true, next: { date: today } };
+  if (today <= seen.date) return { use: true, next: seen }; // same day, or the clock went back (nothing new closes)
+  if (daysBetween(seen.date, today) <= MAX_PLAUSIBLE_JUMP_DAYS) return { use: true, next: { date: today } };
+  const s = seen.suspect;
+  if (s && s.date === today && nowMs - s.since >= SUSPECT_CONFIRM_MS) return { use: true, next: { date: today } };
+  return { use: false, next: { date: seen.date, suspect: s && s.date === today ? s : { date: today, since: nowMs } } };
+}

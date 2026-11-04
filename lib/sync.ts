@@ -1,10 +1,11 @@
 import Dexie from 'dexie';
-import { getDB, dbNameFor, GUEST_UID, type CategoryRow, type Cycle, type Plan, type StashDB, type StashEvent, type SyncBase, type Txn } from '@/db/schema';
+import { getDB, dbNameFor, GUEST_UID, nextRev, withoutRevStamp, type CategoryRow, type Cycle, type Plan, type StashDB, type StashEvent, type SyncBase, type SyncFailure, type Txn } from '@/db/schema';
 import { getAuth, getAccessToken } from './auth';
 import { getSupabase, supabaseEnv } from './supabaseClient';
 import { decodeBase64Username, encodeUsernameToBase64 } from './user';
 import { reportSyncProgress } from './syncState';
 import { getStoredCurrencyCode } from './currency';
+import { hasSyncConsent } from './consent';
 
 export { decodeBase64Username, encodeUsernameToBase64 };
 
@@ -377,6 +378,36 @@ async function recordPushed(db: StashDB, payload: Payload, versions: Record<stri
     }
   }
   await db.syncBase.bulkPut(bases);
+  await clearFailures(db, bases.map((b) => b.key));
+}
+
+/* ---------- quarantine (B2) ---------- */
+
+/** HTTP statuses that mean "the server rejected this data" (constraint, malformed, too large), as opposed to auth / config / outage. */
+const ROW_ERROR_STATUSES = new Set([400, 409, 413, 422]);
+/** Upper bound on extra requests one sync spends hunting for a bad row. */
+const MAX_SPLIT_REQUESTS = 40;
+
+const isRowError = (e: unknown): e is SyncError => e instanceof SyncError && e.status != null && ROW_ERROR_STATUSES.has(e.status);
+
+async function recordFailure(db: StashDB, ref: Ref, e: SyncError): Promise<void> {
+  const meta = await getMeta(db);
+  const failures = { ...(meta.syncFailures ?? {}) };
+  failures[baseKey(ref.name, ref.id)] = { table: ref.name, id: ref.id, message: e.message.slice(0, 160), at: Date.now() };
+  await db.meta.update('main', { syncFailures: failures });
+}
+
+async function clearFailures(db: StashDB, keys: string[]): Promise<void> {
+  const failures = (await getMeta(db)).syncFailures;
+  if (!failures || !keys.some((k) => k in failures)) return;
+  const next = { ...failures };
+  for (const k of keys) delete next[k];
+  await db.meta.update('main', { syncFailures: next });
+}
+
+/** Rows the server refused. They stay on the device and are listed in the UI; everything else keeps syncing. */
+export async function getSyncFailures(db: StashDB = getDB()): Promise<SyncFailure[]> {
+  return Object.values((await getMeta(db)).syncFailures ?? {});
 }
 
 /** Gives a row that lost a unique-name race a free "Name (n)"; its id (and so every link to it) is unchanged. */
@@ -395,7 +426,7 @@ async function renameForClash(db: StashDB, name: 'categories' | 'events', id: st
  * stored as `meta.pendingPush` first, so if the response is lost the same mutation id is resent and the
  * server replays its stored result instead of applying it twice.
  */
-async function pushRefs(db: StashDB, refs: Ref[]): Promise<number> {
+async function pushBatch(db: StashDB, refs: Ref[]): Promise<number> {
   for (let attempt = 0; attempt < 8; attempt++) {
     const { payload, items } = await buildPayload(db, refs);
     if (!items.length) return 0;
@@ -425,6 +456,27 @@ async function pushRefs(db: StashDB, refs: Ref[]): Promise<number> {
   throw new SyncError('Sync could not settle after repeated conflicts', 'server');
 }
 
+/**
+ * `pushBatch`, but a batch the server rejects as bad data is halved until the offending row is found.
+ * That row is quarantined (`meta.syncFailures`) and the rest of the batch goes through, so one invalid
+ * row can no longer block a user's sync forever.
+ */
+async function pushRefs(db: StashDB, refs: Ref[], budget = { left: MAX_SPLIT_REQUESTS }): Promise<number> {
+  try {
+    return await pushBatch(db, refs);
+  } catch (e) {
+    if (!isRowError(e)) throw e;
+    if (refs.length === 1) {
+      await recordFailure(db, refs[0], e);
+      return 0;
+    }
+    if (budget.left-- <= 0) throw e;
+    const mid = refs.length >> 1;
+    const a = await pushRefs(db, refs.slice(0, mid), budget);
+    return a + (await pushRefs(db, refs.slice(mid), budget));
+  }
+}
+
 /** Resends a batch whose outcome is unknown. Returns how many rows it covered. */
 async function resendPending(db: StashDB): Promise<number> {
   const pending = (await getMeta(db)).pendingPush;
@@ -442,20 +494,70 @@ async function resendPending(db: StashDB): Promise<number> {
   return Object.values(pending.payload).reduce((n, rows) => n + rows.length, 0);
 }
 
-/** Pushes every row changed since `meta.lastPushedAt` (tombstones included), parents first. */
+/** Quarantined rows are retried once per app session (and whenever they are edited again). */
+const retriedFailures = new Set<string>();
+
+/**
+ * Finds every unsynced row. "Unsynced" = `localRev > meta.lastPushedRev`. `localRev` is a local counter that
+ * only goes up (db/schema.ts `nextRev`), so a phone clock that moves backwards cannot hide an edit.
+ * Rows written before localRev existed fall back to the old updatedAt cutoff, once.
+ */
+async function scanDirty(db: StashDB, cutoff: number): Promise<{ refs: Ref[]; maxRev: number }> {
+  const meta = await getMeta(db);
+  const sinceRev = meta.lastPushedRev ?? 0;
+  const legacy = meta.lastPushedRev == null;
+  const sinceAt = meta.lastPushedAt ?? 0;
+  const refs: Ref[] = [];
+  let maxRev = sinceRev;
+  const seen = new Set<string>();
+  // One read transaction over every table: a write that already took its rev has either committed
+  // (and is seen) or is still running (and this read waits for it), so no lower rev can appear later.
+  await db.transaction('r', [db.plans, db.cycles, db.cats, db.evts, db.transactions], async () => {
+    for (const name of TABLE_ORDER) {
+      const table = db[MAPPERS[name].local] as unknown as Dexie.Table<{ id: string; updatedAt: number; localRev?: number }, string>;
+      const dirty = await table.where('localRev').above(sinceRev).toArray();
+      if (legacy) dirty.push(...(await table.where('updatedAt').above(sinceAt).and((r) => r.localRev == null && r.updatedAt <= cutoff).toArray()));
+      for (const r of dirty) {
+        if (seen.has(baseKey(name, r.id))) continue;
+        seen.add(baseKey(name, r.id));
+        refs.push({ name, id: r.id });
+        if (r.localRev != null && r.localRev > maxRev) maxRev = r.localRev;
+      }
+    }
+  });
+  return { refs, maxRev };
+}
+
+/** Changes on this device the server does not have yet (unsynced rows plus rows it refused). */
+export async function countUnsynced(db: StashDB = getDB()): Promise<number> {
+  const { refs } = await scanDirty(db, Date.now() - 1);
+  const keys = new Set(refs.map((r) => baseKey(r.name, r.id)));
+  for (const k of Object.keys((await getMeta(db)).syncFailures ?? {})) keys.add(k);
+  // a dirty row identical to its server copy (e.g. just pulled) is not a real pending change
+  let n = 0;
+  for (const k of keys) {
+    const [name, id] = k.split('/') as [TableName, string];
+    if ((await buildPayload(db, [{ name, id }])).items.length) n++;
+  }
+  return n;
+}
+
+/** Pushes every unsynced row (tombstones included), parents first. */
 export async function pushDirty(db: StashDB): Promise<number> {
   let sent = await resendPending(db);
   const meta = await getMeta(db);
-  const since = meta.lastPushedAt ?? 0;
   const cutoff = Date.now() - 1;
-  const refs: Ref[] = [];
-  for (const name of TABLE_ORDER) {
-    const table = db[MAPPERS[name].local] as unknown as Dexie.Table<{ id: string; updatedAt: number }, string>;
-    const dirty = await table.where('updatedAt').above(since).and((r) => r.updatedAt <= cutoff).toArray();
-    for (const r of dirty) refs.push({ name, id: r.id });
+  const { refs, maxRev } = await scanDirty(db, cutoff);
+  if (!retriedFailures.has(db.name)) {
+    retriedFailures.add(db.name);
+    const seen = new Set(refs.map((r) => baseKey(r.name, r.id)));
+    for (const f of Object.values(meta.syncFailures ?? {})) {
+      const name = f.table as TableName;
+      if (!seen.has(baseKey(name, f.id))) refs.push({ name, id: f.id });
+    }
   }
   for (let i = 0; i < refs.length; i += PUSH_CHUNK) sent += await pushRefs(db, refs.slice(i, i + PUSH_CHUNK));
-  await db.meta.update('main', { lastPushedAt: cutoff });
+  await db.meta.update('main', { lastPushedRev: maxRev, lastPushedAt: cutoff });
   return sent;
 }
 
@@ -525,7 +627,7 @@ export async function applyRemote(db: StashDB, rows: RemoteRows): Promise<Set<st
           const base = await db.syncBase.get(key);
           if (base && version != null && version <= base.version) continue; // already have this (our own push, or an old page)
           const local = await table.get(r.id);
-          let next: Record<string, unknown> & { id: string; updatedAt: number };
+          let next: Record<string, unknown> & { id: string; updatedAt: number; localRev?: number };
           if (!local) {
             next = m.toLocal(r) as never;
           } else {
@@ -533,13 +635,16 @@ export async function applyRemote(db: StashDB, rows: RemoteRows): Promise<Set<st
             const dirty = !sameFields(merged, r) || norm('deleted_at', merged.deleted_at) !== norm('deleted_at', r.deleted_at);
             next = m.toLocal({ ...r, ...merged } as Remote) as never;
             next.updatedAt = dirty ? Math.max(Date.now(), local.updatedAt) : Number(merged.client_updated_at);
+            if (dirty) next.localRev = nextRev(); // still differs from the server: the next push sends it
             if (name === 'cycles') {
               const c = next as unknown as Cycle;
               c.pool = (local as unknown as Cycle).pool;
               c.fromSavingsTotal = (local as unknown as Cycle).fromSavingsTotal;
             }
           }
-          await table.put(next);
+          // server state we already have is not a local edit: don't stamp it for push
+          if (next.localRev != null) await table.put(next);
+          else await withoutRevStamp(() => table.put(next));
           if (version != null) await db.syncBase.put({ key, version, row: r });
           if (name === 'cycles') touched.add(r.id);
           if (name === 'transactions') {
@@ -558,23 +663,32 @@ export async function applyRemote(db: StashDB, rows: RemoteRows): Promise<Set<st
 
 /* ---------- orchestration ---------- */
 
-async function pushProfile(): Promise<void> {
+/** Only writes the profile when the currency differs from what the server was last told (it used to PATCH on every sync). */
+async function pushProfile(db: StashDB): Promise<void> {
   const a = getAuth();
   if (!a.uid) return;
+  const currency = getStoredCurrencyCode();
+  if ((await getMeta(db)).profileCurrencyPushed === currency) return;
   await authed(`profiles?id=eq.${a.uid}`, {
     method: 'PATCH',
     headers: { Prefer: 'return=minimal' },
-    body: JSON.stringify({ currency: getStoredCurrencyCode() }),
+    body: JSON.stringify({ currency }),
   });
+  await db.meta.update('main', { profileCurrencyPushed: currency });
 }
 
 async function purgeTombstones(db: StashDB): Promise<void> {
   const meta = await getMeta(db);
   const limit = Date.now() - TOMBSTONE_TTL_MS;
-  const pushed = meta.lastPushedAt ?? 0;
+  const failed = meta.syncFailures ?? {};
+  const pushed = (r: { updatedAt: number; localRev?: number }) =>
+    r.localRev != null ? r.localRev <= (meta.lastPushedRev ?? 0) : r.updatedAt <= (meta.lastPushedAt ?? 0);
   for (const name of TABLE_ORDER) {
-    const table = db[MAPPERS[name].local] as unknown as Dexie.Table<{ id: string; updatedAt: number; deletedAt?: number | null }, string>;
-    const old = await table.filter((r) => r.deletedAt != null && r.deletedAt < limit && r.updatedAt <= pushed).primaryKeys();
+    const table = db[MAPPERS[name].local] as unknown as Dexie.Table<{ id: string; updatedAt: number; localRev?: number; deletedAt?: number | null }, string>;
+    // categories with baseId are "built-in category removed" markers: purging one would bring the built-in back
+    const old = await table
+      .filter((r) => r.deletedAt != null && r.deletedAt < limit && pushed(r) && !(baseKey(name, r.id) in failed) && !(name === 'categories' && (r as { baseId?: string | null }).baseId))
+      .primaryKeys();
     await table.bulkDelete(old);
     await db.syncBase.bulkDelete(old.map((id) => baseKey(name, id)));
   }
@@ -592,6 +706,10 @@ export function syncNow(): Promise<SyncResult> {
   const run = async (): Promise<SyncResult> => {
     const auth = getAuth();
     if (!auth.uid || !supabaseEnv()) throw new SyncError('Not signed in', 'auth');
+    if (!hasSyncConsent()) {
+      reportSyncProgress('local_only');
+      throw new SyncError('Privacy notice not accepted yet', 'auth');
+    }
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       reportSyncProgress('offline');
       throw new SyncError('You are offline', 'offline');
@@ -600,7 +718,7 @@ export function syncNow(): Promise<SyncResult> {
     reportSyncProgress('syncing');
     try {
       const pushed = await pushDirty(db);
-      await pushProfile().catch(() => {});
+      await pushProfile(db).catch(() => {});
       await pullSince(db);
       await purgeTombstones(db);
       const meta = await getMeta(db);

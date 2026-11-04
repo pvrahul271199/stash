@@ -100,5 +100,38 @@ check('direct write: trigger owns version', Number(v) < 999, String(v));
 // 16. UUIDv7 ids are accepted by the uuid primary key
 r = await push(A, M(21), { transactions: [{ ...txn('01930000-0000-7000-8000-000000000001', C2), _base_version: null }] });
 check('uuidv7 transaction id accepted', r.status === 'ok', JSON.stringify(r));
+// 17. L1: only the pull index (+ the tiny partial event index) remain on transactions
+const idx = (await db.query(`select indexname from pg_indexes where schemaname='public' and tablename='transactions' order by 1`)).rows.map((x) => x.indexname);
+check('transactions keeps one general index + the partial event index',
+  idx.includes('idx_transactions_user_updated_id') && idx.includes('idx_transactions_event') &&
+  !idx.some((n) => /user_date|user_cycle|user_category|user_event|user_updated$/.test(n)), idx.join(','));
+// 18. H2: purge hard-deletes old tombstones only
+await db.exec('reset role');
+const OLD = `now() - interval '40 days'`, RECENT = `now() - interval '5 days'`;
+await db.exec(`update transactions set deleted_at = ${OLD} where id='${T1}'`);
+r = await push(A, M(22), { transactions: [{ ...txn('bbbbbbbb-0000-0000-0000-000000000020', C1), _base_version: null }] });
+await db.exec(`update transactions set deleted_at = ${RECENT} where id='bbbbbbbb-0000-0000-0000-000000000020'`);
+await db.exec(`update categories set deleted_at = ${OLD}, base_id = 'food' where id='eeeeeeee-0000-0000-0000-000000000001'`);
+const purged = (await db.query('select public.purge_deleted_data() r')).rows[0].r;
+check('old tombstone purged', (await db.query('select 1 from transactions where id=$1', [T1])).rows.length === 0 && purged.transactions === 1, JSON.stringify(purged));
+check('recent tombstone kept', (await db.query(`select 1 from transactions where id='bbbbbbbb-0000-0000-0000-000000000020'`)).rows.length === 1);
+check('"built-in category removed" marker kept even when old', (await db.query(`select 1 from categories where id='eeeeeeee-0000-0000-0000-000000000001'`)).rows.length === 1);
+e = await err(as(A, () => db.query('select public.purge_deleted_data()')));
+check('users cannot call the purge', e && /permission denied/i.test(e), e);
+// cycle with live children is never purged
+await db.exec(`update cycles set deleted_at = ${OLD} where id='${C1}'`);
+await db.query('select public.purge_deleted_data()');
+check('cycle still referenced by a transaction is kept', (await db.query('select 1 from cycles where id=$1', [C1])).rows.length === 1);
+// 19. H2: delete_my_account erases every row of the caller, and only the caller
+const countFor = async (uid) => Number((await db.query(`select (select count(*) from transactions where user_id=$1) + (select count(*) from cycles where user_id=$1) + (select count(*) from categories where user_id=$1) + (select count(*) from push_mutations where user_id=$1) + (select count(*) from profiles where id=$1) n`, [uid])).rows[0].n);
+check('A has data before deletion', (await countFor(A)) > 0);
+check('B has data before deletion', (await countFor(B)) > 0);
+await db.exec(`select set_config('request.jwt.claim.sub','',false)`);
+e = await err(db.query('select public.delete_my_account()')); // no auth.uid()
+check('anonymous caller cannot delete', e && /not authenticated/.test(e), e);
+await as(A, () => db.query('select public.delete_my_account()'));
+check('A: every row gone', (await countFor(A)) === 0);
+check('A: auth user gone', (await db.query('select 1 from auth.users where id=$1', [A])).rows.length === 0);
+check('B: untouched', (await countFor(B)) > 0 && (await db.query('select 1 from auth.users where id=$1', [B])).rows.length === 1);
 console.log(`\n${ok} passed, ${bad} failed`);
 process.exit(bad ? 1 : 0);
