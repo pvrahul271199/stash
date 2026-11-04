@@ -9,7 +9,7 @@ const A = '11111111-1111-1111-1111-111111111111', B = '22222222-2222-2222-2222-2
 await db.exec(`
  create role anon; create role authenticated; create role service_role;
  create schema auth;
- create table auth.users (id uuid primary key, email text, raw_user_meta_data jsonb default '{}'::jsonb);
+ create table auth.users (id uuid primary key, email text, raw_user_meta_data jsonb default '{}'::jsonb, raw_app_meta_data jsonb default '{}'::jsonb);
  create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
  grant usage on schema auth to authenticated, anon;
  insert into auth.users(id,email) values ('${A}','a@stash.app'),('${B}','b@stash.app');
@@ -133,5 +133,21 @@ await as(A, () => db.query('select public.delete_my_account()'));
 check('A: every row gone', (await countFor(A)) === 0);
 check('A: auth user gone', (await db.query('select 1 from auth.users where id=$1', [A])).rows.length === 0);
 check('B: untouched', (await countFor(B)) > 0 && (await db.query('select 1 from auth.users where id=$1', [B])).rows.length === 1);
+// 20. profiles: username / display name / email for every sign-in method
+const G = '33333333-3333-3333-3333-333333333333', P = '44444444-4444-4444-4444-444444444444';
+await db.exec(`reset role`);
+await db.exec(`insert into auth.users(id,email,raw_user_meta_data,raw_app_meta_data) values
+  ('${G}','Rahul.PV@Gmail.com','{"full_name":"Rahul P V","avatar_url":"https://x/y.png"}','{"provider":"google"}'),
+  ('${P}','pwuser@stash.app','{"username":"pwuser"}','{"provider":"email"}')`);
+const prof = async (id) => (await db.query('select username, display_name, email, auth_provider, avatar_url from profiles where id=$1', [id])).rows[0];
+let pr = await prof(G);
+check('google: username = email (lower-case), display name = name', pr && pr.username === 'rahul.pv@gmail.com' && pr.display_name === 'Rahul P V' && pr.email === 'rahul.pv@gmail.com' && pr.auth_provider === 'google' && pr.avatar_url === 'https://x/y.png', JSON.stringify(pr));
+pr = await prof(P);
+check('password: username and display name = username, no email stored, provider email', pr && pr.username === 'pwuser' && pr.display_name === 'pwuser' && pr.email === null && pr.auth_provider === 'email', JSON.stringify(pr));
+e = await err(db.exec(`update profiles set username = 'not valid' where id='${P}'`));
+check('a malformed username is still rejected', e && /profiles_username_check/.test(e), e);
+await db.exec(`insert into auth.users(id,email,raw_user_meta_data,raw_app_meta_data) values ('55555555-5555-5555-5555-555555555555','noname@gmail.com','{}','{"provider":"google"}')`);
+pr = await prof('55555555-5555-5555-5555-555555555555');
+check('google without a name falls back to the email name', pr && pr.display_name === 'noname', JSON.stringify(pr));
 console.log(`\n${ok} passed, ${bad} failed`);
 process.exit(bad ? 1 : 0);

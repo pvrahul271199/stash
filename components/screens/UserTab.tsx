@@ -70,6 +70,7 @@ export function UserTab({
   const [confirm, setConfirm] = useState<'delete' | 'sample' | 'account' | null>(null);
   const auth = useAuth();
   const username = auth.username ?? '';
+  const shownName = auth.displayName || username;
 
   // Collapsible categories state
   const [categoriesOpen, setCategoriesOpen] = useState(false);
@@ -101,7 +102,7 @@ export function UserTab({
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
     const a = document.createElement('a');
     a.href = url;
-    a.download = `stash-spends-${cleanUser || 'user'}.csv`;
+    a.download = `stash-spends-${cleanUser.replace(/[^a-z0-9_.-]+/g, '-') || 'user'}.csv`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -143,14 +144,15 @@ export function UserTab({
               className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border-2 border-white text-[10px] font-bold text-white shadow-sm"
               style={{ background: AVATAR_STYLE.accent }}
             >
-              {(cleanUser[0] || 'U').toUpperCase()}
+              {((shownName || cleanUser)[0] || 'U').toUpperCase()}
             </span>
           </div>
 
           <div className="min-w-0 flex-1">
             <h2 className="truncate text-[16px] font-semibold text-ink">
-              {cleanUser ? cleanUser.charAt(0).toUpperCase() + cleanUser.slice(1) : 'Guest User'}
+              {shownName ? shownName.charAt(0).toUpperCase() + shownName.slice(1) : 'Guest User'}
             </h2>
+            {auth.email && <p className="truncate text-[12px] text-soft">{auth.email}</p>}
           </div>
         </div>
       </section>

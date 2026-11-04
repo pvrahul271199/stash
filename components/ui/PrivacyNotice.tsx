@@ -5,7 +5,7 @@ export function PrivacyNotice() {
   return (
     <div className="space-y-3 text-[13px] leading-relaxed text-soft">
       <p>
-        <span className="font-semibold text-ink">What we store.</span> Your username, your plan (income, bills,
+        <span className="font-semibold text-ink">What we store.</span> Your username (or, with Google, your Google email, name and picture), your plan (income, bills,
         savings), every spend you log (amount, date, category, label, note, payment type) and your categories,
         events and currency.
       </p>

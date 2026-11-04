@@ -52,7 +52,7 @@ describe('session handling', () => {
     stubWindow({ user: { id: 'uid-1', user_metadata: { username: 'rahul' } } });
     const { initAuth, getAuth } = await import('@/lib/auth');
     await initAuth();
-    expect(getAuth()).toEqual({ status: 'signedIn', uid: 'uid-1', username: 'rahul', provider: 'email' });
+    expect(getAuth()).toEqual({ status: 'signedIn', uid: 'uid-1', username: 'rahul', displayName: 'rahul', provider: 'email' });
   });
 
   it('boots as guest with no session', async () => {

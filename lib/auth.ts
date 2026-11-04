@@ -9,7 +9,18 @@ export const EMAIL_DOMAIN = 'stash.app';
 const USERNAME_RE = /^[a-z0-9_]{3,20}$/;
 const SESSION_KEY = 'stash:auth';
 
-export type AuthState = { status: 'loading' | 'guest' | 'signedIn'; uid?: string; username?: string; provider?: 'email' | 'google' };
+/**
+ * `username` is the account's identifier (the chosen username, or the email for Google accounts: same as the
+ * `profiles.username` column). `displayName` is what the UI shows (the username, or the Google name).
+ */
+export type AuthState = {
+  status: 'loading' | 'guest' | 'signedIn';
+  uid?: string;
+  username?: string;
+  displayName?: string;
+  email?: string;
+  provider?: 'email' | 'google';
+};
 type Result = { ok: true } | { ok: false; error: string };
 
 export function validateUsername(raw: string): string | null {
@@ -43,11 +54,15 @@ interface AuthUser {
   user_metadata?: { username?: string; full_name?: string; name?: string };
 }
 
-/** Signed-in state for a Supabase user. Google accounts have no username: show their name (or email name) instead. */
+/** Signed-in state for a Supabase user, mirroring the profiles row the server trigger writes (see supabase/schema.sql). */
 function fromUser(u: AuthUser): AuthState {
-  const google = u.app_metadata?.provider === 'google';
-  const name = u.user_metadata?.username ?? (google ? (u.user_metadata?.full_name ?? u.user_metadata?.name ?? u.email?.split('@')[0]) : undefined);
-  return { status: 'signedIn', uid: u.id, username: name, provider: google ? 'google' : 'email' };
+  const m = u.user_metadata ?? {};
+  if (u.app_metadata?.provider === 'google') {
+    const email = (u.email ?? '').trim().toLowerCase();
+    const displayName = (m.full_name ?? m.name ?? '').trim() || email.split('@')[0];
+    return { status: 'signedIn', uid: u.id, username: email, displayName, email, provider: 'google' };
+  }
+  return { status: 'signedIn', uid: u.id, username: m.username, displayName: m.username, provider: 'email' };
 }
 
 /** A Google sign-in that created the account just now (as opposed to logging into an existing one). */

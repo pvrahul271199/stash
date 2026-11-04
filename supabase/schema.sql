@@ -57,14 +57,54 @@ create table if not exists public.profiles (
   updated_at timestamptz not null default now()
 );
 
+-- Who the account is, for every sign-in method:
+--   username      password accounts: the chosen username.  Google accounts: the Google email (lower-case).
+--   display_name  password accounts: the username.          Google accounts: the Google name.
+--   email         the real email (Google only; the @stash.app address of a password account is internal, not stored here)
+--   auth_provider 'email' (username + password) or 'google'
+alter table public.profiles add column if not exists email text;
+alter table public.profiles add column if not exists auth_provider text not null default 'email';
+alter table public.profiles add column if not exists avatar_url text;
+-- usernames are 3-20 chars of a-z0-9_, or (for Google accounts) an email address
+alter table public.profiles drop constraint if exists profiles_username_check;
+alter table public.profiles add constraint profiles_username_check
+  check (username ~ '^[a-z0-9_]{3,20}$' or (username ~ '^[^@[:space:]]+@[^@[:space:]]+$' and length(username) <= 254));
+
 create or replace function public.handle_new_user()
 returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  v_meta jsonb := coalesce(new.raw_user_meta_data, '{}'::jsonb);
+  v_provider text := case when coalesce(new.raw_app_meta_data ->> 'provider', 'email') = 'google' then 'google' else 'email' end;
+  v_email text := lower(nullif(trim(coalesce(new.email, v_meta ->> 'email', '')), ''));
+  v_username text;
+  v_name text;
 begin
-  insert into public.profiles (id, username, display_name)
-  values (new.id, new.raw_user_meta_data->>'username', new.raw_user_meta_data->>'username')
-  on conflict (id) do nothing;
+  if v_provider = 'google' then
+    v_username := v_email;
+    v_name := coalesce(nullif(trim(v_meta ->> 'full_name'), ''), nullif(trim(v_meta ->> 'name'), ''), split_part(v_email, '@', 1));
+  else
+    v_username := nullif(v_meta ->> 'username', '');
+    v_name := v_username;
+    v_email := null;
+  end if;
+  insert into public.profiles (id, username, display_name, email, auth_provider, avatar_url)
+  values (new.id, v_username, v_name, v_email, v_provider, nullif(coalesce(v_meta ->> 'avatar_url', v_meta ->> 'picture'), ''))
+  on conflict do nothing;
   return new;
 end $$;
+
+-- Fill in profiles created before these columns existed (idempotent).
+update public.profiles set display_name = username where display_name is null and username is not null;
+update public.profiles p set
+  username = coalesce(p.username, lower(u.email)),
+  display_name = coalesce(nullif(trim(u.raw_user_meta_data ->> 'full_name'), ''), nullif(trim(u.raw_user_meta_data ->> 'name'), ''), split_part(lower(u.email), '@', 1)),
+  email = lower(u.email),
+  auth_provider = 'google',
+  avatar_url = coalesce(p.avatar_url, nullif(coalesce(u.raw_user_meta_data ->> 'avatar_url', u.raw_user_meta_data ->> 'picture'), ''))
+from auth.users u
+where p.id = u.id and coalesce(u.raw_app_meta_data ->> 'provider', 'email') = 'google'
+  and (p.email is null or p.username is null)
+  and not exists (select 1 from public.profiles o where o.id <> p.id and o.username = lower(u.email));
 
 drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
