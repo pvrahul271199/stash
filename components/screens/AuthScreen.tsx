@@ -129,7 +129,6 @@ export function AuthScreen({
           <p>We back up your plan and spends to your account so you can use them on other devices.</p>
           <PrivacyInfo />
         </div>
-        <LegalLinks />
         <PrimaryButton disabled={busy || !name || !password} onClick={() => void submit()}>
           {busy
             ? 'Please wait…'
@@ -180,6 +179,7 @@ export function AuthScreen({
         >
           {mode === 'signup' ? 'I already have an account' : 'Create a new account'}
         </GhostButton>
+        <LegalLinks className="mt-1" />
       </div>
     </main>
   );

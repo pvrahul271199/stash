@@ -333,13 +333,11 @@ const CHAPTERS: Chapter[] = [
 ];
 
 function Tour({ chapter, hot, setHot }: { chapter: Chapter; hot: number; setHot: (i: number) => void }) {
-  const next = () => setHot((hot + 1) % chapter.callouts.length);
   return (
     <div className="demo-fade">
       <h2 className="font-display text-[26px] font-semibold leading-tight text-ink">{chapter.title}</h2>
-      <p className="mt-1 text-[13px] text-soft">Tap the text or the dots below to explore.</p>
       <div className="mt-4">
-        <Canvas H={400} callout={chapter.callouts[hot]} id={`${chapter.name}-${hot}`} onLabel={next}>
+        <Canvas H={400} callout={chapter.callouts[hot]} id={`${chapter.name}-${hot}`}>
           {chapter.mock}
         </Canvas>
       </div>
@@ -351,7 +349,10 @@ function Tour({ chapter, hot, setHot }: { chapter: Chapter; hot: number; setHot:
             role="tab"
             aria-selected={i === hot}
             aria-label={`Tip ${i + 1}: ${k.text}`}
-            onClick={() => setHot(i)}
+            onClick={(e) => {
+              e.stopPropagation(); // a dot jumps straight to its tip; it must not also advance
+              setHot(i);
+            }}
             className="flex items-center justify-center"
             style={{ width: 28, height: 28, minWidth: 0, minHeight: 0 }}
           >
@@ -584,7 +585,14 @@ export function InstallStepView({
         <>
           {plat === 'android' && canInstall && (
             <div className="mt-5">
-              <PrimaryButton onClick={onInstall}>Install Chelav</PrimaryButton>
+              <PrimaryButton
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void onInstall();
+                }}
+              >
+                Install Chelav
+              </PrimaryButton>
               <p className="mt-2 text-center text-[12px] text-soft">Or follow the steps below.</p>
             </div>
           )}
@@ -783,19 +791,52 @@ export function Demo({ onClose }: { onClose: () => void }) {
         ))}
       </div>
 
-      <div className="mt-5 flex-1 overflow-y-auto">
-        {isInstall ? <InstallStep /> : tour ? <Tour key={tour.name} chapter={tour} hot={hot} setHot={setHot} /> : <Basics step={step} />}
-      </div>
+      {/* Tap anywhere below the tabs to move on; the hint is a quiet nudge, not a button. */}
+      <div className="mt-5 flex min-h-0 flex-1 cursor-pointer flex-col" onClick={next}>
+        <div className="flex-1 overflow-y-auto">
+          {isInstall ? <InstallStep /> : tour ? <Tour key={tour.name} chapter={tour} hot={hot} setHot={setHot} /> : <Basics step={step} />}
+        </div>
 
-      <div className="mt-3 flex flex-col gap-1">
-        <PrimaryButton onClick={next}>
-          {lastInChapter ? (lastChapter ? 'Got it' : `Next: ${names[ch + 1]}`) : 'Next'}
-        </PrimaryButton>
-        {ch === 0 && step >= BASICS.length - 1 && (
-          <button type="button" className="min-h-[40px] text-[15px] font-medium text-soft" onClick={() => goChapter(0)}>
-            Watch again
+        <div className="flex flex-col items-center pt-3">
+          {ch === 0 && step >= BASICS.length - 1 && (
+            <button
+              type="button"
+              className="min-h-[36px] text-[14px] font-medium text-soft"
+              onClick={(e) => {
+                e.stopPropagation();
+                goChapter(0);
+              }}
+            >
+              Watch again
+            </button>
+          )}
+          <div className="flex items-center gap-2.5 py-2 text-faint" aria-hidden="true">
+            <span className="relative flex h-9 w-9 items-center justify-center">
+              <span className="tap-ripple absolute left-[5px] top-[1px] h-5 w-5 rounded-full bg-ink/25" />
+              <svg className="tap-hand relative" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M22 14a8 8 0 0 1-8 8" />
+                <path d="M18 11v-1a2 2 0 0 0-2-2a2 2 0 0 0-2 2" />
+                <path d="M14 10V9a2 2 0 0 0-2-2a2 2 0 0 0-2 2v1" />
+                <path d="M10 9.5V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v10" />
+                <path d="M18 11a2 2 0 1 1 4 0v3a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15" />
+              </svg>
+            </span>
+            <span className="text-[13px]">
+              {lastInChapter ? (lastChapter ? 'Tap anywhere to finish' : `Tap anywhere for ${names[ch + 1]}`) : 'Tap anywhere to continue'}
+            </span>
+          </div>
+          {/* keyboard and screen-reader users get a real control */}
+          <button
+            type="button"
+            className="sr-only"
+            onClick={(e) => {
+              e.stopPropagation();
+              next();
+            }}
+          >
+            {lastInChapter ? (lastChapter ? 'Finish' : `Next: ${names[ch + 1]}`) : 'Next'}
           </button>
-        )}
+        </div>
       </div>
     </main>
   );

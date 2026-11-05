@@ -42,6 +42,7 @@ Status values: `open` · `fixed` · `wontfix` · `by-design` (update this column
 | F-34 | Medium | Security | No security headers / CSP | fixed in repo (2026-11-04) via `public/_headers`; applies on hosts that read it (Cloudflare Pages, Netlify) |
 | F-35 | Medium | Privacy | Logout left all finances readable on the device | fixed (2026-11-04) |
 | F-36 | Low | Scale | Five unused secondary indexes on `transactions` | fixed (2026-11-04) |
+| F-37 | Medium | Security | Review of `supabase/schema.sql` (2026-11-06): users could rewrite their own profile (username squatting); `username_available` revealed which emails have Google accounts; unbounded text/JSON per row; no push batch cap | fixed in `schema.sql` (hardening block); **not yet run on a database** |
 | F-09b | High | Budget | "Merge accidental cycle" (F-09) | deliberately left as is (owner decision, 2026-11-04) |
 
 ---

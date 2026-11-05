@@ -446,6 +446,10 @@ begin
   if v_uid is null then
     raise exception 'not authenticated' using errcode = '28000';
   end if;
+  -- The client sends at most 500 rows per call; refuse anything far bigger (a single request must not be able to write millions of rows).
+  if (select coalesce(sum(jsonb_array_length(coalesce(p_changes -> k, '[]'::jsonb))), 0) from unnest(v_tables) k) > 1000 then
+    raise exception 'batch too large' using errcode = '54000';
+  end if;
   select result into v_prev from public.push_mutations where user_id = v_uid and id = p_mutation_id;
   if found then
     return v_prev;
@@ -642,12 +646,97 @@ begin
   if v_uid is null then
     raise exception 'not authenticated' using errcode = '28000';
   end if;
+  if p_version is null or p_version < 1 or p_version > 1000 then
+    raise exception 'bad notice version' using errcode = '22023';
+  end if;
   insert into public.consents (user_id, notice_version, notice_hash, method)
   values (v_uid, p_version, left(p_hash, 128), p_method)
   on conflict (user_id, notice_version) do nothing;
 end $$;
 revoke all on function public.record_consent(int, text, text) from public, anon;
 grant execute on function public.record_consent(int, text, text) to authenticated;
+
+-- ============================================================================
+-- Security hardening (review of 2026-11-06). Idempotent.
+-- ============================================================================
+
+-- 1. profiles: the app only ever PATCHes `currency`. Everything else (username, email, auth_provider) is written by the
+--    handle_new_user trigger. Without this, any user could rewrite their own username to someone else's Google email
+--    (a valid username shape) and block that person's profile row from ever being created.
+revoke insert, update, delete on public.profiles from authenticated;
+grant update (currency) on public.profiles to authenticated;
+
+-- 2. Password sign-ups: the username comes from client-supplied metadata, so enforce the plain username shape here too
+--    (the table check also allows email-shaped values, which are meant for Google accounts only).
+create or replace function public.handle_new_user()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  v_meta jsonb := coalesce(new.raw_user_meta_data, '{}'::jsonb);
+  v_provider text := case when coalesce(new.raw_app_meta_data ->> 'provider', 'email') = 'google' then 'google' else 'email' end;
+  v_email text := lower(nullif(trim(coalesce(new.email, v_meta ->> 'email', '')), ''));
+  v_username text;
+  v_name text;
+begin
+  if v_provider = 'google' then
+    v_username := v_email;
+    v_name := coalesce(nullif(trim(v_meta ->> 'full_name'), ''), nullif(trim(v_meta ->> 'name'), ''), split_part(v_email, '@', 1));
+  else
+    v_username := nullif(v_meta ->> 'username', '');
+    if v_username is null or v_username !~ '^[a-z0-9_]{3,20}$' then
+      raise exception 'invalid username' using errcode = '22023';
+    end if;
+    v_name := v_username;
+    v_email := null;
+  end if;
+  insert into public.profiles (id, username, display_name, email, auth_provider, avatar_url)
+  values (new.id, v_username, v_name, v_email, v_provider, nullif(coalesce(v_meta ->> 'avatar_url', v_meta ->> 'picture'), ''))
+  on conflict do nothing;
+  return new;
+end $$;
+
+-- 3. username_available is callable without signing in, so it must not reveal whether an email address has a Google
+--    account (Google profiles use the email as their username). Only password usernames are reported.
+create or replace function public.username_available(u text)
+returns boolean language sql security definer set search_path = public stable as $$
+  select not exists (
+    select 1 from public.profiles where auth_provider = 'email' and username = lower(trim(u))
+  );
+$$;
+revoke all on function public.username_available(text) from public;
+grant execute on function public.username_available(text) to anon, authenticated;
+
+-- 4. Size limits, so one account cannot store unbounded text or JSON. Far above what the app writes (labels 32,
+--    notes 60, names 32). NOT VALID: binds new writes without failing on rows that predate it.
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'transactions_text_len_check') then
+    alter table public.transactions add constraint transactions_text_len_check check (
+      length(label) <= 200 and length(type) <= 100 and length(coalesce(subtype, '')) <= 100
+      and length(coalesce(event, '')) <= 100 and length(coalesce(payment, '')) <= 100
+      and length(coalesce(note, '')) <= 1000 and length(coalesce(category_id, '')) <= 64
+    ) not valid;
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'categories_size_check') then
+    alter table public.categories add constraint categories_size_check check (
+      length(name) <= 100 and octet_length(subcategories::text) <= 20000
+      and octet_length(sub_added::text) <= 20000 and octet_length(sub_removed::text) <= 20000
+    ) not valid;
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'events_size_check') then
+    alter table public.events add constraint events_size_check check (
+      length(name) <= 100 and length(coalesce(note, '')) <= 1000 and octet_length(categories::text) <= 20000
+    ) not valid;
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'plans_size_check') then
+    alter table public.plans add constraint plans_size_check check (
+      octet_length(coalesce(bill_items::text, '')) <= 20000 and octet_length(coalesce(savings_items::text, '')) <= 20000
+    ) not valid;
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'feature_data_size_check') then
+    alter table public.feature_data add constraint feature_data_size_check check (
+      length(feature_key) <= 100 and length(item_id) <= 100 and octet_length(data::text) <= 20000
+    ) not valid;
+  end if;
+end $$;
 
 -- ============================================================================
 -- CUTOVER (run once): the old username-keyed tables and their data are dropped.
