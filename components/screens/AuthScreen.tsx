@@ -5,6 +5,7 @@ import { getAuth, logIn, signInWithGoogleToken, signUp, validateUsername } from 
 import { googleEnabled } from '@/config/google';
 import { renderGoogleButton } from '@/lib/googleSignIn';
 import { acceptSyncConsent } from '@/lib/consent';
+import { PrivacyInfo } from '../ui/PrivacyInfo';
 
 export function AuthScreen({
   initialMode = 'login',
@@ -115,7 +116,10 @@ export function AuthScreen({
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <p className="text-center text-[12px] text-faint">By continuing you agree to your data being backed up to your account.</p>
+        <div className="flex items-center justify-center gap-1.5 text-center text-[12px] text-faint">
+          <p>By continuing you agree to your data being backed up to your account.</p>
+          <PrivacyInfo />
+        </div>
         <PrimaryButton disabled={busy || !name || !password} onClick={() => void submit()}>
           {busy ? 'Please wait…' : mode === 'signup' ? 'Create account' : 'Log in'}
         </PrimaryButton>

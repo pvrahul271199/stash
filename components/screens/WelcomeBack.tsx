@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import { PrimaryButton, SecondaryButton } from '../ui/Button';
+import { GhostButton, PrimaryButton } from '../ui/Button';
 import type { PendingCatchUp } from '@/db/queries';
 import { dateOfDay, formatShort } from '@/lib/dates';
 import { inr, num } from '@/lib/format';
@@ -22,13 +22,17 @@ export function WelcomeBack({
   pending,
   today,
   onSubmit,
+  onSkip,
 }: {
   pending: PendingCatchUp;
   today: string;
   onSubmit: (total: number) => void;
+  /** Close the missed days with nothing spent; the user adds spends to them later. */
+  onSkip: () => void;
 }) {
   const { currency } = useCurrency();
-  const [raw, setRaw] = useState('');
+  // Starts at what an on-plan stretch would have cost, so one tap confirms; the user can type a different total.
+  const [raw, setRaw] = useState(pending.onPlan > 0 ? String(pending.onPlan) : '');
   const n = pending.gap.to - pending.gap.from + 1;
   const yesterday = dateOfDay(pending.startDate, pending.gap.to);
   const text =
@@ -54,14 +58,15 @@ export function WelcomeBack({
             className="num w-full bg-transparent text-big text-ink outline-none placeholder:text-faint"
           />
         </label>
+        <p className="mt-2 text-[13px] text-soft">
+          If you followed your plan, you&rsquo;d have spent {inr(pending.onPlan)}. Update this if your spending was different.
+        </p>
       </div>
       <div className="flex flex-col gap-2">
         <PrimaryButton disabled={raw === ''} onClick={() => onSubmit(Number(raw))}>
-          Use my estimate
+          {raw === '' ? 'Enter an amount' : `Confirm ${inr(Number(raw))}`}
         </PrimaryButton>
-        <SecondaryButton onClick={() => onSubmit(pending.onPlan)}>
-          I stayed about on plan ({inr(pending.onPlan)})
-        </SecondaryButton>
+        <GhostButton onClick={onSkip}>Skip, I&apos;ll log {n === 1 ? 'it' : 'them'} later</GhostButton>
       </div>
     </main>
   );

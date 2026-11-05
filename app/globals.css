@@ -170,3 +170,9 @@ select:focus {
 .demo-nudge { animation: demo-nudge 0.9s ease-in-out infinite; }
 @keyframes demo-sheet { from { transform: translateY(100%); } to { transform: none; } }
 .demo-sheet { animation: demo-sheet 0.4s ease-out both; }
+
+/* Bottom prompt: backdrop fades in, sheet rises from the bottom edge */
+@keyframes prompt-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes prompt-rise { from { transform: translateY(100%); } to { transform: translateY(0); } }
+.prompt-backdrop { animation: prompt-fade 0.2s ease-out both; }
+.prompt-sheet { animation: prompt-rise 0.32s cubic-bezier(0.22, 1, 0.36, 1) both; }

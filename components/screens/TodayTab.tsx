@@ -30,9 +30,10 @@ import {
   type CloseResult,
   type CycleState,
 } from '@/lib/budget';
-import { dateOfDay, formatWithWeekday } from '@/lib/dates';
+import { calendarDay, dateOfDay, formatWithWeekday, todayISO } from '@/lib/dates';
 import { inr } from '@/lib/format';
 import { useUI } from '@/store/ui';
+import { BottomPrompt } from '../ui/BottomPrompt';
 
 type View = 'today' | 'log' | 'close' | 'closed';
 
@@ -45,6 +46,7 @@ export function TodayTab({ cycle, plan, onCreateAccount }: { cycle: Cycle; plan:
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<Entry | null>(null);
   const setSheet = useUI((s) => s.setSheet);
+  const [notYet, setNotYet] = useState(false);
   const entries = useDayEntries(cycle.id, cycle.currentDay) ?? [];
   const dayRows = useDayRows(cycle.id) ?? [];
   const todayEntries = entries.slice(0, 10);
@@ -71,6 +73,8 @@ export function TodayTab({ cycle, plan, onCreateAccount }: { cycle: Cycle; plan:
     };
   });
   const remaining = Math.max(state.pool - spent, 0);
+  // A day can only be closed once its calendar date has arrived (closing day 1 moves Today on to tomorrow).
+  const dayHasBegun = cycle.currentDay <= calendarDay(cycle.startDate, todayISO(), cycle.totalDays);
 
   async function close() {
     setBusy(true);
@@ -175,7 +179,14 @@ export function TodayTab({ cycle, plan, onCreateAccount }: { cycle: Cycle; plan:
         >
           Log a spend
         </PrimaryButton>
-        <SecondaryButton onClick={() => setView('close')}>Close the day</SecondaryButton>
+        <SecondaryButton
+          onClick={() => {
+            if (dayHasBegun) setView('close');
+            else setNotYet(true);
+          }}
+        >
+          Close the day
+        </SecondaryButton>
       </div>
 
       {view === 'close' && (
@@ -207,6 +218,15 @@ export function TodayTab({ cycle, plan, onCreateAccount }: { cycle: Cycle; plan:
       )}
       {view === 'today' && peekDay == null && !editing && <BackupPrompt onCreate={onCreateAccount} />}
       {editing && <EditSpendSheet entry={editing} onClose={() => setEditing(null)} />}
+      {notYet && (
+        <BottomPrompt
+          title="This day starts tomorrow"
+          body="You can close it then. Until then, keep logging spends as usual."
+          actionLabel="Got it"
+          onAction={() => setNotYet(false)}
+          onClose={() => setNotYet(false)}
+        />
+      )}
       {view === 'closed' && result && <DayClosed cycle={cycle} result={result} onNext={() => setView('today')} />}
     </>
   );

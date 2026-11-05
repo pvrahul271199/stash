@@ -10,7 +10,6 @@ import {
   addSubcategory,
   deleteAllData,
   exportCSV,
-  fillSample,
   mergeAccidentalCycle,
   removeCategory,
   removeEvent,
@@ -45,7 +44,7 @@ export function UserTab({
   onChangePlan,
   onSwitchUser,
   onLogIn,
-  onSampleDone,
+  onCreateAccount,
   onDeleted,
 }: {
   plan: Plan;
@@ -53,7 +52,7 @@ export function UserTab({
   onChangePlan: () => void;
   onSwitchUser: () => void;
   onLogIn: () => void;
-  onSampleDone: () => void;
+  onCreateAccount: () => void;
   onDeleted: () => void;
 }) {
   const toast = useToast((s) => s.show);
@@ -67,7 +66,7 @@ export function UserTab({
 
   const canMerge = useCanMergeCycle();
   const [merging, setMerging] = useState(false);
-  const [confirm, setConfirm] = useState<'delete' | 'sample' | 'account' | null>(null);
+  const [confirm, setConfirm] = useState<'delete' | 'account' | null>(null);
   const auth = useAuth();
   const username = auth.username ?? '';
   const shownName = auth.displayName || username;
@@ -153,7 +152,25 @@ export function UserTab({
               {shownName ? shownName.charAt(0).toUpperCase() + shownName.slice(1) : 'Guest User'}
             </h2>
             {auth.email && <p className="truncate text-[12px] text-soft">{auth.email}</p>}
+            {auth.status !== 'signedIn' && (
+              <p className="truncate text-[12px] text-soft">Saved on this device only</p>
+            )}
           </div>
+          {auth.status !== 'signedIn' && (
+            <button
+              type="button"
+              onClick={onCreateAccount}
+              aria-label="Create account"
+              title="Create account"
+              className="flex h-10 w-10 min-h-0 min-w-0 shrink-0 items-center justify-center rounded-full border border-line bg-white text-ink shadow-sm transition-transform active:scale-[0.95]"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <circle cx="9" cy="8" r="3.5" />
+                <path d="M2.5 20c.6-3.6 3.2-5.5 6.5-5.5s5.9 1.9 6.5 5.5" />
+                <path d="M19 8v6M16 11h6" />
+              </svg>
+            </button>
+          )}
         </div>
       </section>
 
@@ -563,9 +580,6 @@ export function UserTab({
           <SecondaryButton onClick={onLogIn}>Sign up or log in (guest data is not backed up)</SecondaryButton>
         )}
         {installEvent && <SecondaryButton onClick={install}>Install Chelav as PWA</SecondaryButton>}
-        {auth.status !== 'signedIn' && (
-          <SecondaryButton onClick={() => setConfirm('sample')}>Fill with a sample month</SecondaryButton>
-        )}
         <button
           type="button"
           onClick={() => setConfirm('delete')}
@@ -647,19 +661,6 @@ export function UserTab({
         />
       )}
 
-      {confirm === 'sample' && (
-        <ConfirmDialog
-          title="Replace with a sample month?"
-          body="Your current month's spends will be replaced by realistic sample data so you can explore. Your categories stay."
-          confirmLabel="Fill with sample"
-          onCancel={() => setConfirm(null)}
-          onConfirm={async () => {
-            setConfirm(null);
-            await withLoading('Loading a sample month…', fillSample);
-            onSampleDone();
-          }}
-        />
-      )}
     </div>
   );
 }

@@ -748,6 +748,23 @@ export async function syncCalendar(today: string = todayISO()): Promise<PendingC
   return result;
 }
 
+/**
+ * "Skip, I'll log it later": closes the missed days with nothing spent and does NOT mark them as estimated, so
+ * spends the user adds to those days afterwards (History / calendar) flow into the pool through `recompute`.
+ * Until then the days count as unspent, which makes the daily amount a little higher.
+ */
+export async function skipCatchUp(cycleId: string, gap: { from: number; to: number }): Promise<void> {
+  const db = getDB();
+  await db.transaction('rw', [db.cycles, db.transactions, db.dayRows], async () => {
+    const c = await db.cycles.get(cycleId);
+    if (!c || c.currentDay !== gap.from) return;
+    const r = catchUp(c, 0, gap);
+    await db.cycles.update(cycleId, { currentDay: r.state.currentDay, updatedAt: Date.now() });
+    await recompute(db, cycleId);
+  });
+  requestSync();
+}
+
 export async function applyCatchUp(
   cycleId: string,
   total: number,

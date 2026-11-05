@@ -319,7 +319,7 @@ flowchart TD
 
 ## 4. Planned change: choose the cycle start date
 
-**Rule:** `startDate` may be any date from **today back to 7 days ago** (`today − 7 ≤ startDate ≤ today`). Default is today.
+**Rule:** `startDate` may be any date from **today back to 3 days ago** (`today − 3 ≤ startDate ≤ today`). Default is today.
 
 What changes in the tables: nothing structural. `cycles.startDate` already stores it.
 
@@ -335,7 +335,7 @@ flowchart TD
 ```
 
 Implementation checklist
-1. Onboarding date picker with `min = addDays(today, -7)` and `max = today`. Use `lib/dates.ts` helpers, never `new Date(iso)`.
+1. Onboarding date picker with `min = addDays(today, -3)` and `max = today`. Use `lib/dates.ts` helpers, never `new Date(iso)`.
 2. Validate the same bounds in the cycle-creation query in `db/queries.ts`, so the UI is not the only guard.
 3. Set `currentDay = daysBetween(startDate, today) + 1`. Days before it go through the existing catch-up / estimated path.
 4. Unit test in `lib/budget.ts`: `startDate` 0, 3 and 7 days ago give the right `currentDay`, `pool` and `daysLeft`.

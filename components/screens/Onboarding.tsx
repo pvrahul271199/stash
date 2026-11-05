@@ -1,287 +1,371 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { BackIcon, IconButton, PrimaryButton } from '../ui/Button';
 import { inr, num } from '@/lib/format';
 import { useCurrency } from '@/lib/currency';
 import { sumItems, type PlanInput, type PlanItem } from '@/lib/budget';
 
-type Draft = PlanInput;
-
-const STEPS = [
-  { key: 'income', q: 'What lands in your account each month?', help: 'Your take-home salary, after tax.' },
-  {
-    key: 'bills',
-    q: 'What goes out no matter what?',
-    help: 'Rent, EMIs, phone, internet, school fees. Enter a total or add them item by item below.',
-  },
-  {
-    key: 'savings',
-    q: 'What do you put away first?',
-    help: 'SIPs, RD, emergency fund, insurance. Enter a total or add them item by item below.',
-  },
-  { key: 'monthLength', q: 'How many days until your next salary?', help: 'Between 1 and 31.' },
-] as const;
-
 const BILL_SUGGESTIONS = ['Rent', 'Health EMI', 'Loan EMI', 'Phone & Wi-Fi', 'Electricity'];
 const SAVING_SUGGESTIONS = ['SIP', 'Emergency fund', 'RD / FD', 'Health insurance'];
 
-function validate(step: number, d: Draft, raw: string): string | null {
-  const v = raw === '' ? NaN : Number(raw);
-  if (Number.isNaN(v)) return step === 1 || step === 2 ? 'Enter a number. 0 is fine.' : 'Enter a number first.';
-  if (step === 0 && v <= 0) return 'This needs to be more than 0.';
-  if (step === 1 && v >= d.income) return `Bills need to be less than your income (${inr(d.income)}).`;
-  if (step === 2 && d.bills + v >= d.income)
-    return `Bills and savings together need to be less than your income. You have ${inr(d.income - d.bills)} after bills.`;
-  if (step === 3 && (v < 1 || v > 31 || !Number.isInteger(v))) return 'Pick a number from 1 to 31.';
-  return null;
+const digits = (v: string, max: number) => v.replace(/\D/g, '').replace(/^0+(?=\d)/, '').slice(0, max);
+
+/** One optional money field (bills or savings): a total, or item by item. */
+function OptionalAmount({
+  title,
+  help,
+  suggestions,
+  raw,
+  onRaw,
+  items,
+  onItems,
+  onPending,
+}: {
+  title: string;
+  help: string;
+  suggestions: string[];
+  raw: string;
+  onRaw: (v: string) => void;
+  items: PlanItem[];
+  onItems: (items: PlanItem[]) => void;
+  onPending: (pending: boolean) => void;
+}) {
+  const { currency } = useCurrency();
+  const [open, setOpen] = useState(items.length > 0);
+  const [name, setName] = useState('');
+  const [amt, setAmt] = useState('');
+  const [err, setErr] = useState<string | null>(null);
+  const amtRef = useRef<HTMLInputElement>(null);
+  const nameRef = useRef<HTMLInputElement>(null);
+  const itemised = items.length > 0;
+
+  function report(n: string, a: string) {
+    onPending(n.trim() !== '' || a !== '');
+  }
+
+  function add() {
+    const amount = Number(amt);
+    if (!name.trim()) return setErr('Give the item a name.');
+    if (!amount || amount <= 0) return setErr('Enter an amount for this item.');
+    onItems([...items, { name: name.trim(), amount: Math.round(amount) }]);
+    setName('');
+    setAmt('');
+    setErr(null);
+    report('', '');
+    nameRef.current?.focus(); // ready for the next one
+  }
+
+  return (
+    <section className="mt-3 min-w-0 rounded-note border border-line bg-white px-3.5 py-3.5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <h2 className="text-[13px] font-semibold leading-tight text-ink">
+            {title} <span className="text-[10px] font-normal text-faint">(optional)</span>
+          </h2>
+          <p className="mt-1 text-[11px] leading-snug text-soft">{help}</p>
+        </div>
+        <label className="flex h-9 w-[104px] shrink-0 items-center gap-1 border-b border-line px-1 focus-within:border-ink">
+          <span className="num text-[14px] text-faint" aria-hidden="true">
+            {currency.symbol}
+          </span>
+          <span className="sr-only">{title} total</span>
+          <input
+            value={raw === '' ? '' : num(Number(raw))}
+            onChange={(e) => onRaw(digits(e.target.value, 9))}
+            readOnly={itemised}
+            inputMode="numeric"
+            pattern="[0-9]*"
+            placeholder="0"
+            className="num w-full min-w-0 bg-transparent text-right text-[16px] text-ink outline-none placeholder:text-faint read-only:text-soft"
+          />
+        </label>
+      </div>
+
+      {!open && (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          aria-expanded={false}
+          className="mt-3 inline-flex min-h-[30px] items-center gap-1 rounded-full border border-line px-3 text-[12px] font-medium text-ink active:bg-tint"
+        >
+          {itemised ? (
+            <>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M4 20h4L19 9a2.1 2.1 0 0 0-4-4L4 16v4z" />
+                <path d="M13.5 6.5l4 4" />
+              </svg>
+              {`${items.length} item${items.length === 1 ? '' : 's'}`}
+              <span className="sr-only"> , edit</span>
+            </>
+          ) : (
+            <>
+              <span aria-hidden="true">+</span> Add item by item
+            </>
+          )}
+        </button>
+      )}
+
+      {open && (
+        <div className="mt-3 min-w-0 border-t border-line pt-3">
+          {itemised && (
+            <div className="mb-3">
+              <ul className="flex flex-col gap-1.5">
+                {items.map((it, idx) => (
+                  <li
+                    key={`${it.name}-${idx}`}
+                    className="flex min-w-0 items-center gap-2 rounded-key border border-[#EDEBF9] bg-tint py-1.5 pl-3 pr-1.5"
+                  >
+                    <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">{it.name}</span>
+                    <span className="num shrink-0 text-[14px] text-ink">{inr(it.amount)}</span>
+                    <button
+                      type="button"
+                      aria-label={`Remove ${it.name}`}
+                      onClick={() => onItems(items.filter((_, i) => i !== idx))}
+                      className="flex h-6 w-6 min-h-0 min-w-0 shrink-0 items-center justify-center rounded-full text-[16px] leading-none text-faint active:bg-white hover:text-warm"
+                    >
+                      ×
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              <div className="mt-2 flex items-center justify-between border-t border-line px-3 pt-2 text-[13px] font-semibold text-ink">
+                <span>Total</span>
+                <span className="num">{inr(sumItems(items))}</span>
+              </div>
+            </div>
+          )}
+
+          {suggestions.some((sug) => !items.some((it) => it.name === sug)) && (
+            <div className="mb-2.5 flex flex-wrap gap-1.5">
+              {suggestions
+                .filter((sug) => !items.some((it) => it.name === sug))
+                .map((sug) => (
+                  <button
+                    key={sug}
+                    type="button"
+                    onClick={() => {
+                      setName(sug);
+                      report(sug, amt);
+                      amtRef.current?.focus();
+                    }}
+                    className={`min-h-[30px] rounded-full border px-2.5 text-[12px] font-medium ${
+                      name === sug ? 'border-ink bg-ink text-white' : 'border-line bg-white text-ink'
+                    }`}
+                  >
+                    {sug}
+                  </button>
+                ))}
+            </div>
+          )}
+
+          <div className="flex gap-2">
+            <input
+              ref={nameRef}
+              name="plan-item-label"
+              autoComplete="off" autoCorrect="off" spellCheck={false} 
+              value={name}
+              onChange={(e) => {
+                setName(e.target.value);
+                report(e.target.value, amt);
+                setErr(null);
+              }}
+              onKeyDown={(e) => e.key === 'Enter' && (amt ? add() : amtRef.current?.focus())}
+              placeholder="Name"
+              aria-label="Item name"
+              maxLength={32}
+              className="[&:-webkit-autofill]:shadow-[inset_0_0_0_100px_white] [&:-webkit-autofill]:[-webkit-text-fill-color:#1E1B4B] h-10 min-w-0 flex-1 rounded-key border border-line bg-white px-2.5 text-[13px] text-ink placeholder:text-faint"
+            />
+            <input
+              ref={amtRef}
+              name="plan-item-value"
+              autoComplete="off" autoCorrect="off" spellCheck={false} 
+              value={amt === '' ? '' : num(Number(amt))}
+              onChange={(e) => {
+                const v = digits(e.target.value, 8);
+                setAmt(v);
+                report(name, v);
+                setErr(null);
+              }}
+              onKeyDown={(e) => e.key === 'Enter' && add()}
+              inputMode="numeric"
+              pattern="[0-9]*"
+              placeholder={`${currency.symbol} Amt`}
+              aria-label="Item amount"
+              className="[&:-webkit-autofill]:shadow-[inset_0_0_0_100px_white] [&:-webkit-autofill]:[-webkit-text-fill-color:#1E1B4B] num h-10 w-24 min-w-0 shrink-0 rounded-key border border-line bg-white px-2.5 text-[13px] text-ink placeholder:text-faint"
+            />
+          </div>
+          {err && (
+            <p role="alert" className="mt-1.5 text-[13px] text-warm">
+              {err}
+            </p>
+          )}
+          <div className="mt-2.5 flex gap-2">
+            <button
+              type="button"
+              onClick={add}
+              className="h-10 flex-1 rounded-key bg-ink text-[14px] font-semibold text-white"
+            >
+              Add item
+            </button>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="h-10 rounded-key px-4 text-[14px] font-medium text-soft"
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      )}
+    </section>
+  );
 }
 
+/** Whole setup on one page. Only income is required; bills and savings default to 0 and can be added later. */
 export function Onboarding({
   initial,
   onDone,
   onExit,
 }: {
-  initial?: Partial<Draft>;
+  initial?: Partial<PlanInput>;
   onDone: (p: PlanInput) => void;
   onExit: () => void;
 }) {
-  const [step, setStep] = useState(0);
-  const [draft, setDraft] = useState<Draft>({
-    income: initial?.income ?? 0,
-    bills: initial?.bills ?? 0,
-    savings: initial?.savings ?? 0,
-    monthLength: initial?.monthLength ?? 30,
-    billItems: initial?.billItems ?? [],
-    savingsItems: initial?.savingsItems ?? [],
-  });
-  const [raw, setRaw] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [itemName, setItemName] = useState('');
-  const [itemAmt, setItemAmt] = useState('');
   const { currency } = useCurrency();
-  const ref = useRef<HTMLInputElement>(null);
-  const amtRef = useRef<HTMLInputElement>(null);
-  const s = STEPS[step];
+  const start = (n?: number) => (n != null && n > 0 ? String(n) : '');
+  const [income, setIncome] = useState(start(initial?.income));
+  const [billsRaw, setBillsRaw] = useState(start(initial?.bills));
+  const [savingsRaw, setSavingsRaw] = useState(start(initial?.savings));
+  const [billItems, setBillItems] = useState<PlanItem[]>(initial?.billItems ?? []);
+  const [savingsItems, setSavingsItems] = useState<PlanItem[]>(initial?.savingsItems ?? []);
+  const [days, setDays] = useState(String(initial?.monthLength ?? 30));
+  const [pending, setPending] = useState({ bills: false, savings: false });
+  const [error, setError] = useState<string | null>(null);
 
-  const isItemStep = step === 1 || step === 2;
-  const currentItems: PlanItem[] = step === 1 ? (draft.billItems ?? []) : step === 2 ? (draft.savingsItems ?? []) : [];
-  const suggestions = step === 1 ? BILL_SUGGESTIONS : SAVING_SUGGESTIONS;
+  const inc = Number(income) || 0;
+  const bills = billItems.length > 0 ? sumItems(billItems) : Number(billsRaw) || 0;
+  const savings = savingsItems.length > 0 ? sumItems(savingsItems) : Number(savingsRaw) || 0;
+  const d = Number(days);
+  const daysOk = Number.isInteger(d) && d >= 1 && d <= 31;
+  const toLive = inc - bills - savings;
+  const perDay = inc > 0 && toLive > 0 && daysOk ? Math.floor(toLive / d) : null;
 
-  useEffect(() => {
-    const val = draft[s.key] ?? initial?.[s.key];
-    const items = step === 1 ? draft.billItems : step === 2 ? draft.savingsItems : undefined;
-    if (items && items.length > 0) {
-      setRaw(String(sumItems(items)));
-    } else {
-      setRaw(val != null && val > 0 ? String(val) : step === 3 ? String(draft.monthLength || 30) : '');
-    }
-    setItemName('');
-    setItemAmt('');
-    setError(null);
-    ref.current?.focus();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step]);
-
-  function addItem() {
-    const name = itemName.trim();
-    const amt = Number(itemAmt);
-    if (!name) {
-      setError('Give the item a name (e.g. Health EMI).');
-      return;
-    }
-    if (!amt || amt <= 0) {
-      setError('Enter an amount for this item.');
-      return;
-    }
-    const nextItems = [...currentItems, { name, amount: Math.round(amt) }];
-    const total = sumItems(nextItems);
-    setDraft((d) =>
-      step === 1
-        ? { ...d, billItems: nextItems, bills: total }
-        : { ...d, savingsItems: nextItems, savings: total },
-    );
-    setRaw(String(total));
-    setItemName('');
-    setItemAmt('');
-    setError(null);
-  }
-
-  function removeItem(idx: number) {
-    const nextItems = currentItems.filter((_, i) => i !== idx);
-    const total = sumItems(nextItems);
-    setDraft((d) =>
-      step === 1
-        ? { ...d, billItems: nextItems, bills: total }
-        : { ...d, savingsItems: nextItems, savings: total },
-    );
-    setRaw(nextItems.length > 0 ? String(total) : '0');
-    setError(null);
-  }
-
-  function next() {
-    // If user typed an item name + amount and hit Continue without tapping Add, include it automatically
-    let effectiveRaw = raw;
-    let updatedDraft = draft;
-    if (isItemStep && itemName.trim() && Number(itemAmt) > 0) {
-      const nextItems = [...currentItems, { name: itemName.trim(), amount: Math.round(Number(itemAmt)) }];
-      const total = sumItems(nextItems);
-      effectiveRaw = String(total);
-      updatedDraft =
-        step === 1
-          ? { ...draft, billItems: nextItems, bills: total }
-          : { ...draft, savingsItems: nextItems, savings: total };
-      setItemName('');
-      setItemAmt('');
-    }
-    const err = validate(step, updatedDraft, effectiveRaw);
-    if (err) return setError(err);
-    const nd = { ...updatedDraft, [s.key]: Number(effectiveRaw) } as Draft;
-    setDraft(nd);
-    if (step === 3) onDone(nd);
-    else setStep(step + 1);
-  }
-
-  function back() {
-    if (step === 0) onExit();
-    else setStep(step - 1);
+  function submit() {
+    if (inc <= 0) return setError('Add your monthly income first.');
+    if (pending.bills || pending.savings)
+      return setError('You have an item typed but not added. Tap Add, or clear it.');
+    if (bills >= inc) return setError(`Bills need to be less than your income (${inr(inc)}).`);
+    if (bills + savings >= inc)
+      return setError(`Bills and savings together need to be less than your income. You have ${inr(inc - bills)} after bills.`);
+    if (!daysOk) return setError('Days until next salary should be from 1 to 31.');
+    onDone({ income: inc, bills, savings, monthLength: d, billItems, savingsItems });
   }
 
   return (
     <main className="flex h-full flex-col px-6 pb-6 pt-4">
       <div className="flex items-center gap-3">
-        <IconButton label="Back" onClick={back} className="-ml-3">
+        <IconButton label="Back" onClick={onExit} className="-ml-3">
           <BackIcon />
         </IconButton>
-        <div
-          className="flex flex-1 gap-1.5"
-          role="progressbar"
-          aria-valuemin={1}
-          aria-valuemax={4}
-          aria-valuenow={step + 1}
-          aria-label="Setup progress"
-        >
-          {STEPS.map((_, i) => (
-            <span key={i} className={`h-1 flex-1 rounded-full ${i <= step ? 'bg-ink' : 'bg-line'}`} />
-          ))}
-        </div>
       </div>
 
-      <div className="mt-6 flex-1 overflow-y-auto pb-4">
-        <h1 className="font-sans text-question font-semibold text-ink">{s.q}</h1>
-        <p className="mt-2 text-body text-soft">{s.help}</p>
+      <div className="mt-3 min-w-0 flex-1 overflow-y-auto overflow-x-hidden pb-4">
+        <h1 className="font-sans text-[22px] font-semibold leading-snug text-ink">What lands in your account each month?</h1>
+        <p className="mt-1.5 text-[14px] text-soft">Your take-home salary, after tax. That is all we need to start.</p>
 
-        <label className="mt-6 flex items-baseline gap-2 border-b-2 border-ink pb-2">
-          {step < 3 && (
-            <span className="num text-[44px] text-faint" aria-hidden="true">
-              {currency.symbol}
-            </span>
-          )}
-          <span className="sr-only">{s.q}</span>
+        <label className="mt-4 flex min-w-0 items-baseline gap-2 border-b-2 border-ink pb-1.5">
+          <span className="num text-[34px] text-faint" aria-hidden="true">
+            {currency.symbol}
+          </span>
+          <span className="sr-only">Monthly income</span>
           <input
-            ref={ref}
-            value={raw === '' ? '' : step < 3 ? num(Number(raw)) : raw}
+            autoFocus
+            value={income === '' ? '' : num(Number(income))}
             onChange={(e) => {
-              setRaw(e.target.value.replace(/\D/g, '').replace(/^0+(?=\d)/, '').slice(0, 9));
+              setIncome(digits(e.target.value, 9));
               setError(null);
             }}
-            onKeyDown={(e) => e.key === 'Enter' && next()}
+            onKeyDown={(e) => e.key === 'Enter' && submit()}
             inputMode="numeric"
             pattern="[0-9]*"
-            placeholder={step < 3 ? '0' : '30'}
-            className="num w-full bg-transparent text-big text-ink outline-none placeholder:text-faint"
+            placeholder="0"
+            className="num w-full min-w-0 bg-transparent text-[34px] leading-tight text-ink outline-none placeholder:text-faint"
             aria-invalid={!!error}
             aria-describedby="err"
           />
         </label>
-        <p id="err" role="alert" className="mt-2 min-h-[22px] text-[14px] text-warm">
-          {error}
+
+        <p className="mt-2 min-h-[44px] text-[14px] leading-snug text-soft" aria-live="polite">
+          {perDay != null ? (
+            <>
+              About <span className="num font-semibold text-ink">{inr(perDay)}</span> a day to spend
+              {bills + savings === 0 ? ' so far. Add bills and savings below to sharpen it.' : '.'}
+            </>
+          ) : null}
         </p>
 
-        {isItemStep && (
-          <div className="mt-3 rounded-note border border-line bg-white p-3.5">
-            <p className="text-[13px] font-semibold text-ink">
-              {step === 1 ? 'Or log item-wise (EMIs, rent, bills)' : 'Or log item-wise (SIP, RD, insurance)'}
-            </p>
+        <div className="mt-4" />
 
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {suggestions.map((sug) => (
-                <button
-                  key={sug}
-                  type="button"
-                  onClick={() => {
-                    setItemName(sug);
-                    amtRef.current?.focus();
-                  }}
-                  className={`min-h-[30px] rounded-full border px-2.5 text-[12px] font-medium ${
-                    itemName === sug ? 'border-ink bg-ink text-white' : 'border-line bg-white text-ink'
-                  }`}
-                >
-                  + {sug}
-                </button>
-              ))}
-            </div>
+        <OptionalAmount
+          title="Bills you can't skip"
+          help="Rent, EMIs, phone, internet, school fees."
+          suggestions={BILL_SUGGESTIONS}
+          raw={billsRaw}
+          onRaw={(v) => {
+            setBillsRaw(v);
+            setError(null);
+          }}
+          items={billItems}
+          onItems={(items) => {
+            setBillItems(items);
+            setBillsRaw(items.length ? String(sumItems(items)) : '');
+            setError(null);
+          }}
+          onPending={(p) => setPending((s) => ({ ...s, bills: p }))}
+        />
 
-            <div className="mt-2.5 flex gap-2">
-              <input
-                value={itemName}
-                onChange={(e) => {
-                  setItemName(e.target.value);
-                  setError(null);
-                }}
-                onKeyDown={(e) => e.key === 'Enter' && addItem()}
-                placeholder={step === 1 ? 'e.g. Health EMI' : 'e.g. Mutual fund SIP'}
-                aria-label="Item name"
-                maxLength={32}
-                className="h-10 min-w-0 flex-1 rounded-key border border-line bg-white px-3 text-[14px] text-ink placeholder:text-faint"
-              />
-              <input
-                ref={amtRef}
-                value={itemAmt === '' ? '' : num(Number(itemAmt))}
-                onChange={(e) => {
-                  setItemAmt(e.target.value.replace(/\D/g, '').replace(/^0+(?=\d)/, '').slice(0, 8));
-                  setError(null);
-                }}
-                onKeyDown={(e) => e.key === 'Enter' && addItem()}
-                inputMode="numeric"
-                pattern="[0-9]*"
-                placeholder={`${currency.symbol} Amount`}
-                aria-label="Item amount"
-                className="num h-10 w-28 rounded-key border border-line bg-white px-3 text-[14px] text-ink placeholder:text-faint"
-              />
-              <button
-                type="button"
-                onClick={addItem}
-                className="h-10 shrink-0 rounded-key bg-ink px-3.5 text-[13px] font-semibold text-white"
-              >
-                Add
-              </button>
-            </div>
+        <OptionalAmount
+          title="What you put away first"
+          help="SIPs, RD, emergency fund, insurance."
+          suggestions={SAVING_SUGGESTIONS}
+          raw={savingsRaw}
+          onRaw={(v) => {
+            setSavingsRaw(v);
+            setError(null);
+          }}
+          items={savingsItems}
+          onItems={(items) => {
+            setSavingsItems(items);
+            setSavingsRaw(items.length ? String(sumItems(items)) : '');
+            setError(null);
+          }}
+          onPending={(p) => setPending((s) => ({ ...s, savings: p }))}
+        />
 
-            {currentItems.length > 0 && (
-              <ul className="mt-3 divide-y divide-line border-t border-line pt-1">
-                {currentItems.map((it, idx) => (
-                  <li key={`${it.name}-${idx}`} className="flex items-center justify-between py-2 text-[14px]">
-                    <span className="font-medium text-ink">{it.name}</span>
-                    <div className="flex items-center gap-2">
-                      <span className="num text-ink">{inr(it.amount)}</span>
-                      <button
-                        type="button"
-                        aria-label={`Remove ${it.name}`}
-                        onClick={() => removeItem(idx)}
-                        className="flex h-7 w-7 items-center justify-center rounded-full text-faint hover:text-warm"
-                      >
-                        ×
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
+        <section className="mt-3 flex min-w-0 items-center justify-between gap-3 rounded-note border border-line bg-white px-3.5 py-3.5">
+          <div>
+            <h2 className="text-[13px] font-semibold text-ink">Days until next salary</h2>
+            <p className="text-[11px] text-soft">Usually 30. From 1 to 31.</p>
           </div>
-        )}
+          <input
+            value={days}
+            onChange={(e) => {
+              setDays(digits(e.target.value, 2));
+              setError(null);
+            }}
+            inputMode="numeric"
+            pattern="[0-9]*"
+            aria-label="Days until next salary"
+            className="num h-9 w-14 shrink-0 rounded-key border border-line bg-white px-2 text-center text-[16px] text-ink"
+          />
+        </section>
+
+        <p id="err" role="alert" className="mt-3 min-h-[22px] text-[14px] text-warm">
+          {error}
+        </p>
       </div>
 
-      <PrimaryButton onClick={next}>{step === 3 ? 'See my plan' : 'Continue'}</PrimaryButton>
+      <PrimaryButton onClick={submit}>See my plan</PrimaryButton>
     </main>
   );
 }

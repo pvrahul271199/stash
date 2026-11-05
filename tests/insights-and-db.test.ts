@@ -28,6 +28,7 @@ import {
   addSpend,
   addSubcategory,
   applyCatchUp,
+  skipCatchUp,
   closeCurrentDay,
   createPlanAndCycle,
   deleteAllData,
@@ -220,6 +221,24 @@ describe('database queries', () => {
     const est = await db.transactions.where('cycleId').equals(cycle.id).toArray();
     expect(est).toHaveLength(3);
     expect(est.every((x) => x.isEstimate)).toBe(true);
+  });
+
+  it('skipping the catch-up closes the days with nothing spent, and spends added later reach the pool', async () => {
+    await ensureSeed();
+    await createPlanAndCycle({ income: 50000, bills: 18000, savings: 10000, monthLength: 30 }, '2026-10-20');
+    const gap = await syncCalendar('2026-10-23');
+    await skipCatchUp(gap!.cycleId, gap!.gap);
+    const db = getDB();
+    let cycle = (await db.cycles.get(gap!.cycleId))!;
+    expect(cycle.currentDay).toBe(4);
+    expect(cycle.estimatedDays).toEqual([]);
+    expect(cycle.pool).toBe(cycle.planAmount); // nothing spent yet
+    expect(await db.transactions.where('cycleId').equals(cycle.id).count()).toBe(0);
+
+    // later: log a spend on skipped day 2 (like History does); it comes off the pool
+    await addSpend(cycle, { amount: 700, label: 'Lunch', category: 'Food' }, new Date(2026, 9, 23, 10), 2);
+    cycle = (await db.cycles.get(gap!.cycleId))!;
+    expect(cycle.pool).toBe(cycle.planAmount - 700);
   });
 
   it('fills sample month and exports CSV', async () => {

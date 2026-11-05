@@ -2,14 +2,13 @@
 import { useState } from 'react';
 import { BackIcon, IconButton, PrimaryButton, SecondaryButton } from '../ui/Button';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
-import { deleteAllData, exportCSV, fillSample } from '@/db/queries';
+import { deleteAllData, exportCSV } from '@/db/queries';
 import type { Cycle, Plan } from '@/db/schema';
 import { moneyToLiveOn } from '@/lib/budget';
 import { cycleEndDate, formatWithWeekday } from '@/lib/dates';
 import { inr } from '@/lib/format';
 import { useToast } from '@/store/toast';
 import { usePWA } from '@/store/pwa';
-import { useAuth } from '@/lib/auth';
 
 export function PlanScreen({
   plan,
@@ -17,7 +16,6 @@ export function PlanScreen({
   onClose,
   onSwitchUser,
   onChangePlan,
-  onSampleDone,
   onDeleted,
 }: {
   plan: Plan;
@@ -25,14 +23,12 @@ export function PlanScreen({
   onClose: () => void;
   onSwitchUser?: () => void;
   onChangePlan: () => void;
-  onSampleDone: () => void;
   onDeleted: () => void;
 }) {
   const toast = useToast((s) => s.show);
-  const auth = useAuth();
   const installEvent = usePWA((s) => s.installEvent);
   const setPWA = usePWA((s) => s.set);
-  const [confirm, setConfirm] = useState<'delete' | 'sample' | null>(null);
+  const [confirm, setConfirm] = useState<'delete' | null>(null);
 
   const rows: { label: string; value: string; items?: { name: string; amount: number }[] }[] = [
     { label: 'Income', value: inr(plan.income) },
@@ -104,9 +100,6 @@ export function PlanScreen({
           <PrimaryButton onClick={onChangePlan}>Change my plan</PrimaryButton>
           {onSwitchUser && <SecondaryButton onClick={onSwitchUser}>Log out or log in</SecondaryButton>}
           {installEvent && <SecondaryButton onClick={install}>Install Chelav</SecondaryButton>}
-          {auth.status !== 'signedIn' && (
-            <SecondaryButton onClick={() => setConfirm('sample')}>Fill with a sample month</SecondaryButton>
-          )}
           <SecondaryButton onClick={doExport}>Export to CSV</SecondaryButton>
           <button
             onClick={() => setConfirm('delete')}
@@ -130,19 +123,6 @@ export function PlanScreen({
             await deleteAllData();
             setConfirm(null);
             onDeleted();
-          }}
-        />
-      )}
-      {confirm === 'sample' && (
-        <ConfirmDialog
-          title="Replace with a sample month?"
-          body="Your current month's spends will be replaced by realistic sample data so you can explore. Your categories stay."
-          confirmLabel="Fill with sample"
-          onCancel={() => setConfirm(null)}
-          onConfirm={async () => {
-            await fillSample();
-            setConfirm(null);
-            onSampleDone();
           }}
         />
       )}

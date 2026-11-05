@@ -22,6 +22,7 @@ import { acceptSyncConsent, hasSyncConsent } from '@/lib/consent';
 import { preloadGoogle } from '@/lib/googleSignIn';
 import {
   applyCatchUp,
+  skipCatchUp,
   createPlanAndCycle,
   ensureSeed,
   fillSample,
@@ -128,10 +129,11 @@ export function AppShell() {
   async function start() {
     if (!draft || !isPlanValid(draft)) return;
     setBusy(true);
-    // Guard: only today … 7 days back is allowed.
-    const earliest = addDays(todayISO(), -7);
+    // Guard: only today … 3 days back is allowed.
+    const earliest = addDays(todayISO(), -3);
     const date = startDate > todayISO() ? todayISO() : startDate < earliest ? earliest : startDate;
     await createPlanAndCycle(draft, date);
+    setForceWelcome(false); // a plan now exists: leave the post-logout / post-delete Welcome page
     await runSync(); // a back-dated start surfaces the catch-up prompt for the elapsed days
     setStartDate(todayISO());
     setBusy(false);
@@ -205,6 +207,7 @@ export function AppShell() {
           } else {
             await createPlanAndCycle(draft);
           }
+          setForceWelcome(false);
           setBusy(false);
           setFlow('welcome');
           setSheet('none');
@@ -224,6 +227,12 @@ export function AppShell() {
             await applyCatchUp(catchUpGap.cycleId, total, catchUpGap.gap);
             setCatchUpGap(null);
             await runSync();
+          }}
+          onSkip={async () => {
+            await skipCatchUp(catchUpGap.cycleId, catchUpGap.gap);
+            setCatchUpGap(null);
+            await runSync();
+            setTab('today');
           }}
         />
       );
@@ -259,7 +268,10 @@ export function AppShell() {
                   setAuthMode('login');
                   setFlow('auth');
                 }}
-                onSampleDone={() => setTab('insights')}
+                onCreateAccount={() => {
+                  setAuthMode('signup');
+                  setFlow('auth');
+                }}
                 onDeleted={() => {
                     setDraft(null);
                     setForceWelcome(true);
@@ -295,10 +307,6 @@ export function AppShell() {
                 });
                 setSheet('none');
                 setFlow('changePlan');
-              }}
-              onSampleDone={() => {
-                setSheet('none');
-                setTab('insights');
               }}
               onDeleted={() => {
                 setSheet('none');

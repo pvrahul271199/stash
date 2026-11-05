@@ -86,7 +86,7 @@ function Stat({
   const bg = status === 'warn' ? 'bg-warm/10' : status === 'bad' ? 'bg-bad/10' : 'bg-tint';
   return (
     <div className={`rounded-note p-3.5 ${bg}`}>
-      <p className="text-[12px] font-medium uppercase tracking-wide text-soft">{label}</p>
+      <p className="text-[11px] font-medium uppercase tracking-[0.04em] text-soft">{label}</p>
       <p className={`num mt-1 flex items-center gap-1.5 text-[24px] leading-tight ${status === 'good' ? 'text-good' : 'text-ink'}`}>
         {value}
         {trend && <TrendArrow dir={trend.dir} level={trend.level} />}
@@ -189,14 +189,8 @@ export function InsightsTab({ cycle, plan }: { cycle: Cycle | undefined; plan: P
     );
   }
   if (!data) return <div className="flex-1" aria-busy="true" />;
-  if (!entries || entries.length === 0) {
-    return (
-      <div className="px-6 pt-8">
-        <h1 className="text-question font-semibold text-ink">Insights</h1>
-        <p className="mt-2 text-body text-soft">Log a few spends and close a day to see your picture.</p>
-      </div>
-    );
-  }
+  // No spends yet is not a special page: the whole layout shows with zeros.
+  if (!entries) return <div className="flex-1" aria-busy="true" />;
 
   const {
     summary,
@@ -300,7 +294,7 @@ export function InsightsTab({ cycle, plan }: { cycle: Cycle | undefined; plan: P
         <Stat
           label="Average day"
           value={summary.averageDay != null ? inr(summary.averageDay) : '—'}
-          sub="on closed days"
+          sub={summary.averageDay != null ? 'on closed days' : `after ${MIN_CLOSED_DAYS} closed days`}
           trend={
             summary.averageDay == null
               ? undefined
@@ -324,9 +318,9 @@ export function InsightsTab({ cycle, plan }: { cycle: Cycle | undefined; plan: P
           }
         />
         <Stat
-          label="Month-end pace"
+          label="Where you'll land"
           value={projected != null ? inr(projected) : '—'}
-          sub={projected != null ? (projected > cycle.planAmount ? 'over your plan' : 'within your plan') : 'needs a few closed days'}
+          sub={projected != null ? (projected > cycle.planAmount ? 'over your plan' : 'within your plan') : `after ${MIN_CLOSED_DAYS} closed days`}
           status={projected == null || paceLevel == null ? undefined : paceLevel}
           trend={
             projected == null || paceLevel == null

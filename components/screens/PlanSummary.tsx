@@ -23,7 +23,7 @@ export function PlanSummary({
   onBack: () => void;
   onStart: () => void;
   busy?: boolean;
-  /** New cycles only: chosen start date (today … 7 days back). */
+  /** New cycles only: chosen start date (today … 3 days back). */
   startDate?: string;
   onStartDateChange?: (iso: string) => void;
 }) {
@@ -50,11 +50,11 @@ export function PlanSummary({
       <IconButton label="Back" onClick={onBack} className="-ml-3 self-start">
         <BackIcon />
       </IconButton>
-      <div className="flex-1 overflow-y-auto">
-        <p className="mt-4 text-[14px] text-soft">
+      <div className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
+        <p className="mt-3 text-[13px] text-soft">
           {isEditing ? 'Remaining money to live on' : 'Your money to live on'}
         </p>
-        <HugeNumber value={isEditing ? remainingPool : live} className="mt-1" />
+        <HugeNumber value={isEditing ? remainingPool : live} size={56} className="mt-1" />
         {isEditing ? (
           <p className="mt-3 text-body text-soft">
             About {inr(dailyAmount)} a day for the remaining {daysRemaining}{' '}
@@ -66,19 +66,19 @@ export function PlanSummary({
             {plan.monthLength === 1 ? 'day' : 'days'}, until {end}.
           </p>
         )}
-        <dl className="mt-8 divide-y divide-line border-y border-line">
+        <dl className="mt-6 divide-y divide-line border-y border-line">
           {rows.map((r) => (
-            <div key={r.label} className="py-3.5">
+            <div key={r.label} className="min-w-0 py-3">
               <div className="flex items-center justify-between">
-                <dt className="text-[15px] text-soft">{r.label}</dt>
-                <dd className="num text-[20px] text-ink">{inr(r.value)}</dd>
+                <dt className="text-[14px] text-soft">{r.label}</dt>
+                <dd className="num text-[18px] text-ink">{inr(r.value)}</dd>
               </div>
               {r.items && r.items.length > 0 && (
-                <ul className="mt-1.5 flex flex-wrap gap-1.5">
+                <ul className="mt-1.5 flex min-w-0 flex-wrap gap-1">
                   {r.items.map((it, i) => (
                     <li
                       key={`${it.name}-${i}`}
-                      className="rounded-full bg-tint px-2.5 py-0.5 text-[12px] text-soft"
+                      className="max-w-full truncate rounded-full bg-tint px-2 py-0.5 text-[11px] text-soft"
                     >
                       {it.name} <span className="num text-ink">{inr(it.amount)}</span>
                     </li>
@@ -98,7 +98,7 @@ export function PlanSummary({
               <div className="mt-6">
                 <p className="text-[14px] text-soft">Start date</p>
                 <div className="mt-2 flex flex-wrap gap-1.5">
-                  {Array.from({ length: 8 }, (_, i) => {
+                  {Array.from({ length: 4 }, (_, i) => {
                     const iso = addDays(todayISO(), -i);
                     const on = iso === startDate;
                     return (
@@ -121,9 +121,6 @@ export function PlanSummary({
                 )}
               </div>
             )}
-          <div className="mt-6 rounded-note border border-line bg-white px-4 py-3 text-[13px] leading-relaxed text-soft">
-            Bills and savings are already set aside, so you won&apos;t log them again.
-          </div>
           </>
         )}
       </div>

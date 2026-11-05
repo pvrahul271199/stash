@@ -5,7 +5,7 @@ export const colors = {
   soft: '#625F6A',
   faint: '#A5A29C',
   line: '#E7E5E1',
-  tint: '#F6F5F3',
+  tint: '#F7F6FD', // very light violet, same hue family as ink (#1E1B4B)
   good: '#0F766E',
   goodBg: '#E3F3F1',
   warm: '#B45309',

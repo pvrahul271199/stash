@@ -15,7 +15,8 @@ export const useToast = create<ToastState>((set) => ({
   show: (message, tone = 'ink') => {
     clearTimeout(timer);
     set({ message, tone });
-    timer = setTimeout(() => set({ message: null }), 1400);
+    // long messages stay long enough to read
+    timer = setTimeout(() => set({ message: null }), Math.max(1400, message.length * 55));
   },
   hide: () => set({ message: null }),
 }));
