@@ -12,7 +12,7 @@ export { PRIVACY_CONTACT } from './privacyNotice';
 export const CONSENT_VERSION = 1;
 const CONSENT_KEY = 'stash:consent';
 
-/** How the user agreed: ticked the box at sign-up / log-in, via Google, or on the "Before we back up" screen. */
+/** How the user agreed: tapped Create account / Log in, or Google, with the notice line above. ('gate' is an old method, still allowed by the database.) */
 export type ConsentMethod = 'signup' | 'login' | 'google' | 'gate';
 
 interface StoredConsent {

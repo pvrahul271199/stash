@@ -17,9 +17,8 @@ import { UserTab } from './screens/UserTab';
 import { PWAManager } from './pwa/PWAManager';
 import { LoadingScreen } from './ui/LoadingScreen';
 import { LogoutDialog } from './ui/LogoutDialog';
-import { ConsentScreen } from './screens/ConsentScreen';
 import { ThankYou } from './screens/ThankYou';
-import { acceptSyncConsent, flushConsentRecord, hasSyncConsent } from '@/lib/consent';
+import { flushConsentRecord, hasSyncConsent } from '@/lib/consent';
 import { preloadGoogle } from '@/lib/googleSignIn';
 import {
   applyCatchUp,
@@ -391,16 +390,6 @@ export function AppShell() {
         <div className="absolute inset-0 z-[60] bg-bg">
           <LoadingScreen message={busyMessage} />
         </div>
-      )}
-      {ready && auth.status === 'signedIn' && !consented && (
-        <ConsentScreen
-          onAccept={() => {
-            acceptSyncConsent('gate');
-            void flushConsentRecord();
-            setConsented(true);
-          }}
-          onDecline={() => setAskLogout(true)}
-        />
       )}
       {askLogout && (
         <LogoutDialog

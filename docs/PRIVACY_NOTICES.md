@@ -7,9 +7,12 @@ recorded on the server, not just on the phone.
 
 | Where | What the user does | `method` |
 |---|---|---|
-| Sign-up / log-in form (`AuthScreen`) | Taps **"Agree & create account"** / **"Agree & log in"**, with the line "We back up your plan and spends to your account…" and an "i" (full notice) directly above. A device that already agreed sees plain "Create account" / "Log in". | `signup` / `login` |
-| Google sign-in | Taps Google's own button; the line "By continuing with Google you agree to the backup." sits directly above it (we cannot relabel Google's button). Shown only if the device has not agreed before. | `google` |
-| "Before we back up your data" screen (signed in, no consent on this device) | Taps "I agree, back up my data". | `gate` |
+| Sign-up / log-in form (`AuthScreen`) | Taps **Create account** / **Log in**, with the line "By continuing you agree to your plan and spends being backed up to your account." and an "i" (full notice) directly above. | `signup` / `login` |
+| Google sign-in | Taps Google's own button, under the same line (we cannot relabel Google's button). | `google` |
+
+There is no separate consent screen any more (removed 2026-11-06). A signed-in user whose device has no consent record
+(for example a session from before consent existed) has cloud backup paused until they next log in, which records it.
+The `gate` method is no longer written by the app but stays valid in the database.
 
 1. `acceptSyncConsent(method)` (`lib/consent.ts`) sets the local flag. `syncNow` refuses to upload without it.
 2. `flushConsentRecord()` calls the database function `record_consent(version, hash, method)`. It writes one row to
