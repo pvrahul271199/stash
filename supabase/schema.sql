@@ -615,6 +615,40 @@ end $$;
 revoke all on function public.delete_my_account() from public, anon;
 grant execute on function public.delete_my_account() to authenticated;
 
+-- Consent log (DPDP Act): proof that a user accepted a version of the privacy notice, and how.
+-- No foreign key on purpose: the record must survive "Delete my account" (it holds only the user's random id,
+-- the notice version/hash and a timestamp). Users can read their own rows; nobody can write except through
+-- record_consent(), so the timestamp is the server's, not the phone's. One row per user per notice version.
+create table if not exists public.consents (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null,
+  notice_version int not null check (notice_version >= 1),
+  notice_hash text,
+  method text not null check (method in ('signup', 'login', 'google', 'gate')),
+  accepted_at timestamptz not null default now(),
+  unique (user_id, notice_version)
+);
+alter table public.consents enable row level security;
+drop policy if exists consents_select_own on public.consents;
+create policy consents_select_own on public.consents
+  for select to authenticated using ((select auth.uid()) = user_id);
+revoke all on public.consents from anon, authenticated;
+grant select on public.consents to authenticated;
+
+create or replace function public.record_consent(p_version int, p_hash text, p_method text)
+returns void language plpgsql security definer set search_path = public as $$
+declare v_uid uuid := auth.uid();
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+  insert into public.consents (user_id, notice_version, notice_hash, method)
+  values (v_uid, p_version, left(p_hash, 128), p_method)
+  on conflict (user_id, notice_version) do nothing;
+end $$;
+revoke all on function public.record_consent(int, text, text) from public, anon;
+grant execute on function public.record_consent(int, text, text) to authenticated;
+
 -- ============================================================================
 -- CUTOVER (run once): the old username-keyed tables and their data are dropped.
 -- ============================================================================

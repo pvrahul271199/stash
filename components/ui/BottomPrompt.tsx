@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 
 /** A short message that rises from the bottom, with one main action and an optional second one. */
 export function BottomPrompt({
@@ -19,14 +20,20 @@ export function BottomPrompt({
   onClose: () => void;
 }) {
   const actionRef = useRef<HTMLButtonElement>(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
   useEffect(() => {
-    actionRef.current?.focus();
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    // Move focus to the button for keyboard users, but never pull it out of a text field the user is in:
+    // that would blur the field (its focus border flashes off) and drop the phone keyboard behind the sheet.
+    const a = document.activeElement;
+    const typing = a instanceof HTMLInputElement || a instanceof HTMLTextAreaElement;
+    if (!typing) actionRef.current?.focus({ preventScroll: true });
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && closeRef.current();
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, []);
 
-  return (
+  const node = (
     <div
       className="prompt-backdrop absolute inset-0 z-[70] flex items-end bg-ink/35"
       role="presentation"
@@ -70,4 +77,8 @@ export function BottomPrompt({
       </div>
     </div>
   );
+  // Rendered inside the app frame itself (not inside whatever screen opened it), so it never takes part in that
+  // screen's layout. Falls back to inline if the frame is not found.
+  const host = typeof document !== 'undefined' ? document.querySelector('.app-root') : null;
+  return host ? createPortal(node, host) : node;
 }

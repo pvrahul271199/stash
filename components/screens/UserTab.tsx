@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { PrimaryButton, SecondaryButton } from '../ui/Button';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { DeleteAccountDialog } from '../ui/DeleteAccountDialog';
+import { LegalLinks } from '../legal/LegalLinks';
 import { SyncStatusPill } from '../ui/SyncStatusPill';
 import {
   addCategory,
@@ -46,6 +47,7 @@ export function UserTab({
   onLogIn,
   onCreateAccount,
   onDeleted,
+  onAccountDeleted,
 }: {
   plan: Plan;
   cycle: Cycle;
@@ -54,6 +56,8 @@ export function UserTab({
   onLogIn: () => void;
   onCreateAccount: () => void;
   onDeleted: () => void;
+  /** After "Delete my account" (not "Delete all data"); falls back to onDeleted. */
+  onAccountDeleted?: () => void;
 }) {
   const toast = useToast((s) => s.show);
   const installEvent = usePWA((s) => s.installEvent);
@@ -577,7 +581,10 @@ export function UserTab({
         {auth.status === 'signedIn' ? (
           <SecondaryButton onClick={onSwitchUser}>Log out</SecondaryButton>
         ) : (
-          <SecondaryButton onClick={onLogIn}>Sign up or log in (guest data is not backed up)</SecondaryButton>
+          <SecondaryButton onClick={onLogIn} className="flex flex-col items-center justify-center leading-tight">
+            <span>Sign up or log in</span>
+            <span className="text-[11px] font-normal text-faint">Guest data is not backed up</span>
+          </SecondaryButton>
         )}
         {installEvent && <SecondaryButton onClick={install}>Install Chelav as PWA</SecondaryButton>}
         <button
@@ -596,6 +603,7 @@ export function UserTab({
             Delete my account
           </button>
         )}
+        <LegalLinks className="mt-3" />
       </section>
 
       {removingCat && (
@@ -656,7 +664,7 @@ export function UserTab({
           onCancel={() => setConfirm(null)}
           onDone={() => {
             setConfirm(null);
-            onDeleted();
+            (onAccountDeleted ?? onDeleted)();
           }}
         />
       )}

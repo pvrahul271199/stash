@@ -1,7 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { deleteAccount, useAuth } from '@/lib/auth';
-import { PrivacyNotice } from './PrivacyNotice';
 
 /** Account erasure. Needs the password again, and says plainly that it cannot be undone. */
 export function DeleteAccountDialog({ onDone, onCancel }: { onDone: () => void; onCancel: () => void }) {
@@ -39,12 +38,6 @@ export function DeleteAccountDialog({ onDone, onCancel }: { onDone: () => void; 
           This permanently erases your account and everything in it from the cloud and from every device you used.
           It cannot be undone and the username cannot be recovered. Export a CSV first if you want a copy.
         </p>
-        <details className="mt-3 text-[13px]">
-          <summary className="cursor-pointer font-medium text-ink">What we store and what gets erased</summary>
-          <div className="mt-2">
-            <PrivacyNotice />
-          </div>
-        </details>
         <form
           className="mt-4"
           onSubmit={(e) => {

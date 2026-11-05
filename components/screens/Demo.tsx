@@ -47,7 +47,6 @@ const POOL_1 = POOL - SPENT_1;
 const NEXT_1 = Math.round(POOL_1 / (DAYS - 1));
 const POOL_2 = POOL_1 - SPENT_2;
 const NEXT_2 = Math.round(POOL_2 / (DAYS - 2));
-const STEP_MS = 4800;
 const SETUP_MS = 9000;
 
 /* ---------- canvas: fixed unit space (320 wide, H tall) scaled uniformly ---------- */
@@ -736,26 +735,13 @@ export function Demo({ onClose }: { onClose: () => void }) {
   const [ch, setCh] = useState(0); // 0 = basics, 1.. = CHAPTERS[ch - 1]
   const [step, setStep] = useState(0);
   const [hot, setHot] = useState(0);
-  const [playing, setPlaying] = useState(true);
-
-  useEffect(() => {
-    if (ch !== 0 || !playing) return;
-    if (step >= BASICS.length - 1) {
-      setPlaying(false);
-      return;
-    }
-    const t = setTimeout(() => setStep((s) => s + 1), step === 0 ? SETUP_MS : STEP_MS);
-    return () => clearTimeout(t);
-  }, [ch, step, playing]);
+  // Steps move on only when the user taps Next (nothing auto-advances).
 
   const names = ['Basics', ...CHAPTERS.map((c) => c.name), 'Install'];
   const goChapter = (i: number) => {
     setCh(i);
     setHot(0);
-    if (i === 0) {
-      setStep(0);
-      setPlaying(true);
-    }
+    if (i === 0) setStep(0);
   };
 
   const isInstall = ch === names.length - 1;
@@ -766,10 +752,7 @@ export function Demo({ onClose }: { onClose: () => void }) {
   function next() {
     if (!lastInChapter) {
       if (tour) setHot((h) => h + 1);
-      else {
-        setPlaying(false);
-        setStep((s) => s + 1);
-      }
+      else setStep((s) => s + 1);
     } else if (!lastChapter) goChapter(ch + 1);
     else onClose();
   }

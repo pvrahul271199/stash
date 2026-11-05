@@ -18,7 +18,8 @@ import { PWAManager } from './pwa/PWAManager';
 import { LoadingScreen } from './ui/LoadingScreen';
 import { LogoutDialog } from './ui/LogoutDialog';
 import { ConsentScreen } from './screens/ConsentScreen';
-import { acceptSyncConsent, hasSyncConsent } from '@/lib/consent';
+import { ThankYou } from './screens/ThankYou';
+import { acceptSyncConsent, flushConsentRecord, hasSyncConsent } from '@/lib/consent';
 import { preloadGoogle } from '@/lib/googleSignIn';
 import {
   applyCatchUp,
@@ -70,6 +71,7 @@ export function AppShell() {
   const [startDate, setStartDate] = useState(() => todayISO());
   const [catchUpGap, setCatchUpGap] = useState<PendingCatchUp | null>(null);
   const [askLogout, setAskLogout] = useState(false);
+  const [farewell, setFarewell] = useState(false); // thank-you page after "Delete my account"
   const [authMode, setAuthMode] = useState<'signup' | 'login'>('login');
   const [consented, setConsented] = useState(() => hasSyncConsent());
 
@@ -113,7 +115,10 @@ export function AppShell() {
   }, [auth.status, auth.uid]);
 
   useEffect(() => {
-    if (ready && auth.status === 'signedIn' && consented) requestSync();
+    if (ready && auth.status === 'signedIn' && consented) {
+      void flushConsentRecord(); // retries a consent record that could not reach the server earlier
+      requestSync();
+    }
   }, [ready, auth.status, auth.uid, consented]);
 
   useEffect(() => {
@@ -151,6 +156,8 @@ export function AppShell() {
   let body: React.ReactNode = null;
   if (!ready || !snap) {
     body = <LoadingScreen />;
+  } else if (farewell) {
+    body = <ThankYou onDone={() => setFarewell(false)} />;
   } else if (restoring) {
     body = <LoadingScreen />;
   } else if (flow === 'auth') {
@@ -278,6 +285,13 @@ export function AppShell() {
                   setFlow('welcome');
                   setTab('today');
                 }}
+                onAccountDeleted={() => {
+                  setDraft(null);
+                  setForceWelcome(true);
+                  setFlow('welcome');
+                  setTab('today');
+                  setFarewell(true);
+                }}
               />
             )}
           </div>
@@ -381,7 +395,8 @@ export function AppShell() {
       {ready && auth.status === 'signedIn' && !consented && (
         <ConsentScreen
           onAccept={() => {
-            acceptSyncConsent();
+            acceptSyncConsent('gate');
+            void flushConsentRecord();
             setConsented(true);
           }}
           onDecline={() => setAskLogout(true)}

@@ -10,6 +10,7 @@ export function PrivacyInfo({ className = '' }: { className?: string }) {
     <>
       <button
         type="button"
+        onMouseDown={(e) => e.preventDefault()} // keep the field the user is typing in focused
         onClick={() => setOpen(true)}
         aria-label="How your data is used"
         title="How your data is used"

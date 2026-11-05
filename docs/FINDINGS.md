@@ -36,7 +36,7 @@ Status values: `open` · `fixed` · `wontfix` · `by-design` (update this column
 | F-27 | High | Sync | Client-clock LWW, whole-row overwrites, non-atomic multi-request push, missing DB constraints | fixed (2026-11-02) |
 | F-29 | Blocker | Sync | Push decided "unsynced" by comparing the phone clock (`updatedAt > lastPushedAt`) | fixed (2026-11-04) |
 | F-30 | Blocker | Sync | One server-rejected row (4xx) wedged the user's sync forever | fixed (2026-11-04) |
-| F-31 | High | Privacy | Deleting data was soft only; no account deletion; no consent/notice before sync (DPDP) | fixed in code (2026-11-04); needs the SQL run + pg_cron enabled |
+| F-31 | High | Privacy | Deleting data was soft only; no account deletion; no consent/notice before sync (DPDP) | fixed in code (2026-11-04); needs the SQL run + pg_cron enabled; 2026-11-06: consent now logged on the server (`consents`, `record_consent`), explicit checkbox at sign-up, see docs/PRIVACY_NOTICES.md; **re-run `supabase/schema.sql`** |
 | F-32 | Medium | PWA | Service worker network-first navigations hang on slow networks | fixed (2026-11-04) |
 | F-33 | Medium | Sync | Unconditional profile PATCH on every sync | fixed (2026-11-04) |
 | F-34 | Medium | Security | No security headers / CSP | fixed in repo (2026-11-04) via `public/_headers`; applies on hosts that read it (Cloudflare Pages, Netlify) |

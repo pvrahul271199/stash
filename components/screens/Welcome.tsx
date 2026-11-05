@@ -1,6 +1,7 @@
 'use client';
 import { Logo } from '../ui/Logo';
 import { PrimaryButton, SecondaryButton, GhostButton } from '../ui/Button';
+import { LegalLinks } from '../legal/LegalLinks';
 
 export function Welcome({
   onStart,
@@ -34,6 +35,7 @@ export function Welcome({
         <p className="mb-2 mt-2 text-center text-[14px] text-soft">Takes about a minute</p>
         <GhostButton onClick={onAccount}>Sign up or log in</GhostButton>
         <GhostButton onClick={onSample}>Or explore with sample data first</GhostButton>
+        <LegalLinks className="mt-1" />
       </div>
     </main>
   );

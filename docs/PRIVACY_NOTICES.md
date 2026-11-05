@@ -1,0 +1,48 @@
+# Privacy notice versions and consent proof
+
+Why: under India's DPDP Act the company must be able to **show** that a user agreed, and to what. Consent is
+recorded on the server, not just on the phone.
+
+## How consent is captured
+
+| Where | What the user does | `method` |
+|---|---|---|
+| Sign-up / log-in form (`AuthScreen`) | Taps **"Agree & create account"** / **"Agree & log in"**, with the line "We back up your plan and spends to your account…" and an "i" (full notice) directly above. A device that already agreed sees plain "Create account" / "Log in". | `signup` / `login` |
+| Google sign-in | Taps Google's own button; the line "By continuing with Google you agree to the backup." sits directly above it (we cannot relabel Google's button). Shown only if the device has not agreed before. | `google` |
+| "Before we back up your data" screen (signed in, no consent on this device) | Taps "I agree, back up my data". | `gate` |
+
+1. `acceptSyncConsent(method)` (`lib/consent.ts`) sets the local flag. `syncNow` refuses to upload without it.
+2. `flushConsentRecord()` calls the database function `record_consent(version, hash, method)`. It writes one row to
+   `public.consents` with the **server's** timestamp. If the phone is offline the local record stays "pending" and
+   is retried whenever the signed-in app starts or syncs.
+3. One row per user per notice version (`unique (user_id, notice_version)`); later acceptances of the same version are ignored.
+4. `consents` has no foreign key on purpose, so the row survives "Delete my account" (it holds only the random user
+   id, version, hash, method and time). Confirm this retention period with your lawyer.
+5. Users can `select` their own rows; nobody can insert/update/delete except through `record_consent()`.
+
+## Looking up proof
+
+```sql
+select user_id, notice_version, method, accepted_at, notice_hash
+from public.consents where user_id = '<uuid>';
+```
+Match `notice_hash` against the table below to know exactly which words the user accepted.
+
+## Changing the notice
+
+Edit `lib/privacyNotice.ts` → bump `CONSENT_VERSION` in `lib/consent.ts` (everyone is asked again) → add the new
+text and hash here → update `V1_HASH`-style constant in `tests/consent.test.ts`. The test fails if the text changes
+without this.
+
+The hash is SHA-256 (hex) of the sections joined as `"<title> <body>"` with `\n` (see `noticeText()`); the optional
+contact line (`NEXT_PUBLIC_PRIVACY_CONTACT`) is not part of the hash.
+
+## Version 1 (hash `654bcdc4d7cf124645017ba8a14e0ea45fb34031bad40d5ad2afe30c13e2b79f`)
+
+**What we store.** Your username (or, with Google, your Google email, name and picture), your plan (income, bills, savings), every spend you log (amount, date, category, label, note, payment type) and your categories, events and currency.
+
+**Why.** Only to back up your month and show it on your other devices. We do not sell it, show ads, or share it with anyone else.
+
+**Where.** In your account on our cloud database provider (Supabase). Without an account, everything stays on this phone.
+
+**Your choices.** Export a CSV any time. Log out to stop syncing. “Delete my account” in Settings permanently erases your account and everything in it from the cloud. Items you delete are removed from the cloud within 30 days.

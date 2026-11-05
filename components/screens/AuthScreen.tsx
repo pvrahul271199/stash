@@ -4,8 +4,9 @@ import { BackIcon, GhostButton, IconButton, PrimaryButton } from '../ui/Button';
 import { getAuth, logIn, signInWithGoogleToken, signUp, validateUsername } from '@/lib/auth';
 import { googleEnabled } from '@/config/google';
 import { renderGoogleButton } from '@/lib/googleSignIn';
-import { acceptSyncConsent } from '@/lib/consent';
+import { acceptSyncConsent, flushConsentRecord, hasSyncConsent } from '@/lib/consent';
 import { PrivacyInfo } from '../ui/PrivacyInfo';
+import { LegalLinks } from '../legal/LegalLinks';
 
 export function AuthScreen({
   initialMode = 'login',
@@ -25,6 +26,10 @@ export function AuthScreen({
   const name = username.trim().toLowerCase();
   const userHint = name ? validateUsername(name) : null;
 
+  // Agreement is the tap on "Agree & ..." / the Google button, with the notice right above. A device that already
+  // agreed gets the plain labels.
+  const [alreadyAgreed] = useState(() => hasSyncConsent());
+
   async function submit() {
     if (busy) return;
     setBusy(true);
@@ -35,7 +40,8 @@ export function AuthScreen({
       setError(res.error);
       return;
     }
-    acceptSyncConsent(); // recorded only after the account exists, i.e. before the first sync can run
+    acceptSyncConsent(mode); // local flag after the account exists, i.e. before the first sync can run
+    void flushConsentRecord(); // server-side proof (retried later if offline)
     onDone(mode, name);
   }
 
@@ -49,10 +55,13 @@ export function AuthScreen({
     renderGoogleButton(googleRef.current, googleRef.current.clientWidth, async (idToken, nonce) => {
       setBusy(true);
       setError(null);
-      acceptSyncConsent(); // continuing means agreeing to the backup
+      acceptSyncConsent('google'); // before sign-in so the first sync is not held back by the consent gate
       const res = await signInWithGoogleToken(idToken, nonce);
       setBusy(false);
-      if (res.ok) done0.current('login', getAuth().displayName ?? '');
+      if (res.ok) {
+        void flushConsentRecord();
+        done0.current('login', getAuth().displayName ?? '');
+      }
       else setError(res.error);
     })
       .then(() => setGoogleReady(true))
@@ -116,12 +125,17 @@ export function AuthScreen({
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <div className="flex items-center justify-center gap-1.5 text-center text-[12px] text-faint">
-          <p>By continuing you agree to your data being backed up to your account.</p>
+        <div className="flex items-start justify-center gap-1.5 px-1 pb-1 text-center text-[12px] leading-snug text-faint">
+          <p>We back up your plan and spends to your account so you can use them on other devices.</p>
           <PrivacyInfo />
         </div>
+        <LegalLinks />
         <PrimaryButton disabled={busy || !name || !password} onClick={() => void submit()}>
-          {busy ? 'Please wait…' : mode === 'signup' ? 'Create account' : 'Log in'}
+          {busy
+            ? 'Please wait…'
+            : mode === 'signup'
+              ? alreadyAgreed ? 'Create account' : 'Agree & create account'
+              : alreadyAgreed ? 'Log in' : 'Agree & log in'}
         </PrimaryButton>
         {googleOk && (
           <>
@@ -130,6 +144,9 @@ export function AuthScreen({
               <span className="text-[12px] text-faint">or</span>
               <span className="h-px flex-1 bg-line" />
             </div>
+            {!alreadyAgreed && (
+              <p className="text-center text-[12px] text-faint">By continuing with Google you agree to the backup.</p>
+            )}
             <div className="relative min-h-[44px] w-full">
               <div ref={googleRef} className="flex w-full justify-center" aria-label="Continue with Google" />
               {!googleReady && (

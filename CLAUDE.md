@@ -12,6 +12,7 @@ Calm expense tracker built around one question: **"How much can I spend today?"*
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Data model, budget math, sync design, identity model, PWA, mobile app |
 | [`docs/FLOWS.md`](docs/FLOWS.md) | Every user/system flow, step by step, with the functions involved |
 | [`docs/ENHANCEMENTS.md`](docs/ENHANCEMENTS.md) | Proposed, not-yet-built changes (log-first onboarding, guest-claim fix, anonymous accounts) |
+| [`docs/PRIVACY_NOTICES.md`](docs/PRIVACY_NOTICES.md) | Privacy notice versions + hashes, how consent is captured and proven (DPDP) |
 | [`docs/FINDINGS.md`](docs/FINDINGS.md) | Logical flaws / risks found in review, ranked, with evidence and suggested fixes |
 
 Keep these three up to date when behaviour changes. `FINDINGS.md` has a status column — mark items fixed instead of deleting them.
