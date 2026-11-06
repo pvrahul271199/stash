@@ -31,7 +31,7 @@ export function Welcome({
       <div className="flex flex-col gap-1">
         <SecondaryButton onClick={onDemo}>See how it works</SecondaryButton>
         <PrimaryButton onClick={onStart} className="mt-2">Try now</PrimaryButton>
-        <p className="mb-2 mt-2 text-center text-[14px] text-soft">Takes about a minute</p>
+        <div className="h-2" aria-hidden="true" />
         <GhostButton onClick={onAccount}>Sign up or log in</GhostButton>
         <GhostButton onClick={onSample}>Or explore with sample data first</GhostButton>
       </div>

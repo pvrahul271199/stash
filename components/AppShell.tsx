@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Toast } from './ui/Toast';
 import { SampleNote } from './ui/SampleNote';
+import { BottomPrompt } from './ui/BottomPrompt';
 import { GhostButton, PrimaryButton } from './ui/Button';
 import { TabBar, type Tab } from './ui/TabBar';
 import { Welcome } from './screens/Welcome';
@@ -32,7 +33,8 @@ import { isPlanValid, type PlanInput } from '@/lib/budget';
 import { daysBetween, todayISO } from '@/lib/dates';
 import { periodFor } from '@/lib/period';
 import { requestSync, syncNow } from '@/lib/sync';
-import { getAuth, initAuth, logOut, useAuth } from '@/lib/auth';
+import { clearNewAccount, getAuth, initAuth, logOut, useAuth } from '@/lib/auth';
+import { claimGuestData, describeGuestData, type GuestData } from '@/db/claim';
 import { discardSampleAfterSignIn, enterSampleMode, exitSampleMode, isSampleFilling, resumeSampleMode, useSampleMode } from '@/lib/sampleMode';
 import { useUI } from '@/store/ui';
 import { useToast } from '@/store/toast';
@@ -83,6 +85,8 @@ export function AppShell() {
 
   const auth = useAuth();
   const inSample = useSampleMode();
+  // Just signed up with data from before on this phone: ask whether to move it into the new account.
+  const [moveOffer, setMoveOffer] = useState<(GuestData & { uid: string }) | null>(null);
   const [sampleIntro, setSampleIntro] = useState(false); // the 3-second "you're exploring sample data" note
   const [restoring, setRestoring] = useState(false);
   const restoredFor = useRef<string | null>(null);
@@ -186,6 +190,17 @@ export function AppShell() {
         onDone={async (mode, username) => {
           setForceWelcome(false);
           const who = getAuth().displayName || username; // always greet by display name, never by email
+          const a = getAuth();
+          if (a.isNew && a.uid) {
+            // a brand-new account (email or Google): never copy this phone's guest data silently, ask first
+            const found = await describeGuestData().catch(() => null);
+            if (found) setMoveOffer({ ...found, uid: a.uid });
+            clearNewAccount();
+            setFlow('welcome');
+            setTab('today');
+            toast(`Account created. Welcome, ${who}!`);
+            return;
+          }
           if (mode === 'login') {
             const uid = getAuth().uid ?? null;
             restoredFor.current = uid; // this handler owns the restore
@@ -429,6 +444,28 @@ export function AppShell() {
         />
       )}
       {showDemo && <Demo onClose={() => setShowDemo(false)} />}
+      {moveOffer && (
+        <BottomPrompt
+          title={
+            moveOffer.spends > 0
+              ? `You have ${moveOffer.spends} ${moveOffer.spends === 1 ? 'spend' : 'spends'} on this phone. Move ${moveOffer.spends === 1 ? 'it' : 'them'} into your account?`
+              : 'You set up a plan on this phone. Move it into your account?'
+          }
+          body="It was saved here before you signed up. Move it to keep it with your account on every device, or start fresh and leave it out. Starting fresh deletes nothing: it just stays on this phone."
+          actionLabel="Move them"
+          onAction={() => {
+            const offer = moveOffer;
+            setMoveOffer(null);
+            void withLoading('Moving your data…', async () => {
+              await claimGuestData(offer.uid);
+              requestSync();
+            }).then(() => toast('Moved into your account'));
+          }}
+          secondaryLabel="Start fresh"
+          onSecondary={() => setMoveOffer(null)}
+          onClose={() => {} /* a real question: tapping outside or pressing Escape must not answer it */}
+        />
+      )}
       {sampleIntro && inSample && ready && snap?.cycle && <SampleNote onDone={() => setSampleIntro(false)} />}
       <Toast />
       <PWAManager />
