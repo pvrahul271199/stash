@@ -7,11 +7,14 @@ export function Welcome({
   onAccount,
   onSample,
   onDemo,
+  signedIn = false,
 }: {
   onStart: () => void;
   onAccount: () => void;
   onSample: () => void;
   onDemo: () => void;
+  /** Opened from the logo by someone already in: only "how it works" and a way back to the dashboard. */
+  signedIn?: boolean;
 }) {
   return (
     <main className="flex h-full flex-col justify-between px-6 pb-8 pt-14">
@@ -28,13 +31,20 @@ export function Welcome({
           still spend. No guilt, no points. Just clarity.
         </p>
       </div>
-      <div className="flex flex-col gap-1">
-        <PrimaryButton onClick={onStart}>Try now</PrimaryButton>
-        <SecondaryButton onClick={onDemo} className="mt-2">See how it works</SecondaryButton>
-        <div className="h-2" aria-hidden="true" />
-        <GhostButton onClick={onAccount}>Sign up or log in with Google</GhostButton>
-        <GhostButton onClick={onSample}>Or explore with sample data first</GhostButton>
-      </div>
+      {signedIn ? (
+        <div className="flex flex-col gap-1">
+          <PrimaryButton onClick={onStart}>Back to dashboard</PrimaryButton>
+          <SecondaryButton onClick={onDemo} className="mt-2">See how it works</SecondaryButton>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-1">
+          <PrimaryButton onClick={onStart}>Try now</PrimaryButton>
+          <SecondaryButton onClick={onDemo} className="mt-2">See how it works</SecondaryButton>
+          <div className="h-2" aria-hidden="true" />
+          <GhostButton onClick={onAccount}>Sign up or log in with Google</GhostButton>
+          <GhostButton onClick={onSample}>Or explore with sample data first</GhostButton>
+        </div>
+      )}
     </main>
   );
 }

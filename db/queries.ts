@@ -42,7 +42,7 @@ import {
   type DerivedCycle,
 } from '@/lib/period';
 import { resolveLabel } from '@/lib/suggestions';
-import { addDays, dateOfDay, daysBetween, toISO, todayISO } from '@/lib/dates';
+import { addDays, dateOfDay, daysBetween, setClosedThrough, subscribeDay, toISO, todayISO } from '@/lib/dates';
 import { DEFAULT_SAMPLE_PLAN, generateSampleSpends } from '@/lib/sample';
 import { buildCSV, type CsvRow } from '@/lib/csv';
 import { resolveCategories, validateName, type ResolvedCategory } from '@/lib/categories';
@@ -156,7 +156,9 @@ export function useToday(): string {
     const tick = () => setToday(todayISO());
     const id = setInterval(tick, 60_000);
     document.addEventListener('visibilitychange', tick);
+    const off = subscribeDay(tick); // a day was closed early: move on now, not at midnight
     return () => {
+      off();
       clearInterval(id);
       document.removeEventListener('visibilitychange', tick);
     };
@@ -643,8 +645,7 @@ export async function removeEntry(id: string): Promise<void> {
 /* ---------- the day and the month ---------- */
 
 /**
- * "Close the day" is a recap now: what today cost and what tomorrow's amount will be. It writes nothing; the day
- * ends at midnight by itself, so it can't be closed twice, early or on two devices at once.
+ * What today cost and what tomorrow's amount will be. Read-only; `closeToday` is the action that moves on.
  */
 export async function previewCloseDay(today: string = todayISO()): Promise<CloseResult | null> {
   const db = getDB();
@@ -652,6 +653,24 @@ export async function previewCloseDay(today: string = todayISO()): Promise<Close
   if (!c || c.currentDay > c.totalDays) return null;
   const spends = (await db.transactions.where('txnDate').equals(today).toArray()).filter(alive);
   return closeDay(c, spentToday(spends));
+}
+
+/**
+ * "Close the day": the user says the day on screen is done. Returns the recap (tomorrow's amount) and, from that
+ * moment, the app treats the next day as today instead of waiting for midnight. The day on screen is whatever
+ * `todayISO()` says, so a user who closed early can log the next day and close that too.
+ * Stored per device in `meta.closedThrough`; nothing is synced and no month state is stored.
+ */
+export async function closeToday(): Promise<CloseResult | null> {
+  const day = todayISO();
+  const r = await previewCloseDay(day);
+  if (!r) return null;
+  const db = getDB();
+  const m = await db.meta.get('main');
+  if (m) await db.meta.update('main', { closedThrough: day });
+  else await db.meta.put({ id: 'main', lastUsedLabel: null, schemaVersion: SCHEMA_VERSION, closedThrough: day });
+  setClosedThrough(day);
+  return r;
 }
 
 /** Marks last month's leftover as moved to savings (a note on the summary; money itself is never moved by the app). */

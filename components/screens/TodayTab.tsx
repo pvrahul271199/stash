@@ -2,20 +2,20 @@
 import { useEffect, useRef, useState } from 'react';
 import { PrimaryButton, SecondaryButton } from '../ui/Button';
 import { Note } from '../ui/Chip';
+import { useToast } from '@/store/toast';
 import { Logo } from '../ui/Logo';
 import { HugeNumber } from '../ui/HugeNumber';
 import { SyncStatusPill } from '../ui/SyncStatusPill';
-import { WeekRow, type WeekDay } from '../ui/WeekRow';
+import { WeekRow, weekWindow, type WeekDay } from '../ui/WeekRow';
 import { LogSpend } from './LogSpend';
 import { DayPeek } from './DayPeek';
 import { CloseDay } from './CloseDay';
-import { DayClosed } from './DayClosed';
 import { EditSpendSheet } from './EditSpendSheet';
 import { IosHint } from '../pwa/IosHint';
 import { BackupPrompt } from '../ui/BackupPrompt';
 import { PreviousDayHint } from '../ui/PreviousDayHint';
 import { useSampleMode } from '@/lib/sampleMode';
-import { dayRowsOf, previewCloseDay, useDayEntries } from '@/db/queries';
+import { closeToday, dayRowsOf, useDayEntries } from '@/db/queries';
 import type { Entry, Plan } from '@/db/schema';
 import { monthView, type DerivedCycle } from '@/lib/period';
 import {
@@ -25,24 +25,21 @@ import {
   overMessage,
   spentToday,
   todayAllowance,
-  type CloseResult,
   type CycleState,
 } from '@/lib/budget';
 import { dateOfDay, daysBetween, formatWithWeekday, todayISO } from '@/lib/dates';
 import { inr } from '@/lib/format';
-import { useUI } from '@/store/ui';
 
-type View = 'today' | 'log' | 'close' | 'closed';
+type View = 'today' | 'log' | 'close';
 
-export function TodayTab({ cycle, plan, onCreateAccount }: { cycle: DerivedCycle; plan: Plan; onCreateAccount: () => void }) {
+export function TodayTab({ cycle, plan, onCreateAccount, onHome }: { cycle: DerivedCycle; plan: Plan; onCreateAccount: () => void; onHome: () => void }) {
   const [view, setView] = useState<View>('today');
   const [logReturn, setLogReturn] = useState<View>('today');
   const [logDay, setLogDay] = useState<number | undefined>(undefined);
   const [peekDay, setPeekDay] = useState<number | null>(null);
-  const [result, setResult] = useState<CloseResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<Entry | null>(null);
-  const setSheet = useUI((s) => s.setSheet);
+  const toast = useToast((s) => s.show);
   // First visit only: an arrow pointing at yesterday's circle ("you can log earlier days"). Remembered per device; sample mode has its own.
   const inSample = useSampleMode();
   const hintKey = `stash:hint:previous-day${inSample ? ':sample' : ''}`;
@@ -71,11 +68,6 @@ export function TodayTab({ cycle, plan, onCreateAccount }: { cycle: DerivedCycle
   const dayRows = dayRowsOf(cycle);
   const todayEntries = entries.slice(0, 10);
 
-  // Lets the shell hold back the month-end screen until the user has seen "Day closed".
-  useEffect(() => {
-    setSheet(view === 'closed' ? 'dayClosed' : 'none');
-    return () => setSheet('none');
-  }, [view, setSheet]);
 
   const state: CycleState = cycle;
   const allowance = todayAllowance(state);
@@ -98,15 +90,23 @@ export function TodayTab({ cycle, plan, onCreateAccount }: { cycle: DerivedCycle
   const monthDay = daysBetween(cycle.monthStart, todayISO()) + 1;
   const remaining = Math.max(state.pool - spent, 0);
 
-  /** A recap only: nothing is written, the day ends at midnight by itself. */
+  // The same 7 days the recap shows: today turns "closed", tomorrow becomes today.
+  const nextDay = cycle.currentDay + 1;
+  const closeWeek: WeekDay[] = weekWindow(Math.min(nextDay, cycle.totalDays), cycle.totalDays).map((day) => {
+    const row = dayRows.find((r) => r.day === day);
+    return {
+      day,
+      status: day === cycle.currentDay ? 'closed' : day === nextDay ? 'today' : row ? row.status : day < cycle.currentDay ? 'closed' : 'future',
+    };
+  });
+
+  /** Really closes the day on screen: the app moves on to the next day now, not at midnight. One tap, no second screen. */
   async function close() {
     setBusy(true);
-    const r = await previewCloseDay();
+    const r = await closeToday();
     setBusy(false);
-    if (r) {
-      setResult(r);
-      setView('closed');
-    }
+    setView('today');
+    if (r) toast('Day closed');
   }
 
   return (
@@ -114,10 +114,15 @@ export function TodayTab({ cycle, plan, onCreateAccount }: { cycle: DerivedCycle
       <div className="flex-1 overflow-y-auto px-6 pb-4 pt-4">
         <IosHint />
         <header className="flex items-center justify-between pt-3">
-          <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={onHome}
+            aria-label="Chelav home: how it works"
+            className="-ml-1 flex min-h-0 items-center gap-1.5 rounded-xl px-1 py-1 active:opacity-70"
+          >
             <Logo size={24} />
             <span className="font-display text-[17px] font-semibold tracking-tight text-[#1E1B4B]">Chelav</span>
-          </div>
+          </button>
           <div className="flex items-center gap-2">
             <SyncStatusPill />
           </div>
@@ -210,6 +215,9 @@ export function TodayTab({ cycle, plan, onCreateAccount }: { cycle: DerivedCycle
       {view === 'close' && (
         <CloseDay
           entries={entries}
+          cycle={state}
+          week={closeWeek}
+          startDate={cycle.startDate}
           busy={busy}
           onBack={() => setView('today')}
           onClose={close}
@@ -236,7 +244,6 @@ export function TodayTab({ cycle, plan, onCreateAccount }: { cycle: DerivedCycle
       )}
       {view === 'today' && peekDay == null && !editing && <BackupPrompt onCreate={onCreateAccount} />}
       {editing && <EditSpendSheet entry={editing} onClose={() => setEditing(null)} />}
-      {view === 'closed' && result && <DayClosed cycle={cycle} result={result} onNext={() => setView('today')} />}
     </>
   );
 }

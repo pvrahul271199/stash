@@ -59,3 +59,18 @@ describe('dates', () => {
     expect(formatWithWeekday('2026-10-27')).toBe('Tue 27 Oct');
   });
 });
+
+describe('closing a day early', () => {
+  it('skips the closed day until the clock reaches the next one', async () => {
+    const { setClosedThrough, todayISO, clockISO, isAheadOfClock } = await import('@/lib/dates');
+    const clock = clockISO();
+    setClosedThrough(clock);
+    expect(todayISO()).toBe(addDays(clock, 1));
+    expect(isAheadOfClock()).toBe(true);
+    expect(todayISO(new Date(2026, 10, 6))).toBe('2026-11-06'); // an explicit date is taken literally
+    setClosedThrough(addDays(clock, -1)); // the clock has moved past it
+    expect(todayISO()).toBe(clock);
+    expect(isAheadOfClock()).toBe(false);
+    setClosedThrough(null);
+  });
+});

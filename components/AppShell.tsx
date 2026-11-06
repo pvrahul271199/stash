@@ -273,7 +273,7 @@ export function AppShell() {
       body = (
         <>
           <div className="flex min-h-0 flex-1 flex-col">
-            {tab === 'today' && <TodayTab cycle={snap.cycle} plan={snap.plan} onCreateAccount={() => {
+            {tab === 'today' && <TodayTab cycle={snap.cycle} plan={snap.plan} onHome={() => setForceWelcome(true)} onCreateAccount={() => {
                 openSignIn();
               }} />}
             {tab === 'history' && <HistoryTab activeCycle={snap.cycle} plan={snap.plan} />}
@@ -404,6 +404,7 @@ export function AppShell() {
           }}
           onSample={handleSample}
           onDemo={() => setShowDemo(true)}
+          signedIn={auth.status === 'signedIn'}
         />
       );
     }
