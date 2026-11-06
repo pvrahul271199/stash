@@ -1,6 +1,7 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Toast } from './ui/Toast';
+import { GhostButton, PrimaryButton } from './ui/Button';
 import { TabBar, type Tab } from './ui/TabBar';
 import { Welcome } from './screens/Welcome';
 import { Demo } from './screens/Demo';
@@ -39,14 +40,17 @@ import { useUI } from '@/store/ui';
 import { useToast } from '@/store/toast';
 import { useBusy, withLoading } from '@/store/busy';
 
-/** Wait for the first pull, but never block the UI for long (offline / slow network). */
-function restoreFromCloud(): Promise<void> {
+/**
+ * Wait for the first pull, but never block the UI for long (offline / slow network).
+ * Resolves true only when the sync really finished; false on error or timeout (the sync keeps running).
+ */
+function restoreFromCloud(): Promise<boolean> {
   return Promise.race([
     syncNow().then(
-      () => undefined,
-      () => undefined,
+      () => true,
+      () => false,
     ),
-    new Promise<void>((r) => setTimeout(r, 8000)),
+    new Promise<boolean>((r) => setTimeout(() => r(false), 8000)),
   ]);
 }
 
@@ -82,6 +86,16 @@ export function AppShell() {
   const auth = useAuth();
   const [restoring, setRestoring] = useState(false);
   const restoredFor = useRef<string | null>(null);
+  // Signed-in user whose cloud data could not be checked. While set (and no cycle is on the device) we must not
+  // offer onboarding: a new plan made now would become a second cycle next to the one still in the cloud.
+  const [restoreFailedFor, setRestoreFailedFor] = useState<string | null>(null);
+  const restoreFor = useCallback(async (uid: string) => {
+    setRestoring(true);
+    const ok = await restoreFromCloud();
+    setRestoreFailedFor(ok ? null : uid);
+    setRestoring(false);
+    return ok;
+  }, []);
 
   // Returning user on a fresh device/reload with nothing local yet: pull before deciding what to show.
   const hasCycle = snap ? !!snap.cycle : null;
@@ -89,9 +103,8 @@ export function AppShell() {
     if (!ready || !consented || hasCycle !== false || auth.status !== 'signedIn' || !auth.uid) return;
     if (restoredFor.current === auth.uid) return;
     restoredFor.current = auth.uid;
-    setRestoring(true);
-    void restoreFromCloud().finally(() => setRestoring(false));
-  }, [ready, consented, hasCycle, auth.status, auth.uid]);
+    void restoreFor(auth.uid);
+  }, [ready, consented, hasCycle, auth.status, auth.uid, restoreFor]);
 
   const runSync = useCallback(async () => {
     const gap = await syncCalendar(todayISO());
@@ -168,13 +181,12 @@ export function AppShell() {
           setForceWelcome(false);
           const who = getAuth().displayName || username; // always greet by display name, never by email
           if (mode === 'login') {
-            restoredFor.current = getAuth().uid ?? null; // this handler owns the restore
-            setRestoring(true);
+            const uid = getAuth().uid ?? null;
+            restoredFor.current = uid; // this handler owns the restore
             setFlow('welcome');
             setTab('today');
-            await restoreFromCloud();
+            if (uid) await restoreFor(uid);
             await runSync();
-            setRestoring(false);
             toast(who ? `Welcome back, ${who}!` : 'Welcome back!');
             return;
           }
@@ -334,7 +346,23 @@ export function AppShell() {
       );
     }
   } else if (flow === 'welcome') {
-    if (auth.status === 'signedIn' && !snap.cycle) {
+    if (auth.status === 'signedIn' && !snap.cycle && restoreFailedFor === auth.uid) {
+      body = (
+        <main className="flex h-full flex-col justify-center bg-bg px-6" aria-label="Could not load your data">
+          <h1 className="font-display text-[24px] font-semibold tracking-tight text-ink">We couldn’t reach your saved data</h1>
+          <p className="mt-2 text-[15px] leading-relaxed text-soft">
+            Your plan and spends are safe in the cloud. Check your connection and try again, so we don’t start a
+            second month next to the one you already have.
+          </p>
+          <PrimaryButton className="mt-8" onClick={() => auth.uid && void restoreFor(auth.uid)}>
+            Try again
+          </PrimaryButton>
+          <GhostButton className="mt-2" onClick={() => setRestoreFailedFor(null)}>
+            I’m new here, set up a plan
+          </GhostButton>
+        </main>
+      );
+    } else if (auth.status === 'signedIn' && !snap.cycle) {
       body = (
         <Onboarding
           initial={draft ?? undefined}

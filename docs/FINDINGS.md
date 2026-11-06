@@ -44,6 +44,11 @@ Status values: `open` · `fixed` · `wontfix` · `by-design` (update this column
 | F-36 | Low | Scale | Five unused secondary indexes on `transactions` | fixed (2026-11-04) |
 | F-37 | Medium | Security | Review of `supabase/schema.sql` (2026-11-06): users could rewrite their own profile (username squatting); `username_available` revealed which emails have Google accounts; unbounded text/JSON per row; no push batch cap | fixed in `schema.sql` (hardening block); **not yet run on a database** |
 | F-09b | High | Budget | "Merge accidental cycle" (F-09) | deliberately left as is (owner decision, 2026-11-04) |
+| F-38 | Critical | Security | Pull trusted RLS alone: `GET <table>?select=*` had no `user_id` filter and applyRemote wrote any row it got; a sync during a login/logout switch could upload one account's DB into another | fixed (2026-11-06): pull filters `user_id=eq.<uid>`, applyRemote drops rows not owned by the signed-in user, syncNow refuses when the open DB isn't that user's |
+| F-39 | High | Data | Categories doubled: user rows named like a default (old full copies, claimed guest data, two devices) listed next to the default | fixed (2026-11-06): `dedupeCategories` (boot + after pull) re-points spends, keeps extra subcategories, tombstones the duplicate; resolver never shows a name twice |
+| F-40 | High | Budget | Merge card shown to everyone with 2+ cycles; merge reopened the original before closing the restart, so the push broke `uq_cycles_one_active` and was quarantined | fixed (2026-11-06): card only when the newest cycle starts inside the previous one (`findAccidentalPair`); write order fixed. Supersedes F-09/F-09b |
+| F-41 | High | Sync | After login, a slow/failed restore (8 s timeout) dropped the user into onboarding; the new plan became a second cycle next to the cloud one | fixed (2026-11-06): "couldn't reach your saved data" screen with Retry; onboarding only on explicit "I'm new here" |
+| F-42 | Medium | Data | Guest data is claimed into a new account without asking (origin of the 2026-11-01 "Sort later 2,555" rows); spends can be logged on future dates | open |
 
 ---
 

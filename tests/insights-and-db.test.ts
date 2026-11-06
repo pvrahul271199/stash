@@ -47,12 +47,13 @@ import {
   updateEventNote,
   updateActivePlan,
   mergeAccidentalCycle,
+  findAccidentalPair,
 } from '@/db/queries';
 import { getDB } from '@/db/schema';
 import { loadCategories, toEntry } from '@/db/queries';
 import { buildCalendar, buildMonthCalendar, compactINR, dayTotals, dayTotalsByDate, searchEntries } from '@/lib/history';
 import { sumItems } from '@/lib/budget';
-import { dateOfDay, todayISO } from '@/lib/dates';
+import { addDays, dateOfDay, todayISO } from '@/lib/dates';
 
 describe('validateName', () => {
   it('blocks empty, duplicate (case-insensitive), and >24 char names', () => {
@@ -517,8 +518,9 @@ describe('database queries', () => {
 
   it('merges an accidentally restarted cycle back into original month, re-attaching logs and restoring correct timeline', async () => {
     await ensureSeed();
-    // 1. Original month started on 2026-10-01 (Day 1..30)
-    await createPlanAndCycle({ income: 50000, bills: 20000, savings: 0, monthLength: 30 }, '2026-10-01');
+    // 1. Original month started 10 days ago (Day 1..30), so a restart today falls inside it
+    const originalStart = addDays(todayISO(), -10);
+    await createPlanAndCycle({ income: 50000, bills: 20000, savings: 0, monthLength: 30 }, originalStart);
     const db = getDB();
     const cycle1 = (await db.cycles.orderBy('startDate').last())!;
 
@@ -547,7 +549,7 @@ describe('database queries', () => {
     const remainingCycles = (await db.cycles.toArray()).filter((c) => c.deletedAt == null);
     expect(remainingCycles).toHaveLength(1);
     expect(remainingCycles[0].id).toBe(cycle1.id);
-    expect(remainingCycles[0].startDate).toBe('2026-10-01');
+    expect(remainingCycles[0].startDate).toBe(originalStart);
 
     // 5. Verify the spend from cycle2 was moved to cycle1
     const movedEntry = await db.transactions.get(e2.id);
@@ -556,6 +558,17 @@ describe('database queries', () => {
     // 6. Pool is derived: 40,000 - 1,000 (day 1) - 500 (day 2, now a closed day) = 38,500
     expect(remainingCycles[0].planAmount).toBe(40000);
     expect(remainingCycles[0].pool).toBe(38500);
+  });
+
+  it('does not offer or perform a merge for a normal next month (no date overlap)', async () => {
+    await ensureSeed();
+    const db = getDB();
+    await createPlanAndCycle({ income: 50000, bills: 20000, savings: 0, monthLength: 30 }, addDays(todayISO(), -40));
+    await createPlanAndCycle({ income: 50000, bills: 20000, savings: 0, monthLength: 30 }, todayISO());
+    expect(findAccidentalPair(await db.cycles.toArray())).toBeNull();
+    const result = await mergeAccidentalCycle();
+    expect(result.success).toBe(false);
+    expect((await db.cycles.toArray()).filter((c) => c.deletedAt == null)).toHaveLength(2);
   });
 
   it('buildMonthCalendar generates a full Mon-Sun grid with correct cycle day and active status', () => {

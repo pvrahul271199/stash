@@ -1,5 +1,5 @@
 import Dexie from 'dexie';
-import { getDB, dbNameFor, GUEST_UID, nextRev, withoutRevStamp, type CategoryRow, type Cycle, type Plan, type StashDB, type StashEvent, type SyncBase, type SyncFailure, type Txn } from '@/db/schema';
+import { getDB, getActiveDBUid, dbNameFor, GUEST_UID, nextRev, withoutRevStamp, type CategoryRow, type Cycle, type Plan, type StashDB, type StashEvent, type SyncBase, type SyncFailure, type Txn } from '@/db/schema';
 import { getAuth, getAccessToken } from './auth';
 import { getSupabase, supabaseEnv } from './supabaseClient';
 import { decodeBase64Username, encodeUsernameToBase64 } from './user';
@@ -567,18 +567,21 @@ type Cursor = { ts: string; id: string };
 
 async function pullTable(
   db: StashDB,
+  owner: string,
   name: TableName,
   cursor: Cursor | null,
 ): Promise<{ cursor: Cursor | null; touchedCycles: Set<string> }> {
   const touched = new Set<string>();
   let cur = cursor;
+  // Always ask for this user's rows only. RLS should already enforce it, but the app must never depend on that alone.
+  const mine = `&user_id=eq.${encodeURIComponent(owner)}`;
   // first page: plain `updated_at > cursor - overlap`; later pages: the exact (updated_at, id) keyset
   let filter = cursor ? `&updated_at=gt.${encodeURIComponent(new Date(Date.parse(cursor.ts) - PULL_OVERLAP_MS).toISOString())}` : '';
   for (;;) {
-    const res = await authed(`${name}?select=*&order=updated_at.asc,id.asc&limit=${PAGE}${filter}`, { method: 'GET' });
+    const res = await authed(`${name}?select=*${mine}&order=updated_at.asc,id.asc&limit=${PAGE}${filter}`, { method: 'GET' });
     const rows = (await res.json()) as Remote[];
     if (rows.length) {
-      const t = await applyRemote(db, { [name]: rows });
+      const t = await applyRemote(db, { [name]: rows }, owner);
       t.forEach((id) => touched.add(id));
       const last = rows[rows.length - 1];
       const next = { ts: last.updated_at as string, id: last.id };
@@ -592,11 +595,11 @@ async function pullTable(
 }
 
 /** Pulls everything newer than the stored per-table cursors. Never clears local data. */
-export async function pullSince(db: StashDB): Promise<void> {
+export async function pullSince(db: StashDB, owner: string): Promise<void> {
   const meta = await getMeta(db);
   const cursors: Record<string, Cursor | null> = { ...(meta.pullCursors ?? {}) };
   for (const name of TABLE_ORDER) {
-    const r = await pullTable(db, name, cursors[name] ?? null);
+    const r = await pullTable(db, owner, name, cursors[name] ?? null);
     cursors[name] = r.cursor;
   }
   // Advance only after every table succeeded.
@@ -608,10 +611,14 @@ export async function pullSince(db: StashDB): Promise<void> {
  * field against the last synced version (`mergeRows`), and what still differs from the server stays
  * dirty so the next push sends it. Cycle.currentDay merges as max(local, remote); touched cycles are
  * re-derived. Returns the touched cycle ids.
+ *
+ * Ownership is checked here, on the client: a row whose `user_id` is not `owner` (the signed-in user this
+ * DB belongs to) is dropped and never written, whatever the server sent. Rows without a `user_id` are dropped too.
  */
-export async function applyRemote(db: StashDB, rows: RemoteRows): Promise<Set<string>> {
+export async function applyRemote(db: StashDB, rows: RemoteRows, owner: string | undefined = getAuth().uid): Promise<Set<string>> {
   const touched = new Set<string>();
-  const { recompute } = await import('@/db/queries');
+  if (!owner || owner === GUEST_UID) throw new SyncError('Not signed in', 'auth');
+  const { recompute, dedupeCategories } = await import('@/db/queries');
   await db.transaction(
     'rw',
     [db.plans, db.cycles, db.transactions, db.cats, db.evts, db.dayRows, db.meta, db.syncBase],
@@ -622,6 +629,10 @@ export async function applyRemote(db: StashDB, rows: RemoteRows): Promise<Set<st
         const m = MAPPERS[name];
         const table = db[m.local] as unknown as Dexie.Table<Record<string, unknown> & { id: string; updatedAt: number }, string>;
         for (const r of list) {
+          if (r.user_id !== owner) {
+            foreignRowsDropped++;
+            continue;
+          }
           const key = baseKey(name, r.id);
           const version = r.version == null ? null : Number(r.version);
           const base = await db.syncBase.get(key);
@@ -655,10 +666,18 @@ export async function applyRemote(db: StashDB, rows: RemoteRows): Promise<Set<st
           }
         }
       }
+      if (rows.categories?.length) await dedupeCategories(db);
       for (const id of touched) await recompute(db, id);
     },
   );
+  if (foreignRowsDropped && typeof console !== 'undefined') console.warn(`[sync] dropped ${foreignRowsDropped} row(s) that belong to another account`);
   return touched;
+}
+
+/** Rows the server sent that belonged to another account (should always stay 0). Exposed for tests / diagnostics. */
+let foreignRowsDropped = 0;
+export function getForeignRowsDropped(): number {
+  return foreignRowsDropped;
 }
 
 /* ---------- orchestration ---------- */
@@ -714,12 +733,16 @@ export function syncNow(): Promise<SyncResult> {
       reportSyncProgress('offline');
       throw new SyncError('You are offline', 'offline');
     }
+    const uid = auth.uid;
+    // The open DB must be this user's. During a login/logout switch it can briefly be another user's (or the
+    // guest's): syncing then would upload that data into this account, or pull this account into theirs.
+    if (getActiveDBUid() !== uid) throw new SyncError('Account is switching, sync skipped', 'auth');
     const db = getDB();
     reportSyncProgress('syncing');
     try {
       const pushed = await pushDirty(db);
       await pushProfile(db).catch(() => {});
-      await pullSince(db);
+      await pullSince(db, uid);
       await purgeTombstones(db);
       const meta = await getMeta(db);
       if (meta.guestClaimPending) {

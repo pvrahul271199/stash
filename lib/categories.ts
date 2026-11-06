@@ -69,7 +69,13 @@ export function resolveCategories(defaults: DefaultCategory[], rows: CategoryOve
     (d.isSystem ? system : out).push(item);
   }
   own.sort((a, b) => a.sortOrder - b.sortOrder || a.updatedAt - b.updatedAt);
+  // Never show a name twice (a user row copying a default, or the same name from two devices).
+  // db/queries.ts `dedupeCategories` repairs the data; this only keeps the list clean until it runs.
+  const shown = new Set([...out, ...system].map((c) => c.name.toLowerCase()));
   for (const r of own) {
+    const lower = r.name.trim().toLowerCase();
+    if (shown.has(lower)) continue;
+    shown.add(lower);
     out.push({ id: r.id, name: r.name, sortOrder: 0, isSystem: false, subcategories: r.subcategories, baseId: null });
   }
   return [...out, ...system].map((c, i) => ({ ...c, sortOrder: i }));

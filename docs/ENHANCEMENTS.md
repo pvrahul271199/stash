@@ -105,6 +105,65 @@ Costs and risks:
 Recommendation: do E-2 now; do E-1 next; revisit E-3 only if data shows users lost to cleared browser data or
 device switches.
 
+## E-4 · Derived budget period (drop the stateful cycle)
+
+**Problem.** A cycle is stored state that moves: `currentDay` is advanced by closing days, catch-up writes
+`estimatedDays`, "Start next month" / onboarding create new cycle rows, and the server allows one open cycle per
+user. Two devices (or one device before its first pull) disagree about that state, which caused duplicate cycles,
+the merge card, catch-up surprises and quarantined pushes (F-08, F-09, F-40, F-41).
+
+**Key observation.** `rollupCycle` (`lib/budget.ts`) already derives day rows and the pool purely from transactions.
+The only stored inputs it still needs are `currentDay` and `estimatedDays`. Replace `currentDay` with "today" and
+the whole budget becomes a pure function of *(plan, transactions, today)*: nothing to sync, so nothing to conflict.
+
+**Model.**
+```
+period(plan, date)  -> { start, end, totalDays }      // from plan.periodStart (see decision 1)
+planAmount          = moneyToLiveOn(planInEffect(start))
+spentBefore         = Σ spends with start <= txnDate < today, !fromSavings, adjustsPool !== false
+daysLeft            = days from today to end, inclusive
+allowanceToday      = max(planAmount - spentBefore, 0) / daysLeft
+leftToday           = allowanceToday - Σ spends dated today
+history day d       = same formula evaluated with today = d (what rollupCycle already does)
+```
+
+**What goes away.** `cycles` as a synced, mutable table; `closeDay`/`closeCurrentDay` as a write; `syncCalendar`
+day-closing; `planSync`/`catchUp`/`applyCatchUp`/`skipCatchUp`; `estimatedDays`; `startNextMonth`; `startCycle`
+"end the old cycle"; `mergeAccidentalCycle` + card; `uq_cycles_one_active`; `Cycle.pool` cache; `WelcomeBack` as a
+blocking screen.
+
+**What stays / changes.**
+- Missed days count as nothing spent. Replace the blocking catch-up with a dismissible card ("You didn't log Mon–Wed.
+  Add a rough total?") that writes ordinary `isEstimate` transactions; no hidden state.
+- `MonthEnd` becomes a read-only "last period" summary card on the first days of a new period, not a gate.
+  "Move leftover to savings" becomes a flag on that summary (it was cosmetic anyway, F-17).
+- "Close the day" becomes optional and cosmetic (a "today's recap" sheet), or is removed (decision 2).
+- Plan edits: plans get `effectiveFrom`; a past period uses the plan in effect at its start, so changing the plan
+  never rewrites last month. Editing mid-period re-bases the current period only (same as today's behaviour).
+- `adjustsPool: false` (record-only past spends) keeps working: excluded from `spentBefore`.
+- Future-dated spends are blocked (F-42).
+
+**Phases.**
+1. *Pure core.* New `lib/period.ts` (`periodFor`, `planInEffect`, `budgetFor`, `daysFor`) built on `rollupCycle` with
+   `currentDay = calendarDay(today)`. Unit + property tests: order independence, two devices with the same rows give
+   the same numbers, plan change mid-period, DST/month-length edges, overspend.
+2. *Read path behind a flag.* `useSnapshot` exposes a derived `period` alongside `cycle`; Today, History, Insights,
+   LogSpend, DayPeek, WeekRow read the period. Compare old vs new numbers in a dev-only check on real data.
+3. *Write path.* Remove day closing, catch-up, next-month, merge and the "one open cycle" logic; replace WelcomeBack and
+   MonthEnd with the non-blocking cards; block future dates in LogSpend/History.
+4. *Data migration.* Dexie v(N+1): set `plan.periodStart` from the latest cycle (decision 1), add `effectiveFrom` to
+   plans (oldest = earliest cycle start); stop pushing/pulling `cycles`; keep the local table read-only for one release
+   for rollback. Server: keep `cycles` rows for history, stop using `transactions.cycle_id`, drop
+   `uq_cycles_one_active` and the `(user_id, cycle_id)` FK in `schema.sql`.
+5. *Cleanup.* Delete `CycleState`, `closeDay`, `planSync`, `catchUp`, cycle-only tests and screens; update
+   ARCHITECTURE/FLOWS; port to `stash-mobile/` later (it has its own copy of the logic).
+
+**Decisions needed from the owner.**
+1. Period boundary: (a) payday day-of-month, e.g. "from the 1st" or "from the 25th" (calendar-aligned, matches
+   salary; month length varies 28–31), or (b) fixed N days from an anchor date (today's behaviour; drifts off the
+   calendar). Recommended: (a); migration sets the day from the current cycle's start date.
+2. Keep "Close the day" as an optional recap, or remove it.
+
 ## Guest data isolation (reference)
 
 `stash-default` is an IndexedDB database scoped to one browser profile on one device. Guests never sync, so guests on

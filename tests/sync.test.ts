@@ -2,6 +2,8 @@ import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const auth = { status: 'signedIn' as const, uid: 'uid-1', username: 'rahul' };
+/** Simulates a database whose RLS is broken: GETs return every user's rows and ignore the user_id filter. */
+let ignoreUserFilter = false;
 const refreshSession = vi.fn(async () => ({}));
 let token = 'tok-1';
 vi.mock('@/lib/auth', () => ({
@@ -83,7 +85,7 @@ function fakeFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Respon
           for (const { _base_version, ...r } of rows) {
             void _base_version;
             const version = (t.get(r.id)?.version ?? 0) + 1;
-            t.set(r.id, { ...r, version, updated_at: new Date(clock++).toISOString() });
+            t.set(r.id, { ...r, user_id: auth.uid, version, updated_at: new Date(clock++).toISOString() });
             (versions[name] ??= {})[r.id] = version;
           }
         }
@@ -106,7 +108,9 @@ function fakeFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Respon
       const m = or?.match(/updated_at\.gt\.([^,]+),/);
       const plain = u.searchParams.get('updated_at')?.match(/^gt\.(.+)$/);
       const after = m ? decodeURIComponent(m[1]) : plain ? plain[1] : null;
+      const owner = u.searchParams.get('user_id')?.match(/^eq\.(.+)$/)?.[1];
       const rows = [...t.values()]
+        .filter((r) => ignoreUserFilter || (owner != null && r.user_id === owner))
         .filter((r) => !after || r.updated_at > after)
         .sort((a, b) => a.updated_at.localeCompare(b.updated_at));
       return new Response(JSON.stringify(rows), { status: 200 });
@@ -135,7 +139,8 @@ async function freshUser() {
   rpcCalls.length = 0;
   calls.length = 0;
   maxInFlight = 0;
-  await openUserDB(`sync-user-${n}`);
+  auth.uid = `sync-user-${n}`; // the open DB always belongs to the signed-in user
+  await openUserDB(auth.uid);
   await ensureSeed();
 }
 
@@ -155,6 +160,7 @@ describe('sync engine', () => {
     pushRequests = 0;
     uniqueNames = false;
     loseResponseOnce = false;
+    ignoreUserFilter = false;
     await freshUser();
   });
 
@@ -235,7 +241,7 @@ describe('sync engine', () => {
     const local = (await getDB().transactions.get(e.id))!;
     const remote = (amount: number, at: number) =>
       ({
-        id: e.id, client_updated_at: at, deleted_at: null, cycle_id: cycle.id, txn_date: local.txnDate, amount,
+        id: e.id, user_id: auth.uid, client_updated_at: at, deleted_at: null, cycle_id: cycle.id, txn_date: local.txnDate, amount,
         type: 'Food', subtype: null, label: 'x', from_savings: false, adjusts_pool: true, is_estimate: false,
         hour: 0, created_at: local.createdAt,
       }) as never;
@@ -249,7 +255,7 @@ describe('sync engine', () => {
     await createPlanAndCycle(plan, '2026-10-01');
     const cycle = (await getDB().cycles.toArray())[0];
     const remote = {
-      id: cycle.id, client_updated_at: cycle.updatedAt - 5, deleted_at: null, start_date: cycle.startDate,
+      id: cycle.id, user_id: auth.uid, client_updated_at: cycle.updatedAt - 5, deleted_at: null, start_date: cycle.startDate,
       total_days: 30, plan_amount: cycle.planAmount, current_day: 4, leftover_moved: false, estimated_days: [],
     } as never;
     await applyRemote(getDB(), { cycles: [remote] }); // local is newer, but remote day is ahead
@@ -283,7 +289,7 @@ describe('sync engine', () => {
 
   it('a name already taken by another device is renamed locally and the push succeeds', async () => {
     uniqueNames = true;
-    server.set('categories', new Map([['other-device', { id: 'other-device', client_updated_at: 1, version: 1, updated_at: new Date(1).toISOString(), deleted_at: null, name: 'Pets' }]]));
+    server.set('categories', new Map([['other-device', { id: 'other-device', user_id: auth.uid, client_updated_at: 1, version: 1, updated_at: new Date(1).toISOString(), deleted_at: null, name: 'Pets' }]]));
     await createPlanAndCycle(plan, '2026-10-01');
     await addCategory('pets');
     await addCategory('Books');
@@ -363,7 +369,7 @@ describe('pull cursor', () => {
     server.set('categories', t);
     const base = Date.now();
     const cat = (i: number, at: number) => ({
-      id: `00000000-0000-0000-0000-${String(i).padStart(12, '0')}`, client_updated_at: 1, version: 1,
+      id: `00000000-0000-0000-0000-${String(i).padStart(12, '0')}`, user_id: auth.uid, client_updated_at: 1, version: 1,
       updated_at: new Date(at).toISOString(), deleted_at: null, name: `C${i}`, sort_order: i, is_system: false,
       subcategories: [], base_id: null, sub_added: [], sub_removed: [],
     });
@@ -422,6 +428,7 @@ describe('sync robustness (B1, B2, M2)', () => {
     rejectIds.clear();
     uniqueNames = false;
     loseResponseOnce = false;
+    ignoreUserFilter = false;
     await freshUser();
     patchCount = 0;
     pushRequests = 0;
@@ -521,5 +528,62 @@ describe('sync robustness (B1, B2, M2)', () => {
     expect(await countUnsynced()).toBeGreaterThan(0);
     await settle();
     expect(await countUnsynced()).toBe(0);
+  });
+});
+
+describe('account isolation (the app enforces it, not only RLS)', () => {
+  beforeEach(async () => {
+    vi.stubGlobal('fetch', fakeFetch);
+    vi.stubGlobal('navigator', { onLine: true });
+    vi.stubGlobal('window', { localStorage: { getItem: (k: string) => (k === 'stash:consent' ? JSON.stringify({ v: 1 }) : null), setItem: () => {}, removeItem: () => {} }, addEventListener: () => {} });
+    ignoreUserFilter = false;
+    await freshUser();
+  });
+
+  const foreignTxn = (id: string) => ({
+    id, user_id: 'someone-else', client_updated_at: 1, version: 1, updated_at: new Date(clock++).toISOString(), deleted_at: null,
+    cycle_id: null, txn_date: '2026-11-03', amount: 50000, type: 'Other', category_id: 'other', subtype: null, label: 'Sort later',
+    event: null, event_id: null, payment: null, note: null, from_savings: false, adjusts_pool: true, is_estimate: false, hour: 0, created_at: 1,
+  });
+
+  it('every pull asks only for the signed-in user', async () => {
+    await createPlanAndCycle(plan, '2026-10-01');
+    await settle();
+    const gets: string[] = [];
+    vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) => {
+      if ((init?.method ?? 'GET') === 'GET') gets.push(String(input));
+      return fakeFetch(input, init);
+    });
+    await settle();
+    expect(gets.length).toBeGreaterThan(0);
+    for (const g of gets) expect(new URL(g).searchParams.get('user_id')).toBe(`eq.${auth.uid}`);
+  });
+
+  it('with broken RLS (server returns other users\' rows) nothing foreign reaches the device', async () => {
+    ignoreUserFilter = true;
+    server.set('transactions', new Map([['foreign-1', foreignTxn('foreign-1')]]));
+    server.set('categories', new Map([['foreign-cat', { id: 'foreign-cat', user_id: 'someone-else', client_updated_at: 1, version: 1, updated_at: new Date(clock++).toISOString(), deleted_at: null, name: 'Food', sort_order: 0, is_system: false, subcategories: [], base_id: null, sub_added: [], sub_removed: [] }]]));
+    await createPlanAndCycle(plan, '2026-10-01');
+    await settle();
+    expect(await getDB().transactions.get('foreign-1')).toBeUndefined();
+    expect(await getDB().cats.get('foreign-cat')).toBeUndefined();
+    // and so it can never be re-uploaded under this account
+    expect([...server.get('transactions')!.values()].filter((r) => r.user_id === auth.uid && r.id === 'foreign-1')).toHaveLength(0);
+  });
+
+  it('applyRemote drops rows of another user and rows with no owner', async () => {
+    const { user_id, ...ownerless } = foreignTxn('no-owner');
+    void user_id;
+    await applyRemote(getDB(), { transactions: [foreignTxn('foreign-2'), ownerless as never] as never });
+    expect(await getDB().transactions.count()).toBe(0);
+  });
+
+  it('refuses to sync when the open DB belongs to a different user (login/logout switch)', async () => {
+    await createPlanAndCycle(plan, '2026-10-01');
+    const owner = auth.uid;
+    auth.uid = 'another-account'; // auth already switched, DB not yet
+    await expect(syncNow()).rejects.toThrow(/switching/);
+    expect(server.get('plans')).toBeUndefined(); // nothing from the other DB was uploaded into this account
+    auth.uid = owner;
   });
 });

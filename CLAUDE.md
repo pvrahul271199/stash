@@ -22,7 +22,7 @@ Keep these three up to date when behaviour changes. `FINDINGS.md` has a status c
 - Next.js App Router, **static export** (`output: 'export'`, `trailingSlash: true`), React 19, strict TypeScript. Single page (`app/page.tsx` → `components/AppShell.tsx`); there is no server code and no API routes.
 - Tailwind with custom tokens (`tailwind.config.ts`, `theme/tokens.ts`), fonts via `next/font/google`.
 - **Dexie / IndexedDB** is the source of truth on device. Zustand holds *UI-only* state (`store/*`, plus the currency store in `lib/currency.ts`).
-- **Supabase Auth** (`@supabase/supabase-js`, auth only; username → `<username>@stash.app` email + password, no password reset) plus PostgREST over raw `fetch` with the user's access token for data. RLS is per `auth.uid()`. Guests (`stash-default`) never sync.
+- **Supabase Auth** (`@supabase/supabase-js`, auth only; username → `<username>@stash.app` email + password, no password reset) plus PostgREST over raw `fetch` with the user's access token for data. RLS is per `auth.uid()`, **and the client enforces ownership too**: every pull filters `user_id=eq.<uid>` and `applyRemote` drops rows owned by anyone else (F-38). Never remove either. Guests (`stash-default`) never sync.
 - PWA: `app/manifest.ts`, `public/sw.js` + `scripts/build-sw.mjs` (precache + content-hash version).
 - `stash-mobile/`: separate Expo / React Native app with its own copy of the logic and an AsyncStorage JSON blob. Not synced with the web app.
 
@@ -31,7 +31,7 @@ Keep these three up to date when behaviour changes. `FINDINGS.md` has a status c
 ```bash
 npm run dev        # next dev --webpack -H 0.0.0.0  (http://localhost:3000)
 npm run lint       # tsc --noEmit  (there is no ESLint)
-npm test           # vitest run   (139 tests, fake-indexeddb)
+npm test           # vitest run   (153 tests, fake-indexeddb)
 npm run build      # next build --webpack && node scripts/build-sw.mjs  → out/
 npm start          # node scripts/serve-out.mjs → http://127.0.0.1:3100
 npm run test:e2e   # Playwright; needs `npm run build` first, mobile 390x844 + desktop
@@ -82,7 +82,7 @@ stash-mobile/        Expo app (separate package.json)
 - Dates are local ISO strings (`yyyy-mm-dd`). Use `lib/dates.ts`, never `new Date(iso)` (timezone/DST bugs).
 - `Entry.day` and `Entry.date` can disagree after merges/restore; `useDayEntries` filters out entries whose `date` ≠ the expected date.
 - Auth: `lib/auth.ts` (`useAuth`, `signUp`, `logIn`, `logOut`). One Dexie DB per user (`stash-<uid>`, guest = `stash-default`); schema v6 (uuid ids, soft delete, `transactions` + derived `dayRows` via `recompute`). Sync: `requestSync()` only, LWW on `client_updated_at`.
-- `.env.local` is **tracked in git** and the Supabase RLS policies are allow-all. Do not add more secrets to either (FINDINGS F-01/F-02).
+- Do not commit secrets; RLS policies in `supabase/schema.sql` are per-user, but client code must still filter by user (F-38).
 - Working tree has uncommitted changes in 12 files (History, LogSpend, UserTab, queries, sync, …). Findings refer to the working-tree version.
 
 ## Review status

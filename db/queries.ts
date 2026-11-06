@@ -363,6 +363,7 @@ export async function ensureSeed(): Promise<void> {
     });
   });
   await rebuildStaleCaches(db);
+  if ((await dedupeCategories(db)) > 0) requestSync();
 }
 
 async function persistStorage() {
@@ -475,9 +476,22 @@ export function useSyncFailureCount(): number {
   return useLiveQuery(async () => Object.keys((await getDB().meta.get('main'))?.syncFailures ?? {}).length, [], 0);
 }
 
+/**
+ * The two cycles an accidental restart leaves behind: the newest cycle started *inside* the previous one's date
+ * range (e.g. onboarding redone mid-month). A normal "Start next month" begins after the old cycle ends, so
+ * it never matches; that is why the restore card no longer shows for everyone with 2+ months (F-09).
+ */
+export function findAccidentalPair(cycles: Cycle[]): { original: Cycle; latest: Cycle } | null {
+  const live = cycles.filter(alive).sort((a, b) => a.startDate.localeCompare(b.startDate) || a.updatedAt - b.updatedAt);
+  if (live.length < 2) return null;
+  const latest = live[live.length - 1];
+  const original = live[live.length - 2];
+  const offset = daysBetween(original.startDate, latest.startDate);
+  return offset >= 0 && offset < original.totalDays ? { original, latest } : null;
+}
+
 export function useCanMergeCycle(): boolean {
-  const count = useLiveQuery(async () => (await getDB().cycles.toArray()).filter(alive).length, []);
-  return (count ?? 0) > 1;
+  return useLiveQuery(async () => findAccidentalPair(await getDB().cycles.toArray()) != null, [], false);
 }
 
 /**
@@ -487,13 +501,11 @@ export function useCanMergeCycle(): boolean {
  */
 export async function mergeAccidentalCycle(): Promise<{ success: boolean; message: string; currentDay?: number }> {
   const db = getDB();
-  const cycles = (await db.cycles.toArray()).filter(alive);
-  if (cycles.length < 2) {
-    return { success: false, message: 'Only one cycle exists. No previous cycle to restore.' };
+  const pair = findAccidentalPair(await db.cycles.toArray());
+  if (!pair) {
+    return { success: false, message: 'No restarted month found. Nothing to restore.' };
   }
-  cycles.sort((a, b) => a.startDate.localeCompare(b.startDate) || a.updatedAt - b.updatedAt);
-  const latest = cycles[cycles.length - 1];
-  const original = cycles[cycles.length - 2];
+  const { latest, original } = pair;
   const plan = await latestPlan(db);
   const planAmount = plan ? moneyToLiveOn(plan) : original.planAmount;
   const monthLength = plan?.monthLength ?? original.totalDays;
@@ -501,10 +513,12 @@ export async function mergeAccidentalCycle(): Promise<{ success: boolean; messag
   const now = Date.now();
 
   await db.transaction('rw', [db.cycles, db.transactions, db.dayRows], async () => {
+    // Close the restarted cycle BEFORE reopening the original: pushes go in write order and the server allows
+    // only one open cycle per user, so the other order is rejected and the merge never reaches the cloud.
+    await db.cycles.update(latest.id, { deletedAt: now, updatedAt: now });
+    await db.cycles.update(original.id, { currentDay, totalDays: monthLength, planAmount, updatedAt: now });
     const moved = await db.transactions.where('cycleId').equals(latest.id).toArray();
     for (const t of moved) await db.transactions.update(t.id, { cycleId: original.id, updatedAt: now });
-    await db.cycles.update(original.id, { currentDay, totalDays: monthLength, planAmount, updatedAt: now });
-    await db.cycles.update(latest.id, { deletedAt: now, updatedAt: now });
     await db.dayRows.where('cycleId').equals(latest.id).delete();
     await recompute(db, original.id);
   });
@@ -836,6 +850,63 @@ async function overrideFor(db: StashDB, baseId: string, now: number) {
   };
   await db.cats.add(row);
   return row;
+}
+
+/**
+ * Repairs duplicate categories. A user-created row (baseId null) whose name matches a visible default, or an
+ * older user-created row of the same name, is a duplicate: old full copies of the defaults, guest data claimed into
+ * an account, or the same name created on two devices. Its spends are re-pointed to the kept category, extra
+ * subcategories are kept (as an override for a default, or added to the kept row), and the duplicate is tombstoned
+ * so the repair syncs to every device. Idempotent. Must run inside a transaction that includes `cats` and
+ * `transactions` (or opens its own when called outside one).
+ */
+export async function dedupeCategories(db: StashDB = getDB()): Promise<number> {
+  return db.transaction('rw', [db.cats, db.transactions], async () => {
+    const rows = await db.cats.toArray();
+    const now = Date.now();
+    const removedDefaults = new Set<string>();
+    const latestOverride = new Map<string, (typeof rows)[number]>();
+    for (const r of rows) {
+      if (!r.baseId) continue;
+      const prev = latestOverride.get(r.baseId);
+      if (!prev || r.updatedAt > prev.updatedAt) latestOverride.set(r.baseId, r);
+    }
+    for (const [key, o] of latestOverride) if (o.deletedAt != null) removedDefaults.add(key);
+    const visibleDefault = new Map(
+      DEFAULT_CATEGORIES.filter((d) => d.isSystem || !removedDefaults.has(d.key)).map((d) => [d.name.toLowerCase(), d]),
+    );
+    const own = rows
+      .filter((r) => r.baseId == null && r.deletedAt == null)
+      .sort((a, b) => a.updatedAt - b.updatedAt || a.id.localeCompare(b.id));
+    const keptOwn = new Map<string, (typeof rows)[number]>();
+    let fixed = 0;
+    for (const r of own) {
+      const lower = r.name.trim().toLowerCase();
+      const d = visibleDefault.get(lower);
+      const keeper = keptOwn.get(lower);
+      if (!d && !keeper) {
+        keptOwn.set(lower, r);
+        continue;
+      }
+      const targetId = d ? d.key : keeper!.id;
+      const extra = r.subcategories.filter((s) => !(d ? d.subcategories : keeper!.subcategories).includes(s));
+      if (extra.length && d) {
+        const o = await overrideFor(db, d.key, now);
+        const subAdded = [...o.subAdded, ...extra.filter((s) => !o.subAdded.includes(s))];
+        const subRemoved = o.subRemoved.filter((s) => !extra.includes(s));
+        await db.cats.update(o.id, { subAdded, subRemoved, updatedAt: now });
+      } else if (extra.length && keeper) {
+        const subcategories = [...keeper.subcategories, ...extra];
+        await db.cats.update(keeper.id, { subcategories, updatedAt: now });
+        keeper.subcategories = subcategories;
+      }
+      const linked = await db.transactions.where('categoryId').equals(r.id).toArray();
+      for (const t of linked) await db.transactions.update(t.id, { categoryId: targetId, type: d ? d.name : keeper!.name, updatedAt: now });
+      await db.cats.update(r.id, { deletedAt: now, updatedAt: now });
+      fixed++;
+    }
+    return fixed;
+  });
 }
 
 export async function addCategory(name: string): Promise<string | null> {
