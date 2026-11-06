@@ -2,7 +2,7 @@ import type { Config } from 'tailwindcss';
 import { colors } from './theme/tokens';
 
 const config: Config = {
-  content: ['./app/**/*.{ts,tsx}', './components/**/*.{ts,tsx}'],
+  content: ['./app/**/*.{ts,tsx}', './components/**/*.{ts,tsx}', './stories/**/*.{ts,tsx}'],
   theme: {
     extend: {
       colors: { ...colors },

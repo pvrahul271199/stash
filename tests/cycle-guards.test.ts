@@ -351,7 +351,7 @@ describe('last month\'s summary and the sample month', () => {
     }
   });
 
-  /** The same steps `signUp` takes: open the new account's DB, then claim the guest's data into it. */
+  /** Sign-up, then the user answering "Move them": open the new account's DB, then claim the guest's data into it. */
   const signUpFrom = async (uid: string) => {
     const { claimGuestData } = await import('@/db/claim');
     await openUserDB(uid);

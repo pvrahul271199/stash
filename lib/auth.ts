@@ -20,6 +20,8 @@ export type AuthState = {
   displayName?: string;
   email?: string;
   provider?: 'email' | 'google';
+  /** This session just created the account (sign-up, or a Google sign-in that made a new one). Never persisted. */
+  isNew?: boolean;
 };
 type Result = { ok: true } | { ok: false; error: string };
 
@@ -72,7 +74,10 @@ function isNewAccount(u: AuthUser): boolean {
   return Number.isFinite(a) && Number.isFinite(b) && Math.abs(b - a) < 60_000;
 }
 
-/** Called when Google sends the user back with a session: switch to their database, and move guest data in only for a brand-new account. */
+/**
+ * Called when Google sends the user back with a session: switch to their database. Guest data is NOT moved in here: the app asks
+ * first (see `describeGuestData` / `claimGuestData` in db/claim.ts), and only for a brand-new account (`isNew`).
+ */
 let adopting: { uid: string; p: Promise<void> } | null = null;
 function adoptGoogleUser(u: AuthUser): Promise<void> {
   if (!u.id || state.uid === u.id) return Promise.resolve();
@@ -80,11 +85,7 @@ function adoptGoogleUser(u: AuthUser): Promise<void> {
   const uid = u.id;
   const p = (async () => {
     await openUserDB(uid);
-    if (isNewAccount(u)) {
-      const { claimGuestData } = await import('@/db/claim');
-      await claimGuestData(uid);
-    }
-    setState(fromUser(u));
+    setState({ ...fromUser(u), ...(isNewAccount(u) ? { isNew: true } : null) });
   })().finally(() => {
     adopting = null;
   });
@@ -138,6 +139,11 @@ async function dropToGuest() {
   setState({ status: 'guest' });
 }
 
+/** The new-account handling (e.g. the "move your data?" question) is done: forget that this session created the account. */
+export function clearNewAccount(): void {
+  if (state.isNew) setState({ ...state, isNew: false });
+}
+
 export function useAuth(): AuthState {
   return useSyncExternalStore(
     (l) => {
@@ -178,10 +184,8 @@ export async function signUp(username: string, password: string): Promise<Result
     });
     if (error) return { ok: false, error: friendly(error.message) };
     if (!data.user || !data.session) return { ok: false, error: 'Sign up needs "Confirm email" turned off' };
-    const { claimGuestData } = await import('@/db/claim');
-    await openUserDB(data.user.id);
-    await claimGuestData(data.user.id);
-    setState({ status: 'signedIn', uid: data.user.id, username: name });
+    await openUserDB(data.user.id); // guest data on this phone is not copied in: the app asks first
+    setState({ status: 'signedIn', uid: data.user.id, username: name, isNew: true });
     return { ok: true };
   } catch (e) {
     return { ok: false, error: friendly(e instanceof Error ? e.message : String(e)) };

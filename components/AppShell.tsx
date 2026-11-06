@@ -2,11 +2,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Toast } from './ui/Toast';
 import { SampleNote } from './ui/SampleNote';
+import { BottomPrompt } from './ui/BottomPrompt';
 import { GhostButton, PrimaryButton } from './ui/Button';
 import { TabBar, type Tab } from './ui/TabBar';
 import { Welcome } from './screens/Welcome';
 import { Demo } from './screens/Demo';
 import { AuthScreen } from './screens/AuthScreen';
+import { GoogleSignInSheet } from './ui/GoogleSignInSheet';
 import { Onboarding } from './screens/Onboarding';
 import { PlanSummary } from './screens/PlanSummary';
 import { TodayTab } from './screens/TodayTab';
@@ -32,7 +34,8 @@ import { isPlanValid, type PlanInput } from '@/lib/budget';
 import { daysBetween, todayISO } from '@/lib/dates';
 import { periodFor } from '@/lib/period';
 import { requestSync, syncNow } from '@/lib/sync';
-import { getAuth, initAuth, logOut, useAuth } from '@/lib/auth';
+import { clearNewAccount, getAuth, initAuth, logOut, useAuth } from '@/lib/auth';
+import { claimGuestData, describeGuestData, type GuestData } from '@/db/claim';
 import { discardSampleAfterSignIn, enterSampleMode, exitSampleMode, isSampleFilling, resumeSampleMode, useSampleMode } from '@/lib/sampleMode';
 import { useUI } from '@/store/ui';
 import { useToast } from '@/store/toast';
@@ -74,6 +77,12 @@ export function AppShell() {
   const [askLogout, setAskLogout] = useState(false);
   const [farewell, setFarewell] = useState(false); // thank-you page after "Delete my account"
   const [authMode, setAuthMode] = useState<'signup' | 'login'>('login');
+  // The one way in is the "Sign in with Google" sheet; the older username form (AuthScreen) is only a small link inside it.
+  const [signInSheet, setSignInSheet] = useState(false);
+  const openSignIn = (m: 'signup' | 'login') => {
+    setAuthMode(m);
+    setSignInSheet(true);
+  };
   const [consented, setConsented] = useState(() => hasSyncConsent());
 
   // Guests may open the sign-in screen soon: fetch Google's script in idle time so its button appears instantly.
@@ -83,6 +92,8 @@ export function AppShell() {
 
   const auth = useAuth();
   const inSample = useSampleMode();
+  // Just signed up with data from before on this phone: ask whether to move it into the new account.
+  const [moveOffer, setMoveOffer] = useState<(GuestData & { uid: string }) | null>(null);
   const [sampleIntro, setSampleIntro] = useState(false); // the 3-second "you're exploring sample data" note
   const [restoring, setRestoring] = useState(false);
   const restoredFor = useRef<string | null>(null);
@@ -171,6 +182,34 @@ export function AppShell() {
     });
   }
 
+  /** After any successful sign-in or sign-up (Google sheet, or the username form). */
+  async function handleAuthDone(mode: 'signup' | 'login', username: string) {
+    setForceWelcome(false);
+    const who = getAuth().displayName || username; // always greet by display name, never by email
+    const a = getAuth();
+    if (a.isNew && a.uid) {
+      // a brand-new account (email or Google): never copy this phone's guest data silently, ask first
+      const found = await describeGuestData().catch(() => null);
+      if (found) setMoveOffer({ ...found, uid: a.uid });
+      clearNewAccount();
+      setFlow('welcome');
+      setTab('today');
+      toast(`Account created. Welcome, ${who}!`);
+      return;
+    }
+    if (mode === 'login') {
+      const uid = getAuth().uid ?? null;
+      restoredFor.current = uid; // this handler owns the restore
+      setFlow('welcome');
+      setTab('today');
+      if (uid) await restoreFor(uid);
+      toast(who ? `Welcome back, ${who}!` : 'Welcome back!');
+      return;
+    }
+    setFlow('welcome');
+    toast(`Account created. Welcome, ${who}!`);
+  }
+
   let body: React.ReactNode = null;
   if (!ready || !snap) {
     body = <LoadingScreen />;
@@ -183,21 +222,7 @@ export function AppShell() {
       <AuthScreen
         initialMode={authMode}
         onBack={() => setFlow('welcome')}
-        onDone={async (mode, username) => {
-          setForceWelcome(false);
-          const who = getAuth().displayName || username; // always greet by display name, never by email
-          if (mode === 'login') {
-            const uid = getAuth().uid ?? null;
-            restoredFor.current = uid; // this handler owns the restore
-            setFlow('welcome');
-            setTab('today');
-            if (uid) await restoreFor(uid);
-            toast(who ? `Welcome back, ${who}!` : 'Welcome back!');
-            return;
-          }
-          setFlow('welcome');
-          toast(`Account created. Welcome, ${who}!`);
-        }}
+        onDone={handleAuthDone}
       />
     );
   } else if (flow === 'changePlan') {
@@ -250,8 +275,7 @@ export function AppShell() {
         <>
           <div className="flex min-h-0 flex-1 flex-col">
             {tab === 'today' && <TodayTab cycle={snap.cycle} plan={snap.plan} onCreateAccount={() => {
-                setAuthMode('signup');
-                setFlow('auth');
+                openSignIn('signup');
               }} />}
             {tab === 'history' && <HistoryTab activeCycle={snap.cycle} plan={snap.plan} />}
             {tab === 'insights' && <InsightsTab cycle={snap.cycle} plan={snap.plan} />}
@@ -274,12 +298,10 @@ export function AppShell() {
                 onSwitchUser={() => setAskLogout(true)}
                 onLeaveSample={leaveSample}
                 onLogIn={() => {
-                  setAuthMode('login');
-                  setFlow('auth');
+                  openSignIn('login');
                 }}
                 onCreateAccount={() => {
-                  setAuthMode('signup');
-                  setFlow('auth');
+                  openSignIn('signup');
                 }}
                 onDeleted={() => {
                     setDraft(null);
@@ -308,8 +330,7 @@ export function AppShell() {
                 if (auth.status === 'signedIn') {
                   setAskLogout(true);
                 } else {
-                  setAuthMode('login');
-                  setFlow('auth');
+                  openSignIn('login');
                 }
               }}
               onChangePlan={() => {
@@ -375,8 +396,7 @@ export function AppShell() {
             else setFlow('onboarding');
           }}
           onAccount={() => {
-            setAuthMode('login');
-            setFlow('auth');
+            openSignIn('login');
           }}
           onSample={handleSample}
           onDemo={() => setShowDemo(true)}
@@ -429,6 +449,41 @@ export function AppShell() {
         />
       )}
       {showDemo && <Demo onClose={() => setShowDemo(false)} />}
+      {signInSheet && (
+        <GoogleSignInSheet
+          onClose={() => setSignInSheet(false)}
+          onSignedIn={() => {
+            setSignInSheet(false);
+            void handleAuthDone('login', '');
+          }}
+          onUseUsername={() => {
+            setSignInSheet(false);
+            setFlow('auth');
+          }}
+        />
+      )}
+      {moveOffer && (
+        <BottomPrompt
+          title={
+            moveOffer.spends > 0
+              ? `You have ${moveOffer.spends} ${moveOffer.spends === 1 ? 'spend' : 'spends'} on this phone. Move ${moveOffer.spends === 1 ? 'it' : 'them'} into your account?`
+              : 'You set up a plan on this phone. Move it into your account?'
+          }
+          body="It was saved here before you signed up. Move it to keep it with your account on every device, or start fresh and leave it out. Starting fresh deletes nothing: it just stays on this phone."
+          actionLabel="Move them"
+          onAction={() => {
+            const offer = moveOffer;
+            setMoveOffer(null);
+            void withLoading('Moving your data…', async () => {
+              await claimGuestData(offer.uid);
+              requestSync();
+            }).then(() => toast('Moved into your account'));
+          }}
+          secondaryLabel="Start fresh"
+          onSecondary={() => setMoveOffer(null)}
+          onClose={() => {} /* a real question: tapping outside or pressing Escape must not answer it */}
+        />
+      )}
       {sampleIntro && inSample && ready && snap?.cycle && <SampleNote onDone={() => setSampleIntro(false)} />}
       <Toast />
       <PWAManager />

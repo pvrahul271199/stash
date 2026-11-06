@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { PrimaryButton, SecondaryButton } from '../ui/Button';
 import { Note } from '../ui/Chip';
 import { Logo } from '../ui/Logo';
@@ -13,6 +13,8 @@ import { DayClosed } from './DayClosed';
 import { EditSpendSheet } from './EditSpendSheet';
 import { IosHint } from '../pwa/IosHint';
 import { BackupPrompt } from '../ui/BackupPrompt';
+import { PreviousDayHint } from '../ui/PreviousDayHint';
+import { useSampleMode } from '@/lib/sampleMode';
 import { dayRowsOf, previewCloseDay, useDayEntries } from '@/db/queries';
 import type { Entry, Plan } from '@/db/schema';
 import { monthView, type DerivedCycle } from '@/lib/period';
@@ -41,6 +43,30 @@ export function TodayTab({ cycle, plan, onCreateAccount }: { cycle: DerivedCycle
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<Entry | null>(null);
   const setSheet = useUI((s) => s.setSheet);
+  // First visit only: an arrow pointing at yesterday's circle ("you can log earlier days"). Remembered per device; sample mode has its own.
+  const inSample = useSampleMode();
+  const hintKey = `stash:hint:previous-day${inSample ? ':sample' : ''}`;
+  const stripRef = useRef<HTMLDivElement>(null);
+  const [showHint, setShowHint] = useState(false);
+  useEffect(() => {
+    let seen = true;
+    try {
+      seen = window.localStorage.getItem(hintKey) === '1';
+    } catch {
+      /* no storage: skip the hint rather than nag on every visit */
+    }
+    if (seen) return;
+    const t = setTimeout(() => setShowHint(true), 700);
+    return () => clearTimeout(t);
+  }, [hintKey]);
+  const endHint = () => {
+    setShowHint(false);
+    try {
+      window.localStorage.setItem(hintKey, '1');
+    } catch {
+      /* ignore */
+    }
+  };
   const entries = useDayEntries(cycle.id, cycle.currentDay) ?? [];
   const dayRows = dayRowsOf(cycle);
   const todayEntries = entries.slice(0, 10);
@@ -119,12 +145,16 @@ export function TodayTab({ cycle, plan, onCreateAccount }: { cycle: DerivedCycle
           )}
         </div>
 
-        <div className="mt-2">
+        <div className="relative mt-2" ref={stripRef}>
           <WeekRow
             days={week}
             startDate={cycle.monthStart}
-            onSelect={(day) => setPeekDay(day)}
+            onSelect={(day) => {
+              endHint();
+              setPeekDay(day);
+            }}
           />
+          {showHint && view === 'today' && peekDay == null && <PreviousDayHint host={stripRef} onDone={endHint} />}
         </div>
         <p className="mt-5 text-[15px] text-soft">
           <span className="num text-ink">{inr(remaining)}</span> left for {n} {n === 1 ? 'day' : 'days'}

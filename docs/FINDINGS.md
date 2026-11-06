@@ -50,7 +50,7 @@ Status values: `open` · `fixed` · `wontfix` · `by-design` (update this column
 | F-41 | High | Sync | After login, a slow/failed restore (8 s timeout) dropped the user into onboarding; the new plan became a second cycle next to the cloud one | fixed (2026-11-06): "couldn't reach your saved data" screen with Retry; onboarding only on explicit "I'm new here" |
 | F-43 | Medium | Privacy | Logout offered "keep my data on this phone" and a second "remove it" button | fixed (2026-11-06): logging out always removes the local copy after a final sync; warns if changes could not upload |
 | F-44 | Medium | Budget | "Last month, wrapped up" showed for a brand-new plan: "last month" was looked up as the day before tracking began, which is in the same calendar month when tracking starts mid-month (0 spent, whole plan "left over"). Sample data also straddled months ("19 Oct - 18 Nov") | fixed (2026-11-06): last month = the calendar month before this one and only if it has spends; the sample stays inside the current month |
-| F-42 | Medium | Data | Guest data is claimed into a new account without asking (origin of the 2026-11-01 "Sort later 2,555" rows) | open (future-dated spends are the intended "log ahead" feature, not a bug) |
+| F-42 | Medium | Data | Guest data was claimed into a new account without asking (origin of the 2026-11-01 "Sort later 2,555" rows) | fixed (2026-11-06): sign-up / new Google accounts no longer copy anything; the app asks "You have N spends on this phone. Move them into your account?" (Move them / Start fresh; Start fresh deletes nothing). Sample data is never offered |
 
 ---
 
@@ -315,3 +315,12 @@ Reviewed and **not** built (no current feature needs them; each is a column plus
 - **F-36 / L1**: only `(user_id, updated_at, id)` plus a tiny partial `event_id` index remain (the events FK is `on delete set null`).
 - Also fixed: the client purge of old tombstones deleted "built-in category removed" markers (`baseId` set), which would bring the built-in back.
 - Not done: B3 (merge button), H1, H3-H5, M-level server work beyond the above, L2/L3. `supabase/schema.sql` must be re-run in the Supabase SQL editor.
+
+---
+
+## Working-tree note (2026-11-06)
+
+During the derived-months work the repository's checked-out branch changed between `derived-months` (the new work, two commits ahead of
+`main`) and `main` (the older code) outside the editing session, and uncommitted edits in the working tree were reset twice. All
+committed work is on `derived-months`; `main` still has the old stored-cycle code. Before merging, rebase/merge `derived-months` into
+`main` rather than re-applying edits by hand, and commit work-in-progress promptly on the feature branch.
