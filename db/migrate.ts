@@ -3,11 +3,37 @@ import { rollupCycle } from '@/lib/budget';
 import { DEFAULT_CATEGORIES } from './schema';
 import { resolveCategories } from '@/lib/categories';
 import { dateOfDay } from '@/lib/dates';
-import type { CategoryRow, Cycle, DayRow, StashEvent, Txn, Plan } from './schema';
+import { planPeriodPatches } from '@/lib/period';
+import type { CategoryRow, StashEvent, Txn as CurrentTxn, Plan, Syncable } from './schema';
 import type { LegacyCategory, LegacyCycle, LegacyDayRow, LegacyEntry, LegacyEvent, LegacyPlan } from './legacy';
 import { SCHEMA_VERSION, dbNameFor, GUEST_UID, type Meta } from './schema';
 import { LegacyStashDB } from './legacy';
 import { encodeUsernameToBase64 } from '@/lib/user';
+
+/**
+ * Shapes of the v5-v10 tables (`cycles`, `dayRows`, and `cycleId` on transactions). Months are derived now (lib/period.ts)
+ * and the app no longer has these types; they only exist so the v4 -> v5 upgrade can still write what v5 stored, after
+ * which the v11 upgrade drops it. Do not use them elsewhere.
+ */
+interface Cycle extends Syncable {
+  startDate: string;
+  totalDays: number;
+  planAmount: number;
+  currentDay: number;
+  pool: number;
+  fromSavingsTotal: number;
+  calcVersion?: number;
+  leftoverMoved: boolean;
+  estimatedDays: number[];
+}
+interface DayRow {
+  cycleId: string;
+  day: number;
+  allowanceAtStart: number;
+  spent: number;
+  status: 'closed' | 'estimated';
+}
+type Txn = CurrentTxn & { cycleId: string | null };
 
 export const LEGACY_DB_NAME = 'stash';
 export const LEGACY_SPLIT_FLAG = 'stash:legacy-split';
@@ -328,4 +354,22 @@ export async function migrateTxnLinks(tx: Transaction): Promise<void> {
       t.categoryId ??= catId.get((t.type ?? '').toLowerCase()) ?? null;
       t.eventId ??= t.event ? (evtId.get(t.event.trim().toLowerCase()) ?? null) : null;
     });
+}
+
+/**
+ * v10 -> v11: stored cycles and day rows are gone (months are derived, lib/period.ts). Before the tables are dropped,
+ * the first old cycle's start is carried over as the first plan's `effectiveFrom`, so history stays inside tracking, and
+ * the newest plan gets calendar months. Plans are edited, so the change syncs like any edit. Transaction rows keep a
+ * stray `cycleId` property that nothing reads (rewriting them would mark every transaction as unsynced).
+ */
+export async function migrateToDerivedPeriods(tx: Transaction): Promise<void> {
+  const plans = (await tx.table('plans').toArray()) as (Plan & { id: string })[];
+  if (!plans.length) return;
+  const cycles = ((await tx.table('cycles').toArray()) as { startDate: string; deletedAt?: number | null }[])
+    .filter((c) => c.deletedAt == null)
+    .sort((a, b) => a.startDate.localeCompare(b.startDate));
+  const now = Date.now();
+  for (const { id, patch } of planPeriodPatches(plans, cycles[0]?.startDate ?? null)) {
+    await tx.table('plans').update(id, { ...patch, updatedAt: now });
+  }
 }

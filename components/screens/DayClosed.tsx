@@ -3,8 +3,8 @@ import { PrimaryButton } from '../ui/Button';
 import { Note } from '../ui/Chip';
 import { HugeNumber } from '../ui/HugeNumber';
 import { WeekRow, weekWindow, type WeekDay } from '../ui/WeekRow';
-import { useDayRows } from '@/db/queries';
-import type { Cycle } from '@/db/schema';
+import { dayRowsOf } from '@/db/queries';
+import type { DerivedCycle } from '@/lib/period';
 import type { CloseResult } from '@/lib/budget';
 import { inr } from '@/lib/format';
 
@@ -13,11 +13,11 @@ export function DayClosed({
   result,
   onNext,
 }: {
-  cycle: Cycle;
+  cycle: DerivedCycle;
   result: CloseResult;
   onNext: () => void;
 }) {
-  const rows = useDayRows(cycle.id) ?? [];
+  const rows = dayRowsOf(cycle);
   const over = result.state.currentDay > cycle.totalDays;
   const nextDay = result.state.currentDay;
   const week: WeekDay[] = weekWindow(Math.min(nextDay, cycle.totalDays), cycle.totalDays).map((day) => {
@@ -39,11 +39,11 @@ export function DayClosed({
 
         {over ? (
           <Note tone="good" className="mt-10">
-            That was the last day of your month. Let&apos;s look at how it went.
+            This is the last day of your month. A new one starts tomorrow.
           </Note>
         ) : (
           <>
-            <p className="mt-10 text-[15px] text-soft">Tomorrow you can spend</p>
+            <p className="mt-10 text-[15px] text-soft">If that&apos;s all for today, tomorrow you can spend</p>
             <HugeNumber value={result.tomorrowAllowance} className="mt-1" />
             <Note tone={result.kind === 'more' ? 'adjust' : 'good'} className="mt-4">
               {result.message}
@@ -54,7 +54,7 @@ export function DayClosed({
           </>
         )}
       </div>
-      <PrimaryButton onClick={onNext}>{over ? 'See my month' : `Start day ${nextDay}`}</PrimaryButton>
+      <PrimaryButton onClick={onNext}>Done</PrimaryButton>
     </div>
   );
 }

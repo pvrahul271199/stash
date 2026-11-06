@@ -1,10 +1,12 @@
 import 'fake-indexeddb/auto';
 import Dexie from 'dexie';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { addSpend, createPlanAndCycle } from '@/db/queries';
+import { addSpend, createPlan } from '@/db/queries';
 import { getDB, openUserDB } from '@/db/schema';
 import { LegacyStashDB } from '@/db/legacy';
 import { splitLegacyDB } from '@/db/migrate';
+import { cycleFor } from '@/db/queries';
+import { addDays, todayISO } from '@/lib/dates';
 
 const store = new Map<string, string>();
 const plan = { income: 80000, bills: 25000, savings: 15000, monthLength: 30 };
@@ -23,8 +25,8 @@ describe('per-user databases', () => {
 
   it('user A logs a spend, logs out, user B sees nothing; A gets it back', async () => {
     await openUserDB('uid-a');
-    await createPlanAndCycle(plan, '2026-10-01');
-    const cycle = (await getDB().cycles.toArray())[0];
+    await createPlan(plan, '2026-10-01');
+    const cycle = (await cycleFor(getDB()))!;
     await addSpend(cycle, { amount: 250, label: 'Lunch', category: 'Food', subcategory: 'Lunch' });
     expect(await getDB().transactions.count()).toBe(1);
 
@@ -32,7 +34,7 @@ describe('per-user databases', () => {
     expect(await getDB().transactions.count()).toBe(0);
     await openUserDB('uid-b');
     expect(await getDB().transactions.count()).toBe(0);
-    expect(await getDB().cycles.count()).toBe(0);
+    expect(await getDB().plans.count()).toBe(0);
 
     await openUserDB('uid-a');
     expect(await getDB().transactions.count()).toBe(1);
@@ -106,8 +108,8 @@ describe('claim guest data', () => {
     await Dexie.delete('stash-uid-new');
     await Dexie.delete('stash-uid-old');
     await openUserDB('default');
-    await createPlanAndCycle(plan, '2026-10-01');
-    const cycle = (await getDB().cycles.toArray())[0];
+    await createPlan(plan, '2026-10-01');
+    const cycle = (await cycleFor(getDB()))!;
     await addSpend(cycle, { amount: 90, label: 'Tea', category: 'Food', subcategory: null });
 
     const r = await claimGuestData('uid-new');
@@ -124,24 +126,25 @@ describe('claim guest data', () => {
   });
 });
 
-describe('day rows stay derived in one transaction', () => {
-  it('many transactions on one day sum correctly in dayRows, and remove restores the pool', async () => {
-    const { closeCurrentDay, removeEntry } = await import('@/db/queries');
+describe('day rows are derived from transactions', () => {
+  it('many spends on one past day sum into its day row and the pool; removing one gives it back', async () => {
+    const { removeEntry } = await import('@/db/queries');
     await openUserDB('uid-rollup');
-    await createPlanAndCycle(plan, '2026-10-01');
-    const cycle = (await getDB().cycles.toArray())[0];
+    await createPlan({ ...plan, periodStartDay: Number(addDays(todayISO(), -5).slice(8)) }, addDays(todayISO(), -5)); // month starts 5 days ago, so yesterday is always in it
+    const cycle = (await cycleFor(getDB()))!;
+    const yesterday = addDays(todayISO(), -1);
     const ids: string[] = [];
     for (let i = 1; i <= 25; i++) {
-      ids.push((await addSpend(cycle, { amount: i, label: 'x', category: 'Food' })).id);
+      ids.push((await addSpend(cycle, { amount: i, label: 'x', category: 'Food' }, new Date(), undefined, yesterday)).id);
     }
-    await closeCurrentDay(cycle.id);
-    const row = await getDB().dayRows.get([cycle.id, 1]);
-    expect(row?.spent).toBe(325);
-    const after = (await getDB().cycles.get(cycle.id))!;
-    expect(after.pool).toBe(cycle.planAmount - 325);
+    const day = cycle.currentDay - 1;
+    let c = (await cycleFor(getDB()))!;
+    expect(c.days.find((d) => d.day === day)?.spent).toBe(325);
+    expect(c.pool).toBe(cycle.pool - 325);
     await removeEntry(ids[24]);
-    expect((await getDB().dayRows.get([cycle.id, 1]))?.spent).toBe(300);
-    expect((await getDB().cycles.get(cycle.id))!.pool).toBe(cycle.planAmount - 300);
+    c = (await cycleFor(getDB()))!;
+    expect(c.days.find((d) => d.day === day)?.spent).toBe(300);
+    expect(c.pool).toBe(cycle.pool - 300);
   });
 });
 
@@ -221,8 +224,8 @@ describe('spend lands on the date it was logged for', () => {
     const { ensureSeed } = await import('@/db/queries');
     await openUserDB('date-user');
     await ensureSeed();
-    await createPlanAndCycle(plan, '2026-10-20');
-    const c = (await getDB().cycles.toArray())[0];
+    await createPlan(plan, '2026-10-20');
+    const c = (await cycleFor(getDB()))!;
     const cases: [string, number][] = [
       ['2026-10-20', 11], ['2026-10-25', 22], ['2026-11-05', 33], ['2026-09-30', 44], ['2026-11-30', 55],
     ];

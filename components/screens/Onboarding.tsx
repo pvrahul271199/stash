@@ -1,9 +1,12 @@
 'use client';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { BackIcon, IconButton, PrimaryButton } from '../ui/Button';
 import { inr, num } from '@/lib/format';
 import { useCurrency } from '@/lib/currency';
 import { sumItems, type PlanInput, type PlanItem } from '@/lib/budget';
+import { periodFor } from '@/lib/period';
+import { daysBetween, formatLong, todayISO } from '@/lib/dates';
+import { DatePicker } from '../ui/DatePicker';
 
 const BILL_SUGGESTIONS = ['Rent', 'Health EMI', 'Loan EMI', 'Phone & Wi-Fi', 'Electricity'];
 const SAVING_SUGGESTIONS = ['SIP', 'Emergency fund', 'RD / FD', 'Health insurance'];
@@ -226,10 +229,15 @@ export function Onboarding({
   initial,
   onDone,
   onExit,
+  startDate,
+  onStartDateChange,
 }: {
   initial?: Partial<PlanInput>;
   onDone: (p: PlanInput) => void;
   onExit: () => void;
+  /** New plans only: the day tracking starts on (the 1st of this month by default, up to today). Omitted when editing a plan. */
+  startDate?: string;
+  onStartDateChange?: (iso: string) => void;
 }) {
   const { currency } = useCurrency();
   const start = (n?: number) => (n != null && n > 0 ? String(n) : '');
@@ -238,17 +246,27 @@ export function Onboarding({
   const [savingsRaw, setSavingsRaw] = useState(start(initial?.savings));
   const [billItems, setBillItems] = useState<PlanItem[]>(initial?.billItems ?? []);
   const [savingsItems, setSavingsItems] = useState<PlanItem[]>(initial?.savingsItems ?? []);
-  const [days, setDays] = useState(String(initial?.monthLength ?? 30));
   const [pending, setPending] = useState({ bills: false, savings: false });
+  const [pickingDate, setPickingDate] = useState(false);
+  useEffect(() => {
+    if (!pickingDate) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setPickingDate(false);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [pickingDate]);
   const [error, setError] = useState<string | null>(null);
 
   const inc = Number(income) || 0;
   const bills = billItems.length > 0 ? sumItems(billItems) : Number(billsRaw) || 0;
   const savings = savingsItems.length > 0 ? sumItems(savingsItems) : Number(savingsRaw) || 0;
-  const d = Number(days);
-  const daysOk = Number.isInteger(d) && d >= 1 && d <= 31;
+  // Months are calendar months (start day 1). An existing plan keeps whatever start day it already has.
+  const monthStartDay = initial?.periodStartDay ?? 1;
+  const from = startDate ?? todayISO();
+  const month = periodFor(monthStartDay, from);
+  const monthLength = month.totalDays;
   const toLive = inc - bills - savings;
-  const perDay = inc > 0 && toLive > 0 && daysOk ? Math.floor(toLive / d) : null;
+  const perDay = inc > 0 && toLive > 0 ? Math.floor(toLive / (daysBetween(from, month.end) + 1)) : null;
+  const firstOfMonth = periodFor(1, todayISO()).start;
 
   function submit() {
     if (inc <= 0) return setError('Add your monthly income first.');
@@ -257,12 +275,11 @@ export function Onboarding({
     if (bills >= inc) return setError(`Bills need to be less than your income (${inr(inc)}).`);
     if (bills + savings >= inc)
       return setError(`Bills and savings together need to be less than your income. You have ${inr(inc - bills)} after bills.`);
-    if (!daysOk) return setError('Days until next salary should be from 1 to 31.');
-    onDone({ income: inc, bills, savings, monthLength: d, billItems, savingsItems });
+    onDone({ income: inc, bills, savings, monthLength, periodStartDay: monthStartDay, billItems, savingsItems });
   }
 
   return (
-    <main className="flex h-full flex-col px-6 pb-6 pt-4">
+    <main className="relative flex h-full flex-col px-6 pb-6 pt-4">
       <div className="flex items-center gap-3">
         <IconButton label="Back" onClick={onExit} className="-ml-3">
           <BackIcon />
@@ -342,23 +359,25 @@ export function Onboarding({
           onPending={(p) => setPending((s) => ({ ...s, savings: p }))}
         />
 
-        <section className="mt-3 flex min-w-0 items-center justify-between gap-3 rounded-note border border-line bg-white px-3.5 py-3.5">
-          <div>
-            <h2 className="text-[13px] font-semibold text-ink">Days until next salary</h2>
-            <p className="text-[11px] text-soft">Usually 30. From 1 to 31.</p>
-          </div>
-          <input
-            value={days}
-            onChange={(e) => {
-              setDays(digits(e.target.value, 2));
-              setError(null);
-            }}
-            inputMode="numeric"
-            pattern="[0-9]*"
-            aria-label="Days until next salary"
-            className="num h-9 w-14 shrink-0 rounded-key border border-line bg-white px-2 text-center text-[16px] text-ink"
-          />
-        </section>
+        {startDate && onStartDateChange && (
+          <section className="mt-3 rounded-note border border-line bg-white" aria-label="Start date">
+            <button
+              type="button"
+              onClick={() => setPickingDate(true)}
+              aria-haspopup="dialog"
+              className="flex min-h-0 w-full items-center justify-between gap-3 px-3.5 py-3.5 text-left"
+            >
+              <span>
+                <span className="block text-[13px] font-semibold text-ink">Start tracking from</span>
+                <span className="mt-0.5 block text-[12px] text-soft">
+                  {startDate === todayISO() ? 'Today, ' : ''}
+                  {formatLong(startDate)}
+                </span>
+              </span>
+              <span className="rounded-full bg-tint px-3 py-1.5 text-[12px] font-semibold text-ink">Change</span>
+            </button>
+          </section>
+        )}
 
         <p id="err" role="alert" className="mt-3 min-h-[22px] text-[14px] text-warm">
           {error}
@@ -366,6 +385,50 @@ export function Onboarding({
       </div>
 
       <PrimaryButton onClick={submit}>See my plan</PrimaryButton>
+
+      {pickingDate && startDate && onStartDateChange && (
+        <div className="absolute inset-0 z-[45] flex items-end bg-ink/40" role="presentation" onClick={() => setPickingDate(false)}>
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Choose start date"
+            onClick={(e) => e.stopPropagation()}
+            className="w-full rounded-t-[24px] bg-white px-5 pt-3"
+            style={{ paddingBottom: 'calc(var(--safe-bottom) + 20px)' }}
+          >
+            <div className="mx-auto mb-3 h-1 w-9 rounded-full bg-line" aria-hidden="true" />
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-section font-semibold text-ink">Start tracking from</h2>
+                <p className="mt-0.5 text-[13px] text-soft">Pick today, or an earlier day of this month.</p>
+              </div>
+              <button
+                type="button"
+                aria-label="Close"
+                onClick={() => setPickingDate(false)}
+                className="flex h-9 w-9 min-h-0 shrink-0 items-center justify-center rounded-full bg-tint text-ink"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+                  <path d="M6 6l12 12M18 6L6 18" />
+                </svg>
+              </button>
+            </div>
+            <div className="mt-3">
+              <DatePicker
+                bare
+                label="Start date"
+                value={startDate}
+                min={firstOfMonth}
+                max={todayISO()}
+                onChange={(iso) => {
+                  onStartDateChange(iso);
+                  setPickingDate(false);
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

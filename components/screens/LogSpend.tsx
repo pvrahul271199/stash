@@ -14,7 +14,8 @@ import {
   useLastPayment,
   useLastUsedLabel,
 } from '@/db/queries';
-import { PAYMENT_MODES, type Cycle, type Plan } from '@/db/schema';
+import { PAYMENT_MODES, type Plan } from '@/db/schema';
+import type { DerivedCycle } from '@/lib/period';
 import { daysLeft, isBigSpend, todayAllowance } from '@/lib/budget';
 import { MAX_NAME } from '@/lib/categories';
 import { dateOfDay, daysBetween, formatShort, formatWithWeekday, todayISO } from '@/lib/dates';
@@ -38,7 +39,7 @@ export function LogSpend({
   targetDate,
   onClose,
 }: {
-  cycle: Cycle;
+  cycle: DerivedCycle;
   plan: Plan;
   /** Optional specific day (1..totalDays) to log into when adding from History. */
   targetDay?: number;

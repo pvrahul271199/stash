@@ -1,29 +1,22 @@
 import { describe, it, expect } from 'vitest';
 import {
-  addFromSavings,
-  catchUp,
   closeDay,
   displayLeft,
-  initialCycleState,
   isBigSpend,
-  isCycleOver,
   isPlanValid,
   moneyToLiveOn,
   monthEnd,
-  onPlanTotal,
   overMessage,
   pace,
-  planSync,
   projection,
   spentToday,
   todayAllowance,
   type CycleState,
-  type DayInfo,
 } from '@/lib/budget';
 import { inr } from '@/lib/format';
 
 const plan = { income: 50000, bills: 18000, savings: 10000, monthLength: 30 };
-const fresh = (): CycleState => initialCycleState(plan);
+const fresh = (): CycleState => ({ currentDay: 1, totalDays: plan.monthLength, pool: moneyToLiveOn(plan), fromSavingsTotal: 0 });
 
 describe('plan', () => {
   it('computes money to live on and blocks <= 0', () => {
@@ -99,78 +92,12 @@ describe('big spend', () => {
   it('is never big on the last day', () => {
     expect(isBigSpend(5000, 100, { ...s, currentDay: 30 })).toBe(false);
   });
-  it('from savings leaves the pool alone', () => {
-    const next = addFromSavings(s, 2400);
-    expect(next.pool).toBe(s.pool);
-    expect(next.fromSavingsTotal).toBe(2400);
+  it('closing a day carries the savings total and leaves the pool alone', () => {
+    const next = { ...s, fromSavingsTotal: 2400 };
     expect(todayAllowance(next)).toBe(a);
     const r = closeDay(next, 0);
     expect(r.state.fromSavingsTotal).toBe(2400);
-  });
-});
-
-const none = (): DayInfo => ({ hasEntries: false, spent: 0 });
-
-describe('calendar sync', () => {
-  it('does nothing when the calendar day matches', () => {
-    const p = planSync(fresh(), 1, none);
-    expect(p.closes).toEqual([]);
-    expect(p.gap).toBeNull();
-  });
-  it('quietly closes a day that has entries', () => {
-    const p = planSync(fresh(), 2, (d) => (d === 1 ? { hasEntries: true, spent: 400 } : none()));
-    expect(p.closes).toHaveLength(1);
-    expect(p.closes[0]).toMatchObject({ day: 1, spent: 400, status: 'closed' });
-    expect(p.state.currentDay).toBe(2);
-    expect(p.state.pool).toBe(22000 - 400);
-    expect(p.gap).toBeNull();
-  });
-  it('closes the logged day then asks for the rest', () => {
-    const p = planSync(fresh(), 5, (d) => (d === 1 ? { hasEntries: true, spent: 400 } : none()));
-    expect(p.closes).toHaveLength(1);
-    expect(p.gap).toEqual({ from: 2, to: 4 });
-  });
-  it('opens the gap for nothing logged', () => {
-    expect(planSync(fresh(), 4, none).gap).toEqual({ from: 1, to: 3 });
-  });
-  it('ends the cycle when the final day has entries', () => {
-    const s = { ...fresh(), currentDay: 30 };
-    const p = planSync(s, 31, () => ({ hasEntries: true, spent: 100 }));
-    expect(isCycleOver(p.state)).toBe(true);
-    expect(p.gap).toBeNull();
-  });
-  it('does not misbehave after the cycle ended or if the clock jumps far ahead', () => {
-    const over = { ...fresh(), currentDay: 31 };
-    expect(planSync(over, 31, none)).toMatchObject({ closes: [], gap: null });
-    expect(planSync(fresh(), 31, none).gap).toEqual({ from: 1, to: 30 });
-  });
-});
-
-describe('catch-up', () => {
-  it.each([1, 3, 7])('splits evenly across %i missed days', (n) => {
-    const s = fresh();
-    const r = catchUp(s, 1000, { from: 1, to: n });
-    expect(r.days).toHaveLength(n);
-    expect(r.days.every((d) => d.status === 'estimated')).toBe(true);
-    expect(r.days.reduce((x, d) => x + d.spent, 0)).toBe(1000);
-    expect(r.state.currentDay).toBe(n + 1);
-    expect(r.state.pool).toBe(s.pool - 1000);
-    const amounts = r.days.map((d) => d.spent);
-    expect(Math.max(...amounts) - Math.min(...amounts)).toBeLessThanOrEqual(1);
-  });
-  it('zero creates no entries but still closes the days', () => {
-    const r = catchUp(fresh(), 0, { from: 1, to: 3 });
-    expect(r.entries).toEqual([]);
-    expect(r.days).toHaveLength(3);
-    expect(r.state.pool).toBe(22000);
-  });
-  it('on-plan total keeps tomorrow the same', () => {
-    const s = fresh();
-    const gap = { from: 1, to: 3 };
-    const total = onPlanTotal(s, gap);
-    expect(total).toBe(Math.round((22000 / 30) * 3));
-    const r = catchUp(s, total, gap);
-    expect(Math.abs(todayAllowance(r.state) - todayAllowance(s))).toBeLessThan(1);
+    expect(r.state.pool).toBe(s.pool);
   });
 });
 
@@ -178,8 +105,8 @@ describe('cycle end and month summary', () => {
   it('computes the month-end rows', () => {
     let s = fresh();
     for (let i = 0; i < 30; i++) s = closeDay(s, 600).state;
-    expect(isCycleOver(s)).toBe(true);
-    const m = monthEnd(plan, 22000, addFromSavings(s, 2400));
+    expect(s.currentDay).toBe(31);
+    const m = monthEnd(plan, 22000, { ...s, fromSavingsTotal: 2400 });
     expect(m.spentOnDaily).toBe(18000);
     expect(m.leftOver).toBe(4000);
     expect(m.fromSavings).toBe(2400);

@@ -121,26 +121,25 @@ test.describe('Today Tab Spends & Day Close Flows', () => {
     await expect(page.getByText(/₹1,000/).first()).toBeVisible();
   });
 
-  test('closes the day and advances to day 2 with recalculated daily allowance', async ({ page }) => {
+  test('closing the day shows tomorrow\'s amount and leaves today open for more spends', async ({ page }) => {
     // Log a 200 spend
     await page.getByRole('button', { name: 'Log a spend' }).click();
     await page.getByRole('button', { name: '2', exact: true }).click();
     await page.getByRole('button', { name: '00', exact: true }).click();
     await page.getByRole('button', { name: 'Save' }).click();
 
-    // Close day
+    // Recap (writes nothing; the day ends at midnight by itself)
     await page.getByRole('button', { name: 'Close the day' }).click();
-    const closeDialog = page.getByRole('dialog', { name: 'Close the day' });
-    await expect(closeDialog).toBeVisible();
-    await closeDialog.getByRole('button', { name: 'Close the day' }).click();
+    const recap = page.getByRole('dialog', { name: 'Close the day' });
+    await expect(recap).toBeVisible();
+    await recap.getByRole('button', { name: 'Close the day' }).click();
 
-    // Day closed screen
-    const closedDialog = page.getByRole('dialog', { name: 'Day closed' });
-    await expect(closedDialog.getByRole('heading', { name: 'Day closed' })).toBeVisible();
-    await expect(closedDialog.getByText('Tomorrow you can spend')).toBeVisible();
+    const wrapped = page.getByRole('dialog', { name: 'Day closed' });
+    await expect(wrapped.getByRole('heading', { name: 'Day closed' })).toBeVisible();
+    await expect(wrapped.getByText(/tomorrow you can spend/)).toBeVisible();
 
-    await closedDialog.getByRole('button', { name: 'Start day 2' }).click();
-    await expect(page.getByText(/day 2 of 30/)).toBeVisible();
+    await wrapped.getByRole('button', { name: 'Done' }).click();
+    await expect(page.getByText('You can still spend today')).toBeVisible();
   });
 
   test('SyncStatusPill is clickable and displays status toast feedback', async ({ page }) => {

@@ -223,7 +223,7 @@ export async function logIn(username: string, password: string): Promise<Result>
 }
 
 export interface LogOutOptions {
-  /** Also delete this user's database from the device (shared / family phones). */
+  /** Delete this user's database from the device. On by default: the data lives in the account and returns on login. */
   removeLocalData?: boolean;
 }
 
@@ -237,7 +237,7 @@ export async function unsyncedBeforeLogout(): Promise<number> {
   return countUnsynced().catch(() => 0);
 }
 
-export async function logOut(opts: LogOutOptions = {}): Promise<void> {
+export async function logOut({ removeLocalData = true }: LogOutOptions = {}): Promise<void> {
   const uid = state.uid;
   const sb = getSupabase();
   try {
@@ -251,7 +251,7 @@ export async function logOut(opts: LogOutOptions = {}): Promise<void> {
     /* ignore */
   }
   await dropToGuest(); // opens the guest DB, which closes the user's handle
-  if (opts.removeLocalData && uid) {
+  if (removeLocalData && uid) {
     try {
       await Dexie.delete(dbNameFor(uid));
     } catch {
@@ -281,7 +281,7 @@ export async function deleteAccount(password: string): Promise<Result> {
   }
   const { clearSyncConsent } = await import('./consent');
   clearSyncConsent();
-  await logOut({ removeLocalData: true });
+  await logOut();
   return { ok: true };
 }
 

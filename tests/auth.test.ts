@@ -72,22 +72,23 @@ describe('session handling', () => {
     expect(getAuth().status).toBe('guest');
   });
 
-  it('M5: logOut({ removeLocalData }) deletes the user database, a plain logOut keeps it', async () => {
+  it('logging out removes the user\'s database from the device (the account keeps the data)', async () => {
     const names = async () => (await indexedDB.databases()).map((d) => d.name);
-    stubWindow({ user: { id: 'uid-keep', user_metadata: { username: 'keeper' } } });
-    let mod = await import('@/lib/auth');
-    await mod.initAuth();
-    expect(await names()).toContain('stash-uid-keep');
-    await mod.logOut();
-    expect(await names()).toContain('stash-uid-keep');
-
-    vi.resetModules();
     stubWindow({ user: { id: 'uid-wipe', user_metadata: { username: 'wiper' } } });
-    mod = await import('@/lib/auth');
+    const mod = await import('@/lib/auth');
     await mod.initAuth();
     expect(await names()).toContain('stash-uid-wipe');
-    await mod.logOut({ removeLocalData: true });
+    await mod.logOut();
     expect(await names()).not.toContain('stash-uid-wipe');
     expect(mod.getAuth().status).toBe('guest');
+  });
+
+  it('logOut({ removeLocalData: false }) is still available for internal use and keeps the database', async () => {
+    const names = async () => (await indexedDB.databases()).map((d) => d.name);
+    stubWindow({ user: { id: 'uid-keep', user_metadata: { username: 'keeper' } } });
+    const mod = await import('@/lib/auth');
+    await mod.initAuth();
+    await mod.logOut({ removeLocalData: false });
+    expect(await names()).toContain('stash-uid-keep');
   });
 });

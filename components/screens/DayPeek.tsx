@@ -1,7 +1,7 @@
 'use client';
 import { PrimaryButton } from '../ui/Button';
 import { useDayEntries } from '@/db/queries';
-import type { Cycle } from '@/db/schema';
+import type { DerivedCycle } from '@/lib/period';
 import { dateOfDay, formatWithWeekday } from '@/lib/dates';
 import { inr } from '@/lib/format';
 
@@ -12,7 +12,8 @@ export function DayPeek({
   onLog,
   onClose,
 }: {
-  cycle: Cycle;
+  /** The cycle seen over its whole month (`monthView`): `day` counts from the month's first day. */
+  cycle: DerivedCycle;
   day: number;
   onLog: () => void;
   onClose: () => void;

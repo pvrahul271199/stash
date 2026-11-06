@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import Dexie from 'dexie';
 import { describe, expect, it } from 'vitest';
-import { closeDay, dayOfTxn, rollupCycle, initialCycleState, todayAllowance } from '@/lib/budget';
+import { closeDay, dayOfTxn, rollupCycle, todayAllowance } from '@/lib/budget';
 import { StashDB } from '@/db/schema';
 
 const cyc = { startDate: '2026-10-01', totalDays: 10, planAmount: 1000, currentDay: 1 };
@@ -18,8 +18,7 @@ describe('rollupCycle', () => {
   });
 
   it('matches a closeDay replay', () => {
-    let s = initialCycleState({ income: 0, bills: 0, savings: 0, monthLength: 10 });
-    s = { ...s, pool: 1000 };
+    let s = { currentDay: 1, totalDays: 10, pool: 1000, fromSavingsTotal: 0 };
     const spends = [60, 250, 0];
     const expectedAllowances: number[] = [];
     for (const sp of spends) {
@@ -67,7 +66,7 @@ describe('rollupCycle', () => {
 });
 
 describe('Dexie v4 -> v5 migration', () => {
-  it('upgrades a v4 DB in place: uuid remap, backfilled date, derived rows, estimated days, detached spends', async () => {
+  it('upgrades a v4 DB in place: uuid ids, backfilled dates, detached spends; stored cycles end up as plan dates and are dropped', async () => {
     const name = 'mig-v4-test';
     await Dexie.delete(name);
     const v4 = new Dexie(name);
@@ -104,24 +103,26 @@ describe('Dexie v4 -> v5 migration', () => {
 
     const db = new StashDB(name);
     await db.open();
-    const [plans, cycles, txns, rows, cats] = await Promise.all([
-      db.plans.toArray(), db.cycles.toArray(), db.transactions.toArray(), db.dayRows.toArray(), db.cats.toArray(),
-    ]);
+    const [plans, txns, cats] = await Promise.all([db.plans.toArray(), db.transactions.toArray(), db.cats.toArray()]);
     expect(plans).toHaveLength(1);
-    expect(cycles).toHaveLength(1);
-    expect(cycles[0].id).toMatch(/^[0-9a-f-]{36}$/);
-    expect(cycles[0].estimatedDays).toEqual([2]);
-    expect(cycles[0].pool).toBe(1000 - 60 - 250); // derived pool wins over stored 777
+    expect(plans[0].effectiveFrom).toBe('2026-10-01'); // carried over from the stored cycle before it was dropped
+    expect(plans[0].periodStartDay).toBe(1); // calendar months
     expect(txns).toHaveLength(3);
     expect(txns.find((t) => t.id === 'a')?.txnDate).toBe('2026-10-01');
     expect(txns.find((t) => t.id === 'a')?.type).toBe('Food');
-    expect(txns.find((t) => t.id === 'c')?.cycleId).toBeNull();
-    expect(rows.map((r) => r.spent).sort()).toEqual([250, 60]);
     expect(cats[0].name).toBe('Food');
     const meta = await db.meta.get('main');
     expect((meta?.migrationReport as { pools: { legacyPool: number }[] }).pools[0].legacyPool).toBe(777);
-    // v4 tables are dropped by v6
-    expect(db.tables.map((t) => t.name)).not.toContain('entries');
+    // v4 tables are dropped by v6, stored cycles / day rows by v11
+    const tables = db.tables.map((t) => t.name);
+    expect(tables).not.toContain('entries');
+    expect(tables).not.toContain('cycles');
+    expect(tables).not.toContain('dayRows');
+    // the derived month sees the same spends
+    const { buildAllCycles } = await import('@/lib/period');
+    const [oct] = buildAllCycles(plans, txns, '2026-10-05');
+    // the orphan spend 'c' (10, dated 1 Oct, no cycle) now counts too: months are by date, not by a stored link
+    expect([oct.startDate, oct.pool]).toEqual(['2026-10-01', 1000 - 60 - 250 - 10]);
     db.close();
   });
 });

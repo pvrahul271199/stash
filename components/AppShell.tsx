@@ -9,7 +9,6 @@ import { AuthScreen } from './screens/AuthScreen';
 import { Onboarding } from './screens/Onboarding';
 import { PlanSummary } from './screens/PlanSummary';
 import { TodayTab } from './screens/TodayTab';
-import { WelcomeBack } from './screens/WelcomeBack';
 import { MonthEnd } from './screens/MonthEnd';
 import { PlanScreen } from './screens/PlanScreen';
 import { HistoryTab } from './screens/HistoryTab';
@@ -22,18 +21,16 @@ import { ThankYou } from './screens/ThankYou';
 import { flushConsentRecord, hasSyncConsent } from '@/lib/consent';
 import { preloadGoogle } from '@/lib/googleSignIn';
 import {
-  applyCatchUp,
-  skipCatchUp,
-  createPlanAndCycle,
+  createPlan,
+  dismissMonthSummary,
   ensureSeed,
   fillSample,
-  syncCalendar,
   updateActivePlan,
   useSnapshot,
-  type PendingCatchUp,
 } from '@/db/queries';
-import { isCycleOver, isPlanValid, type PlanInput } from '@/lib/budget';
-import { addDays, todayISO } from '@/lib/dates';
+import { isPlanValid, type PlanInput } from '@/lib/budget';
+import { todayISO } from '@/lib/dates';
+import { periodFor } from '@/lib/period';
 import { requestSync, syncNow } from '@/lib/sync';
 import { getAuth, initAuth, logOut, useAuth } from '@/lib/auth';
 import { useUI } from '@/store/ui';
@@ -71,8 +68,8 @@ export function AppShell() {
   const [tab, setTab] = useState<Tab>('today');
   const [busy, setBusy] = useState(false);
   const [showDemo, setShowDemo] = useState(false);
+  // New plans track from today by default; the user may pick any earlier day of this month on the calendar.
   const [startDate, setStartDate] = useState(() => todayISO());
-  const [catchUpGap, setCatchUpGap] = useState<PendingCatchUp | null>(null);
   const [askLogout, setAskLogout] = useState(false);
   const [farewell, setFarewell] = useState(false); // thank-you page after "Delete my account"
   const [authMode, setAuthMode] = useState<'signup' | 'login'>('login');
@@ -106,20 +103,14 @@ export function AppShell() {
     void restoreFor(auth.uid);
   }, [ready, consented, hasCycle, auth.status, auth.uid, restoreFor]);
 
-  const runSync = useCallback(async () => {
-    const gap = await syncCalendar(todayISO());
-    setCatchUpGap(gap);
-  }, []);
-
   useEffect(() => {
     // Hold the loader for a minimum time so it doesn't just flash on fast local boots.
     const minShow = new Promise<void>((r) => setTimeout(r, 450));
     initAuth()
       .then(() => ensureSeed())
-      .then(() => runSync())
       .then(() => minShow)
       .then(() => setReady(true));
-  }, [runSync]);
+  }, []);
 
   // The auth screen records consent when an account is created or logged into: pick that up.
   useEffect(() => {
@@ -133,25 +124,14 @@ export function AppShell() {
     }
   }, [ready, auth.status, auth.uid, consented]);
 
-  useEffect(() => {
-    const onVis = () => {
-      if (document.visibilityState === 'visible') {
-        void runSync();
-      }
-    };
-    document.addEventListener('visibilitychange', onVis);
-    return () => document.removeEventListener('visibilitychange', onVis);
-  }, [runSync]);
-
   async function start() {
     if (!draft || !isPlanValid(draft)) return;
     setBusy(true);
-    // Guard: only today … 3 days back is allowed.
-    const earliest = addDays(todayISO(), -3);
+    // Guard: from the 1st of this month up to today.
+    const earliest = periodFor(1, todayISO()).start;
     const date = startDate > todayISO() ? todayISO() : startDate < earliest ? earliest : startDate;
-    await createPlanAndCycle(draft, date);
+    await createPlan(draft, date);
     setForceWelcome(false); // a plan now exists: leave the post-logout / post-delete Welcome page
-    await runSync(); // a back-dated start surfaces the catch-up prompt for the elapsed days
     setStartDate(todayISO());
     setBusy(false);
     setFlow('welcome');
@@ -186,7 +166,6 @@ export function AppShell() {
             setFlow('welcome');
             setTab('today');
             if (uid) await restoreFor(uid);
-            await runSync();
             toast(who ? `Welcome back, ${who}!` : 'Welcome back!');
             return;
           }
@@ -223,7 +202,7 @@ export function AppShell() {
           if (snap.cycle) {
             await updateActivePlan(draft);
           } else {
-            await createPlanAndCycle(draft);
+            await createPlan(draft);
           }
           setForceWelcome(false);
           setBusy(false);
@@ -235,27 +214,10 @@ export function AppShell() {
       />
     );
   } else if (snap.cycle && snap.plan && flow !== 'onboarding' && flow !== 'summary' && !forceWelcome) {
-    const cycleOver = isCycleOver(snap.cycle);
-    if (catchUpGap && catchUpGap.cycleId === snap.cycle.id) {
-      body = (
-        <WelcomeBack
-          pending={catchUpGap}
-          today={todayISO()}
-          onSubmit={async (total) => {
-            await applyCatchUp(catchUpGap.cycleId, total, catchUpGap.gap);
-            setCatchUpGap(null);
-            await runSync();
-          }}
-          onSkip={async () => {
-            await skipCatchUp(catchUpGap.cycleId, catchUpGap.gap);
-            setCatchUpGap(null);
-            await runSync();
-            setTab('today');
-          }}
-        />
-      );
-    } else if (cycleOver && sheet !== 'dayClosed') {
-      body = <MonthEnd cycle={snap.cycle} plan={snap.plan} />;
+    // A new month started in the last few days and last month's summary wasn't seen on this device yet.
+    const lastMonth = snap.previous && !snap.previousSeen && snap.cycle.currentDay <= 3 ? snap.previous : null;
+    if (lastMonth) {
+      body = <MonthEnd cycle={lastMonth} plan={snap.plan} onDone={() => void dismissMonthSummary(lastMonth.id)} />;
     } else {
       body = (
         <>
@@ -276,6 +238,7 @@ export function AppShell() {
                     bills: snap.plan!.bills,
                     savings: snap.plan!.savings,
                     monthLength: snap.plan!.monthLength,
+                    periodStartDay: snap.plan!.periodStartDay,
                     billItems: snap.plan!.billItems,
                     savingsItems: snap.plan!.savingsItems,
                   });
@@ -327,6 +290,7 @@ export function AppShell() {
                   bills: snap.plan!.bills,
                   savings: snap.plan!.savings,
                   monthLength: snap.plan!.monthLength,
+                  periodStartDay: snap.plan!.periodStartDay,
                   billItems: snap.plan!.billItems,
                   savingsItems: snap.plan!.savingsItems,
                 });
@@ -366,6 +330,8 @@ export function AppShell() {
       body = (
         <Onboarding
           initial={draft ?? undefined}
+          startDate={startDate}
+          onStartDateChange={setStartDate}
           onExit={() => void logOut()}
           onDone={(p) => {
             setDraft(p);
@@ -393,6 +359,8 @@ export function AppShell() {
     body = (
       <Onboarding
         initial={draft ?? undefined}
+        startDate={startDate}
+        onStartDateChange={setStartDate}
         onExit={() => setFlow('welcome')}
         onDone={(p) => {
           setDraft(p);
@@ -407,7 +375,6 @@ export function AppShell() {
         onBack={() => setFlow('onboarding')}
         onStart={start}
         startDate={startDate}
-        onStartDateChange={setStartDate}
       />;
   }
 
@@ -422,9 +389,9 @@ export function AppShell() {
       {askLogout && (
         <LogoutDialog
           onCancel={() => setAskLogout(false)}
-          onLogout={(removeLocalData) => {
+          onLogout={() => {
             setAskLogout(false);
-            void withLoading('Signing out…', () => logOut({ removeLocalData })).then(() => {
+            void withLoading('Signing out…', () => logOut()).then(() => {
               setDraft(null);
               setForceWelcome(true);
               setFlow('welcome');

@@ -4,8 +4,9 @@ import { DayChart, type ChartMode } from '../charts/DayChart';
 import { CategoryList, Donut } from '../charts/Donut';
 import { TimeOfDayChart, WeekdayChart } from '../charts/WeekdayTime';
 import { Note } from '../ui/Chip';
-import { useCategories, useCycleEntries, useDayRows, useEvents } from '@/db/queries';
-import type { Cycle, Plan } from '@/db/schema';
+import { dayRowsOf, useAllCycles, useCategories, useCycleEntries, useEvents } from '@/db/queries';
+import type { Plan } from '@/db/schema';
+import { monthLabel, type DerivedCycle } from '@/lib/period';
 import {
   MIN_CLOSED_DAYS,
   biggestSpends,
@@ -98,8 +99,14 @@ function Stat({
   );
 }
 
-export function InsightsTab({ cycle, plan }: { cycle: Cycle | undefined; plan: Plan | undefined }) {
+export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | undefined; plan: Plan | undefined }) {
   const { currency } = useCurrency();
+  // Insights are per month: this month by default, earlier months with the arrows.
+  const allMonths = useAllCycles();
+  const [monthId, setMonthId] = useState<string | null>(null);
+  const months = allMonths && allMonths.length ? allMonths : current ? [current] : [];
+  const monthIdx = Math.max(0, months.findIndex((c) => c.id === (monthId ?? current?.id)));
+  const cycle = months[monthIdx] ?? current;
   const focus = useUI((s) => s.focusCategory);
   const toggleFocus = useUI((s) => s.toggleFocusCategory);
   const setFocus = useUI((s) => s.setFocusCategory);
@@ -107,7 +114,7 @@ export function InsightsTab({ cycle, plan }: { cycle: Cycle | undefined; plan: P
   const [focusEvent, setFocusEvent] = useState<string | null>(null);
   const [mode, setMode] = useState<ChartMode>('each');
   const entries = useCycleEntries(cycle?.id);
-  const rows = useDayRows(cycle?.id);
+  const rows = useMemo(() => (cycle ? dayRowsOf(cycle) : undefined), [cycle]);
   const cats = useCategories();
   const events = useEvents();
 
@@ -231,12 +238,39 @@ export function InsightsTab({ cycle, plan }: { cycle: Cycle | undefined; plan: P
 
   return (
     <div className="flex-1 overflow-y-auto px-6 pb-8 pt-6" style={{ overflowAnchor: 'none' }}>
-      <h1 className="text-question font-semibold text-ink">Insights</h1>
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="text-question font-semibold text-ink">Insights</h1>
+        <div className="flex items-center gap-1" role="group" aria-label="Month">
+          <button
+            type="button"
+            aria-label="Earlier month"
+            disabled={monthIdx >= months.length - 1}
+            onClick={() => setMonthId(months[monthIdx + 1].id)}
+            className="flex h-9 w-9 min-h-0 items-center justify-center rounded-full border border-line text-ink disabled:opacity-30"
+          >
+            ‹
+          </button>
+          <span className="min-w-[110px] text-center text-[13px] font-medium text-ink" aria-live="polite">
+            {monthLabel(cycle)}
+          </span>
+          <button
+            type="button"
+            aria-label="Later month"
+            disabled={monthIdx <= 0}
+            onClick={() => setMonthId(months[monthIdx - 1].id)}
+            className="flex h-9 w-9 min-h-0 items-center justify-center rounded-full border border-line text-ink disabled:opacity-30"
+          >
+            ›
+          </button>
+        </div>
+      </div>
 
       {/* 1. Summary */}
       <section className="mt-5 rounded-[20px] border border-line bg-white p-5 shadow-sm" aria-label="Summary">
         <div className="flex items-start justify-between gap-3">
-          <p className="text-[13px] font-medium uppercase tracking-wide text-soft">Spent this month</p>
+          <p className="text-[13px] font-medium uppercase tracking-wide text-soft">
+            {cycle.currentDay > cycle.totalDays ? 'Spent in the month' : 'Spent this month'}
+          </p>
           <span className="num rounded-full bg-tint px-2.5 py-1 text-[12px] font-medium text-ink">
             {Math.round(fillPct)}% used
           </span>

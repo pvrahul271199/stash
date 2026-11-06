@@ -15,7 +15,7 @@ Browser (static export, no server)
         Supabase PostgREST  /rest/v1/stash_*   (RLS = allow all)
 ```
 
-## 2. Data model (Dexie v9, `db/schema.ts`)
+## 2. Data model (Dexie v11, `db/schema.ts`)
 
 One database **per user**: `stash-<auth uid>`; guest = `stash-default` (never synced). All rows have uuid `id`, `updatedAt` (client ms) and optional `deletedAt` (tombstone; reads filter it out).
 
@@ -23,16 +23,22 @@ One database **per user**: `stash-<auth uid>`; guest = `stash-default` (never sy
 |---|---|---|
 | `users`, `meta` | `userId`, `'main'` | profile mirror; lastUsedLabel, activeEvent, lastPayment, sync cursors (`lastPushedRev`, legacy `lastPushedAt`, `pullCursors`), `syncFailures`, `calendarSeen`, `profileCurrencyPushed`, `guestClaimPending`, `migrationReport` |
 | `plans` | `id` | income, bills, savings, monthLength, items, currency |
-| `cycles` | `id` | startDate, totalDays, planAmount, `currentDay` (cursor), `estimatedDays[]`; `pool`/`fromSavingsTotal` are caches written by `recompute` |
 | `transactions` | `id` | cycleId\|null, `txnDate`, amount, type, subtype, label, event, payment, note, fromSavings, adjustsPool, isEstimate, hour, createdAt. Day is derived (`dayOfTxn`) |
-| `dayRows` | `[cycleId+day]` | derived by `recompute`, never synced |
 | `cats`, `evts` | `id` | `cats` holds only this user's categories and changes to the shared defaults (`baseId`, `subAdded`, `subRemoved`, tombstone = default removed); defaults live once in `DEFAULT_CATEGORIES` and server table `default_categories`. `loadCategories` resolves them. Events are plain rows. |
 
 v1-v4 live in `db/legacy.ts`. v5 added the tables above, v6 drops the v4 tables; both upgrades run `migrateV4ToV5` (derived pool wins, old value kept in `meta.migrationReport`). The old shared `stash` DB is split into `stash-default` and dormant `stash-legacy-*` DBs by `db/migrate.ts`.
 
 Every money write changes a transaction/cycle and calls `recompute(db, cycleId)` (pure `rollupCycle` in `lib/budget.ts`) in the same Dexie transaction. Relationships to categories/events are still by name.
 
-## 3. Budget math (`lib/budget.ts`, pure)
+## 3. Budget math (`lib/budget.ts`, `lib/period.ts`, pure)
+
+> **Since 2026-11-06 (E-4) the month is derived.** `lib/period.ts`: `periodFor(startDay, date)`, `planInEffect`,
+> `trackingStart`, `buildCycle` (runs `rollupCycle` with `currentDay` = today's day), `buildAllCycles`, `missedDays`.
+> Nothing below that mentions closing days, `currentDay` advancing, `planSync` or `catchUp` writing state applies to
+> the app any more: `closeDay` is only used to preview "tomorrow" and by `rollupCycle`; `catchUp`/`planSync` are unused.
+> Server: `plans.period_start_day`, `plans.effective_from`; cycles are not synced; `uq_cycles_one_active` and the
+> transactions -> cycles FK are dropped. **Dexie v11 / server (2026-11-06) removed `cycles` and `dayRows` entirely**; the
+> rows above that mention them are historical. Plans carry `periodStartDay` + `effectiveFrom`; a month is found by `txnDate`.
 
 - `moneyToLiveOn = income − bills − savings`; `isPlanValid`: income>0, bills/savings≥0, live>0, monthLength integer 1..31.
 - `todayAllowance = max(pool,0) / (totalDays − currentDay + 1)`.
@@ -60,7 +66,7 @@ Every money write changes a transaction/cycle and calls `recompute(db, cycleId)`
 | `applyCatchUp` | +Rough-total entries | +estimated rows | currentDay,pool | – |
 | `mergeAccidentalCycle` | re-point to older cycle | – (!) | rewrite older, delete latest | remote cycle delete |
 | `fillSample` | **clear all** + sample | clear + sample | **clear all** + 1 new | events replaced |
-| `deleteAllData` | guest: clear every table; signed in: tombstone all synced rows | dayRows cleared | – | `ensureSeed()` + `syncNow()` |
+| `deleteAllData` | guest: clear every table; signed in: tombstone all synced rows | – | – | `ensureSeed()` + `syncNow()` |
 | category/event CRUD | rewrite names | | | event removal clears `meta.activeEvent` |
 
 ## 5. Identity model

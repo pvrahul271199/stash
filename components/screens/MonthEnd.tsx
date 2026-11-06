@@ -1,13 +1,15 @@
 'use client';
 import { PrimaryButton, SecondaryButton } from '../ui/Button';
 import { Note } from '../ui/Chip';
-import { moveLeftoverToSavings, startNextMonth } from '@/db/queries';
-import type { Cycle, Plan } from '@/db/schema';
+import { moveLeftoverToSavings } from '@/db/queries';
+import type { Plan } from '@/db/schema';
+import type { DerivedCycle } from '@/lib/period';
 import { monthEnd } from '@/lib/budget';
 import { inr } from '@/lib/format';
 import { useToast } from '@/store/toast';
 
-export function MonthEnd({ cycle, plan }: { cycle: Cycle; plan: Plan }) {
+/** Summary of the month that just ended. Your new month has already started; this only looks back. */
+export function MonthEnd({ cycle, plan, onDone }: { cycle: DerivedCycle; plan: Plan; onDone: () => void }) {
   const toast = useToast((s) => s.show);
   const m = monthEnd(plan, cycle.planAmount, cycle);
   const rows: [string, number, boolean][] = [
@@ -20,7 +22,8 @@ export function MonthEnd({ cycle, plan }: { cycle: Cycle; plan: Plan }) {
   return (
     <main className="flex h-full flex-col px-6 pb-6 pt-14">
       <div className="flex-1 overflow-y-auto">
-        <h1 className="font-display text-[32px] font-semibold leading-tight text-ink">Your month is done</h1>
+        <h1 className="font-display text-[32px] font-semibold leading-tight text-ink">Last month, wrapped up</h1>
+        <p className="mt-2 text-body text-soft">Your new month has already started. Here&apos;s how the last one went.</p>
         <dl className="mt-8 divide-y divide-line border-y border-line">
           {rows
             .filter((r) => r[2])
@@ -54,7 +57,7 @@ export function MonthEnd({ cycle, plan }: { cycle: Cycle; plan: Plan }) {
             {cycle.leftoverMoved ? 'Moved to savings' : `Move ${inr(m.leftOver)} to savings`}
           </SecondaryButton>
         )}
-        <PrimaryButton onClick={() => startNextMonth()}>Start next month</PrimaryButton>
+        <PrimaryButton onClick={onDone}>Continue to this month</PrimaryButton>
       </div>
     </main>
   );

@@ -105,7 +105,19 @@ Costs and risks:
 Recommendation: do E-2 now; do E-1 next; revisit E-3 only if data shows users lost to cleared browser data or
 device switches.
 
-## E-4 · Derived budget period (drop the stateful cycle)
+## E-4 · Derived budget period (drop the stateful cycle) — implemented 2026-11-06
+
+Follow-up (same day): calendar months by default (start day 1, changeable), the Today strip shows the whole month and
+accepts logging on days before tracking began (pulls the tracking start back), "Wrap up today" is "Close the day" again,
+Insights has a month picker.
+
+Status: phases 1-4 done (`lib/period.ts`, `db/queries.ts`, `lib/sync.ts`, `supabase/schema.sql`, UI). Decisions taken:
+salary day of the month (default = start date's day); "Close the day" kept as a read-only recap ("Wrap up today").
+Phase 5 done (2026-11-06): `planSync`/`catchUp`/`initialCycleState`/`isCycleOver` removed from `lib/budget.ts`; Dexie v11
+dropped `cycles`/`dayRows` and the `cycleId` indexes; the server `cycles` table and `transactions.cycle_id` are dropped by
+the last block of `supabase/schema.sql`. Left: port to `stash-mobile/` (it has its own copy of the old logic).
+Setup now asks for a start date (calendar picker; today by default, any earlier day of the month allowed) instead of a
+start-day number; the catch-up / "rough total" screen is removed; logging out always removes the local copy.
 
 **Problem.** A cycle is stored state that moves: `currentDay` is advanced by closing days, catch-up writes
 `estimatedDays`, "Start next month" / onboarding create new cycle rows, and the server allows one open cycle per

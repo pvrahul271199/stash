@@ -1,4 +1,5 @@
 'use client';
+import { useEffect, useState } from 'react';
 import { useLiveQuery as useDexieLive } from 'dexie-react-hooks';
 import {
   DEFAULT_CATEGORIES,
@@ -6,7 +7,6 @@ import {
   getDB,
   useActiveUid,
   type Category,
-  type Cycle,
   type Entry,
   type Plan,
   type StashDB,
@@ -15,22 +15,32 @@ import {
   type UserRecord,
 } from './schema';
 import {
-  catchUp,
   closeDay,
   dayOfTxn,
-  initialCycleState,
   isPlanValid,
-  moneyToLiveOn,
-  onPlanTotal,
-  planSync,
-  rollupCycle,
   spentToday,
   type CloseResult,
-  type DayInfo,
+  type DayRecord,
   type PlanInput,
 } from '@/lib/budget';
+import {
+  buildAllCycles,
+  buildCycle,
+  clampStartDay,
+  dayOfMonth,
+  decodePeriodId,
+  effectiveFromOf,
+  endOf,
+  orderPlans,
+  periodFor,
+  planPeriodPatches,
+  planInEffect,
+  startDayOf,
+  trackingStart,
+  type DerivedCycle,
+} from '@/lib/period';
 import { resolveLabel } from '@/lib/suggestions';
-import { addDays, calendarDay, dateOfDay, daysBetween, todayISO, vetToday } from '@/lib/dates';
+import { addDays, dateOfDay, daysBetween, toISO, todayISO } from '@/lib/dates';
 import { DEFAULT_SAMPLE_PLAN, SAMPLE_DAYS, generateSampleSpends } from '@/lib/sample';
 import { buildCSV, type CsvRow } from '@/lib/csv';
 import { resolveCategories, validateName, type ResolvedCategory } from '@/lib/categories';
@@ -45,9 +55,6 @@ import { uuidv7 } from '@/lib/uuid';
 const uuid = () => crypto.randomUUID();
 /** Transactions are the big table: time-ordered ids keep its Postgres primary-key index compact. */
 const txnId = uuidv7;
-
-/** Bump when rollupCycle's logic changes: cached pool/dayRows built by an older version are rebuilt at startup. */
-export const CALC_VERSION = 1;
 
 const alive = <T extends { deletedAt?: number | null }>(r: T) => r.deletedAt == null;
 
@@ -84,12 +91,12 @@ const inEvent = (t: Txn, e: { id: string; name: string }) =>
 
 export function toEntry(
   t: Txn,
-  cycle: Pick<Cycle, 'startDate' | 'totalDays'> | undefined,
+  cycle: { startDate: string; totalDays: number } | null | undefined,
   names?: LinkNames,
 ): Entry {
   return {
     id: t.id,
-    cycleId: t.cycleId ?? '',
+    cycleId: cycle ? periodKey(cycle) : '',
     day: cycle ? dayOfTxn(cycle, t.txnDate) : 0,
     date: t.txnDate,
     amount: t.amount,
@@ -107,40 +114,71 @@ export function toEntry(
   };
 }
 
-/**
- * Rebuilds a cycle's day rows, pool and fromSavingsTotal from its live transactions.
- * Must run inside the same Dexie transaction as the write that changed them
- * (tables: cycles, transactions, dayRows).
- */
-export async function recompute(db: StashDB, cycleId: string): Promise<void> {
-  const c = await db.cycles.get(cycleId);
-  if (!c || c.deletedAt != null) return;
-  const txns = await db.transactions.where('cycleId').equals(cycleId).toArray();
-  const r = rollupCycle(c, txns);
-  await db.dayRows.where('cycleId').equals(cycleId).delete();
-  await db.dayRows.bulkPut(
-    r.days.map((d) => ({
-      cycleId,
-      day: d.day,
-      allowanceAtStart: d.allowanceAtStart,
-      spent: d.spent,
-      status: d.status,
-    })),
-  );
-  if (c.pool !== r.pool || c.fromSavingsTotal !== r.fromSavingsTotal || c.calcVersion !== CALC_VERSION) {
-    // no updatedAt bump: these are local caches, not synced fields
-    await db.cycles.update(cycleId, { pool: r.pool, fromSavingsTotal: r.fromSavingsTotal, calcVersion: CALC_VERSION });
-  }
+/* ---------- derived periods (docs/ENHANCEMENTS.md E-4) ----------
+ * There is no stored "cycle" any more. The month, today's amount and every day row are computed from the plans and
+ * transactions (lib/period.ts), so nothing about the month can be duplicated, closed early, merged or out of sync. */
+
+const periodKey = (c: { startDate: string; totalDays: number }) => `p:${c.startDate}:${c.totalDays}`;
+
+/** The derived cycle of the period that contains `date`; undefined before the first plan (or before tracking began). */
+export async function cycleFor(db: StashDB, date: string = todayISO(), today: string = todayISO()): Promise<DerivedCycle | undefined> {
+  const [plans, meta] = await Promise.all([db.plans.toArray(), db.meta.get('main')]);
+  const tracking = trackingStart(plans);
+  if (!tracking) return undefined;
+  const period = periodFor(startDayOf(plans), date);
+  const txns = await db.transactions.where('txnDate').between(period.start, period.end, true, true).toArray();
+  const c = buildCycle(period, planInEffect(plans, period)!, txns, today, tracking);
+  if (!c) return undefined;
+  c.leftoverMoved = (meta?.leftoverMoved ?? []).includes(c.id);
+  return c;
 }
 
-/** Re-derives every cycle whose caches were built by an older CALC_VERSION. Cheap no-op when none are. */
-export async function rebuildStaleCaches(db: StashDB = getDB()): Promise<number> {
-  const stale = (await db.cycles.toArray()).filter((c) => c.deletedAt == null && c.calcVersion !== CALC_VERSION);
-  if (!stale.length) return 0;
-  await db.transaction('rw', [db.cycles, db.transactions, db.dayRows], async () => {
-    for (const c of stale) await recompute(db, c.id);
+/** The derived cycle a period id (`p:<start>:<days>`) stands for, as of today. */
+async function cycleById(db: StashDB, id: string): Promise<DerivedCycle | undefined> {
+  const r = decodePeriodId(id);
+  return r ? cycleFor(db, r.startDate) : undefined;
+}
+
+async function allCycles(db: StashDB, today: string = todayISO()): Promise<DerivedCycle[]> {
+  const [plans, txns, meta] = await Promise.all([db.plans.toArray(), db.transactions.toArray(), db.meta.get('main')]);
+  const moved = new Set(meta?.leftoverMoved ?? []);
+  return buildAllCycles(plans, txns, today, (id) => moved.has(id));
+}
+
+const cycleOfDate = (cycles: DerivedCycle[], iso: string) => cycles.find((c) => iso >= c.startDate && iso <= endOf(c));
+
+/** Today's date, re-read every minute and when the app comes back, so the month and day roll over at midnight. */
+export function useToday(): string {
+  const [today, setToday] = useState(() => todayISO());
+  useEffect(() => {
+    const tick = () => setToday(todayISO());
+    const id = setInterval(tick, 60_000);
+    document.addEventListener('visibilitychange', tick);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', tick);
+    };
+  }, []);
+  return today;
+}
+
+/** Day rows (every day before today) of a derived cycle. */
+export function dayRowsOf(cycle: { id: string; days?: DayRecord[] } | undefined) {
+  return (cycle?.days ?? []).map((d) => ({ cycleId: cycle!.id, ...d }));
+}
+
+/**
+ * Gives plans that don't have them yet an `effectiveFrom` (the date they were created) and the newest plan calendar
+ * months (start day 1). Needed for plans pulled from a device that predates derived months. (The one-time move from
+ * the old stored cycles is the Dexie v11 upgrade, `migrateToDerivedPeriods`.) Idempotent; the edit syncs.
+ */
+export async function migrateToPeriods(db: StashDB = getDB()): Promise<boolean> {
+  return db.transaction('rw', db.plans, async () => {
+    const patches = planPeriodPatches((await db.plans.toArray()).filter(alive), null);
+    const now = Date.now();
+    for (const { id, patch } of patches) await db.plans.update(id, { ...patch, updatedAt: now });
+    return patches.length > 0;
   });
-  return stale.length;
 }
 
 /** Defaults + this user's overrides, resolved. */
@@ -148,65 +186,62 @@ export async function loadCategories(db: StashDB = getDB()): Promise<ResolvedCat
   return resolveCategories(DEFAULT_CATEGORIES, await db.cats.toArray());
 }
 
+/** The plan that applies now (the one edits change). */
 async function latestPlan(db: StashDB): Promise<Plan | undefined> {
-  const all = (await db.plans.toArray()).filter(alive);
-  return all.sort((a, b) => a.createdAt - b.createdAt).pop();
-}
-
-async function latestCycle(db: StashDB): Promise<Cycle | undefined> {
-  const all = (await db.cycles.toArray()).filter(alive);
-  return all.sort((a, b) => a.startDate.localeCompare(b.startDate) || a.updatedAt - b.updatedAt).pop();
+  return orderPlans((await db.plans.toArray()).filter(alive)).pop();
 }
 
 /* ---------- reads ---------- */
 
 export interface Snapshot {
   plan: Plan | undefined;
-  cycle: Cycle | undefined;
+  /** This month (derived). Undefined until a plan exists. */
+  cycle: DerivedCycle | undefined;
+  /** Last month (derived), for the month-end summary. */
+  previous: DerivedCycle | undefined;
+  /** Whether the month-end summary of `previous` was already seen on this device. */
+  previousSeen: boolean;
 }
 
 /** `undefined` while loading, then always an object (maybe with empty fields). */
 export function useSnapshot(): Snapshot | undefined {
+  const today = useToday();
   return useLiveQuery(async () => {
     const db = getDB();
-    const [plan, cycle] = await Promise.all([latestPlan(db), latestCycle(db)]);
-    return { plan, cycle };
-  }, []);
+    const [plan, cycle, meta] = await Promise.all([latestPlan(db), cycleFor(db, today, today), db.meta.get('main')]);
+    const previous = cycle ? await cycleFor(db, addDays(cycle.startDate, -1), today) : undefined;
+    const previousSeen = !previous || (meta?.monthSummarySeen ?? []).includes(previous.id);
+    return { plan, cycle, previous, previousSeen };
+  }, [today]);
 }
 
+/** Spends of one day of a derived cycle (`cycleId` = period id), newest first. */
 export function useDayEntries(cycleId: string | undefined, day: number | undefined): Entry[] | undefined {
   return useLiveQuery(async () => {
-    if (cycleId == null || day == null) return [];
+    const range = decodePeriodId(cycleId);
+    if (!range || day == null) return [];
     const db = getDB();
-    const cycle = await db.cycles.get(cycleId);
-    if (!cycle) return [];
-    const date = dateOfDay(cycle.startDate, day);
-    const [rows, names] = await Promise.all([
-      db.transactions.where('[cycleId+txnDate]').equals([cycleId, date]).toArray(),
-      loadLinkNames(db),
-    ]);
+    const date = dateOfDay(range.startDate, day);
+    const [rows, names] = await Promise.all([db.transactions.where('txnDate').equals(date).toArray(), loadLinkNames(db)]);
     return rows
       .filter(alive)
-      .map((t) => toEntry(t, cycle, names))
+      .map((t) => toEntry(t, range, names))
       .sort((a, b) => b.createdAt - a.createdAt);
   }, [cycleId, day]);
 }
 
+/** Every spend dated inside a derived cycle. */
 export function useCycleEntries(cycleId: string | undefined): Entry[] | undefined {
   return useLiveQuery(async () => {
-    if (cycleId == null) return [];
+    const range = decodePeriodId(cycleId);
+    if (!range) return [];
     const db = getDB();
-    const cycle = await db.cycles.get(cycleId);
-    const [rows, names] = await Promise.all([db.transactions.where('cycleId').equals(cycleId).toArray(), loadLinkNames(db)]);
-    return rows.filter(alive).map((t) => toEntry(t, cycle, names));
+    const [rows, names] = await Promise.all([
+      db.transactions.where('txnDate').between(range.startDate, endOf(range), true, true).toArray(),
+      loadLinkNames(db),
+    ]);
+    return rows.filter(alive).map((t) => toEntry(t, range, names));
   }, [cycleId]);
-}
-
-export function useDayRows(cycleId: string | undefined) {
-  return useLiveQuery(
-    async () => (cycleId == null ? [] : getDB().dayRows.where('cycleId').equals(cycleId).toArray()),
-    [cycleId],
-  );
 }
 
 export function useLastUsedLabel(): string | null {
@@ -218,22 +253,19 @@ export function useLastPayment(): string {
   return useLiveQuery(async () => (await getDB().meta.get('main'))?.lastPayment ?? 'UPI', [], 'UPI') ?? 'UPI';
 }
 
-/** Every cycle, newest first. */
-export function useAllCycles(): Cycle[] | undefined {
-  return useLiveQuery(async () => {
-    const all = (await getDB().cycles.toArray()).filter(alive);
-    return all.sort((a, b) => b.startDate.localeCompare(a.startDate) || b.updatedAt - a.updatedAt);
-  }, []);
+/** Every tracked month (derived), newest first. */
+export function useAllCycles(): DerivedCycle[] | undefined {
+  const today = useToday();
+  return useLiveQuery(async () => allCycles(getDB(), today), [today]);
 }
 
-/** Every spend across all cycles (loaded on demand when searching History). */
+/** Every spend across all months (loaded on demand when searching History). */
 export function useAllEntries(enabled = true): Entry[] | undefined {
   return useLiveQuery(async () => {
     if (!enabled) return [];
     const db = getDB();
-    const [cycles, txns, names] = await Promise.all([db.cycles.toArray(), db.transactions.toArray(), loadLinkNames(db)]);
-    const byId = new Map(cycles.map((c) => [c.id, c]));
-    return txns.filter(alive).map((t) => toEntry(t, t.cycleId ? byId.get(t.cycleId) : undefined, names));
+    const [cycles, txns, names] = await Promise.all([allCycles(db), db.transactions.toArray(), loadLinkNames(db)]);
+    return txns.filter(alive).map((t) => toEntry(t, cycleOfDate(cycles, t.txnDate), names));
   }, [enabled]);
 }
 
@@ -270,15 +302,14 @@ export function useDateEntries(iso: string): Entry[] {
   return (
     useLiveQuery(async () => {
       const db = getDB();
-      const [rows, cycles, names] = await Promise.all([
+      const [rows, cycle, names] = await Promise.all([
         db.transactions.where('txnDate').equals(iso).toArray(),
-        db.cycles.toArray(),
+        cycleFor(db, iso),
         loadLinkNames(db),
       ]);
-      const byId = new Map(cycles.map((c) => [c.id, c]));
       return rows
         .filter(alive)
-        .map((t) => toEntry(t, t.cycleId ? byId.get(t.cycleId) : undefined, names))
+        .map((t) => toEntry(t, cycle, names))
         .sort((a, b) => b.createdAt - a.createdAt);
     }, [iso]) ?? []
   );
@@ -362,8 +393,8 @@ export async function ensureSeed(): Promise<void> {
       lastSeenAt: Date.now(),
     });
   });
-  await rebuildStaleCaches(db);
-  if ((await dedupeCategories(db)) > 0) requestSync();
+  const migrated = await migrateToPeriods(db);
+  if ((await dedupeCategories(db)) > 0 || migrated) requestSync();
 }
 
 async function persistStorage() {
@@ -374,92 +405,68 @@ async function persistStorage() {
   }
 }
 
-/** Server constraints: 1 <= total_days <= 366 and amounts >= 0. A violating row would wedge the whole push batch. */
-const clampDays = (n: number) => Math.min(366, Math.max(1, Math.round(n)));
 const nonNeg = (n: number) => Math.max(0, Math.round(n));
 
-async function startCycle(p: PlanInput, startDate: string, addPlan: boolean): Promise<void> {
-  const db = getDB();
-  const s = initialCycleState(p);
-  const currency = getStoredCurrencyCode();
-  const now = Date.now();
-  await db.transaction('rw', [db.plans, db.cycles, db.transactions, db.dayRows], async () => {
-    // The server allows one unfinished cycle per user: end any still-open one (e.g. onboarding redone
-    // mid-month) before the new one starts. Its remaining days close empty, so the unspent pool is left over.
-    for (const old of (await db.cycles.toArray()).filter((c) => alive(c) && c.currentDay <= c.totalDays)) {
-      await db.cycles.update(old.id, { currentDay: old.totalDays + 1, updatedAt: now });
-      await recompute(db, old.id);
-    }
-    if (addPlan) {
-      await db.plans.add({
-        id: uuid(),
-        updatedAt: now,
-        createdAt: now,
-        income: nonNeg(p.income),
-        bills: nonNeg(p.bills),
-        savings: nonNeg(p.savings),
-        monthLength: p.monthLength,
-        billItems: p.billItems,
-        savingsItems: p.savingsItems,
-        currency,
-      });
-    }
-    await db.cycles.add({
-      id: uuid(),
-      updatedAt: now,
-      startDate,
-      totalDays: clampDays(s.totalDays),
-      planAmount: moneyToLiveOn(p),
-      currentDay: s.currentDay,
-      pool: s.pool,
-      fromSavingsTotal: 0,
-      leftoverMoved: false,
-      estimatedDays: [],
-    });
-  });
+/**
+ * Logging on a day of the first month that is before budgeting began (the month strip shows the whole month) pulls the
+ * tracking start back to that day, so the spend counts like any other past day: in the pool, the day rows, History and
+ * Insights. The days in between simply count as nothing spent. Dates in any other month stay plain records.
+ * Must run inside a transaction that includes `plans`.
+ */
+async function extendTrackingStart(db: StashDB, date: string): Promise<void> {
+  const plans = (await db.plans.toArray()).filter(alive);
+  const tracking = trackingStart(plans);
+  if (!tracking || date >= tracking) return;
+  if (date < periodFor(startDayOf(plans), tracking).start) return;
+  await db.plans.update(orderPlans(plans)[0].id, { effectiveFrom: date, updatedAt: Date.now() });
 }
 
-/** Saves the plan and starts a new cycle today. Used for initial onboarding. */
-export async function createPlanAndCycle(p: PlanInput, startDate: string = todayISO()): Promise<void> {
-  await startCycle(p, startDate, true);
+function planFields(p: PlanInput, periodStartDay: number, now: number) {
+  return {
+    income: nonNeg(p.income),
+    bills: nonNeg(p.bills),
+    savings: nonNeg(p.savings),
+    monthLength: Math.min(31, Math.max(1, Math.round(p.monthLength))),
+    billItems: p.billItems,
+    savingsItems: p.savingsItems,
+    currency: getStoredCurrencyCode(),
+    periodStartDay: clampStartDay(periodStartDay),
+    updatedAt: now,
+  };
+}
+
+/**
+ * Saves a plan that applies from `startDate` (onboarding: today or up to 3 days back). It never creates, ends or
+ * restarts a month: months are derived, so redoing onboarding mid-month just changes the numbers from that day on.
+ */
+export async function createPlan(p: PlanInput, startDate: string = todayISO()): Promise<void> {
+  const db = getDB();
+  const now = Date.now();
+  const existing = (await db.plans.toArray()).filter(alive);
+  // with no explicit start day, months stay as they are; a first plan gets calendar months (start day 1)
+  const startDay = p.periodStartDay ?? (existing.length ? startDayOf(existing) : 1);
+  await db.plans.add({ id: uuid(), createdAt: now, effectiveFrom: startDate, ...planFields(p, startDay, now) });
   await persistStorage();
   requestSync();
 }
 
 /**
- * Updates the plan and re-bases the active cycle: the cycle's pool is derived from
- * the new plan amount minus what closed days consumed, so past allowances are re-based too.
+ * Changes the plan. Within the month the current plan started in, it is edited in place; otherwise a new plan
+ * version starts today, so earlier months keep the amounts they were planned with. Either way this month is
+ * re-based: what earlier days used stays used, the rest is spread over the days left.
  */
 export async function updateActivePlan(p: PlanInput): Promise<void> {
   const db = getDB();
-  const currency = getStoredCurrencyCode();
   const now = Date.now();
-  await db.transaction('rw', [db.plans, db.cycles, db.transactions, db.dayRows], async () => {
-    const plan = await latestPlan(db);
-    const fields = {
-      income: nonNeg(p.income),
-      bills: nonNeg(p.bills),
-      savings: nonNeg(p.savings),
-      monthLength: Math.round(p.monthLength),
-      billItems: p.billItems,
-      savingsItems: p.savingsItems,
-      currency,
-      updatedAt: now,
-    };
-    if (plan) {
-      await db.plans.update(plan.id, fields);
+  const today = todayISO();
+  await db.transaction('rw', db.plans, async () => {
+    const plans = (await db.plans.toArray()).filter(alive);
+    const latest = orderPlans(plans).pop();
+    const fields = planFields(p, p.periodStartDay ?? startDayOf(plans), now);
+    if (latest && effectiveFromOf(latest) >= periodFor(startDayOf(plans), today).start) {
+      await db.plans.update(latest.id, fields);
     } else {
-      await db.plans.add({ id: uuid(), createdAt: now, ...fields });
-    }
-    const cycle = await latestCycle(db);
-    if (cycle) {
-      await db.cycles.update(cycle.id, {
-        planAmount: moneyToLiveOn(p),
-        // never below the current day: current_day <= total_days + 1 is a server constraint (F-14)
-        totalDays: clampDays(Math.max(p.monthLength, cycle.currentDay)),
-        updatedAt: now,
-      });
-      await recompute(db, cycle.id);
+      await db.plans.add({ id: uuid(), createdAt: now, effectiveFrom: today, ...fields });
     }
   });
   await persistStorage();
@@ -474,68 +481,6 @@ export function useSpendCount(): number {
 /** How many rows the server rejected and sync has set aside (shown as "N items couldn't sync"). */
 export function useSyncFailureCount(): number {
   return useLiveQuery(async () => Object.keys((await getDB().meta.get('main'))?.syncFailures ?? {}).length, [], 0);
-}
-
-/**
- * The two cycles an accidental restart leaves behind: the newest cycle started *inside* the previous one's date
- * range (e.g. onboarding redone mid-month). A normal "Start next month" begins after the old cycle ends, so
- * it never matches; that is why the restore card no longer shows for everyone with 2+ months (F-09).
- */
-export function findAccidentalPair(cycles: Cycle[]): { original: Cycle; latest: Cycle } | null {
-  const live = cycles.filter(alive).sort((a, b) => a.startDate.localeCompare(b.startDate) || a.updatedAt - b.updatedAt);
-  if (live.length < 2) return null;
-  const latest = live[live.length - 1];
-  const original = live[live.length - 2];
-  const offset = daysBetween(original.startDate, latest.startDate);
-  return offset >= 0 && offset < original.totalDays ? { original, latest } : null;
-}
-
-export function useCanMergeCycle(): boolean {
-  return useLiveQuery(async () => findAccidentalPair(await getDB().cycles.toArray()) != null, [], false);
-}
-
-/**
- * Merges an accidentally restarted cycle back into the original month: its spends move into
- * the original cycle, the original returns to today's day with the latest plan, and the
- * accidental cycle is tombstoned.
- */
-export async function mergeAccidentalCycle(): Promise<{ success: boolean; message: string; currentDay?: number }> {
-  const db = getDB();
-  const pair = findAccidentalPair(await db.cycles.toArray());
-  if (!pair) {
-    return { success: false, message: 'No restarted month found. Nothing to restore.' };
-  }
-  const { latest, original } = pair;
-  const plan = await latestPlan(db);
-  const planAmount = plan ? moneyToLiveOn(plan) : original.planAmount;
-  const monthLength = plan?.monthLength ?? original.totalDays;
-  const currentDay = Math.min(monthLength, Math.max(1, calendarDay(original.startDate, todayISO(), monthLength)));
-  const now = Date.now();
-
-  await db.transaction('rw', [db.cycles, db.transactions, db.dayRows], async () => {
-    // Close the restarted cycle BEFORE reopening the original: pushes go in write order and the server allows
-    // only one open cycle per user, so the other order is rejected and the merge never reaches the cloud.
-    await db.cycles.update(latest.id, { deletedAt: now, updatedAt: now });
-    await db.cycles.update(original.id, { currentDay, totalDays: monthLength, planAmount, updatedAt: now });
-    const moved = await db.transactions.where('cycleId').equals(latest.id).toArray();
-    for (const t of moved) await db.transactions.update(t.id, { cycleId: original.id, updatedAt: now });
-    await db.dayRows.where('cycleId').equals(latest.id).delete();
-    await recompute(db, original.id);
-  });
-  requestSync();
-  return {
-    success: true,
-    currentDay,
-    message: `Restored to Day ${currentDay} of your original month! Your past logs and updated plan are unified.`,
-  };
-}
-
-/** New cycle starting today with the same plan. */
-export async function startNextMonth(): Promise<void> {
-  const plan = await latestPlan(getDB());
-  if (!plan) return;
-  await startCycle(plan, todayISO(), false);
-  requestSync();
 }
 
 /* ---------- spends ---------- */
@@ -568,7 +513,7 @@ export interface SpendUpdate {
 
 /** Logs a spend on the cycle's current day (or a specific `targetDay` / `targetDate` when adding from History). */
 export async function addSpend(
-  cycle: Cycle,
+  cycle: { startDate: string; totalDays: number; currentDay: number },
   spend: NewSpend,
   now: Date = new Date(),
   targetDay?: number,
@@ -585,21 +530,13 @@ export async function addSpend(
   const activeEvent = spend.event === undefined ? ((await db.meta.get('main'))?.activeEvent ?? null) : spend.event;
 
   let entryDate: string;
-  let targetCycle: Cycle = cycle;
   let adjustsPool = spend.adjustPool !== false;
 
   if (targetDate) {
     entryDate = targetDate;
     const diff = daysBetween(cycle.startDate, targetDate);
-    if (!(diff >= 0 && diff < cycle.totalDays)) {
-      const all = (await db.cycles.toArray()).filter(alive);
-      const matched = all.find((c) => {
-        const d = daysBetween(c.startDate, targetDate);
-        return d >= 0 && d < c.totalDays;
-      });
-      if (matched) targetCycle = matched;
-      adjustsPool = false; // never deduct from a cycle's pool for a date outside its range
-    }
+    // a date in another month only ever counts in that month's own numbers
+    if (!(diff >= 0 && diff < cycle.totalDays)) adjustsPool = true;
   } else {
     const day =
       targetDay != null ? Math.min(Math.max(1, Math.round(targetDay)), cycle.totalDays) : cycle.currentDay;
@@ -619,7 +556,6 @@ export async function addSpend(
   const txn: Txn = {
     id: txnId(),
     updatedAt: Date.now(),
-    cycleId: targetCycle.id,
     txnDate: entryDate,
     amount: Math.round(spend.amount),
     label: spend.label,
@@ -637,16 +573,16 @@ export async function addSpend(
     createdAt,
   };
 
-  await db.transaction('rw', [db.transactions, db.meta, db.cycles, db.dayRows], async () => {
+  await db.transaction('rw', [db.transactions, db.meta, db.plans], async () => {
+    await extendTrackingStart(db, entryDate);
     await db.transactions.add(txn);
     await db.meta.update('main', {
       lastUsedLabel: spend.label,
       ...(txn.payment ? { lastPayment: txn.payment } : {}),
     });
-    await recompute(db, targetCycle.id);
   });
   requestSync();
-  return toEntry(txn, targetCycle);
+  return toEntry(txn, cycle);
 }
 
 /**
@@ -655,8 +591,8 @@ export async function addSpend(
  */
 export async function updateEntry(id: string, patch: SpendUpdate): Promise<Entry | null> {
   const db = getDB();
-  let updated: Entry | null = null;
-  await db.transaction('rw', [db.transactions, db.cycles, db.dayRows, db.cats, db.evts], async () => {
+  let saved: Txn | null = null;
+  await db.transaction('rw', [db.transactions, db.cats, db.evts], async () => {
     const prev = await db.transactions.get(id);
     if (!prev || prev.deletedAt != null) return;
     const cat = patch.category != null ? (await loadCategories(db)).find((c) => c.name.toLowerCase() === patch.category!.toLowerCase()) : undefined;
@@ -677,162 +613,52 @@ export async function updateEntry(id: string, patch: SpendUpdate): Promise<Entry
       fromSavings: patch.fromSavings != null ? patch.fromSavings : prev.fromSavings,
     };
     await db.transactions.put(next);
-    if (prev.cycleId) await recompute(db, prev.cycleId);
-    const cycle = prev.cycleId ? await db.cycles.get(prev.cycleId) : undefined;
-    updated = toEntry(next, cycle, await loadLinkNames(db));
+    saved = next;
   });
-  if (updated) requestSync();
-  return updated;
+  if (!saved) return null;
+  const t: Txn = saved;
+  requestSync();
+  return toEntry(t, await cycleFor(db, t.txnDate), await loadLinkNames(db));
 }
 
-/** Soft delete: the tombstone syncs, and the cycle is re-derived. */
+/** Soft delete: the tombstone syncs; the month's numbers are derived, so nothing else changes. */
 export async function removeEntry(id: string): Promise<void> {
   const db = getDB();
-  await db.transaction('rw', [db.transactions, db.cycles, db.dayRows], async () => {
+  await db.transaction('rw', [db.transactions], async () => {
     const t = await db.transactions.get(id);
     if (!t || t.deletedAt != null) return;
     const now = Date.now();
     await db.transactions.update(id, { deletedAt: now, updatedAt: now });
-    if (t.cycleId) await recompute(db, t.cycleId);
   });
   requestSync();
 }
 
-/* ---------- closing days ---------- */
-
-/** A day can only be closed once it has begun: closing is capped at today's cycle day, so a clock moved backwards cannot close tomorrow. */
-export async function closeCurrentDay(cycleId: string, onDate: string = todayISO()): Promise<CloseResult | null> {
-  const db = getDB();
-  const res = await db.transaction('rw', [db.cycles, db.transactions, db.dayRows], async () => {
-    const c = await db.cycles.get(cycleId);
-    if (!c || c.deletedAt != null || c.currentDay > c.totalDays) return null;
-    if (c.currentDay > calendarDay(c.startDate, onDate, c.totalDays)) return null;
-    const date = dateOfDay(c.startDate, c.currentDay);
-    const today = (await db.transactions.where('[cycleId+txnDate]').equals([cycleId, date]).toArray()).filter(alive);
-    const r = closeDay(c, spentToday(today));
-    await db.cycles.update(cycleId, { currentDay: r.state.currentDay, updatedAt: Date.now() });
-    await recompute(db, cycleId);
-    return r;
-  });
-  if (res) requestSync();
-  return res;
-}
-
-export interface PendingCatchUp {
-  cycleId: string;
-  gap: { from: number; to: number };
-  onPlan: number;
-  startDate: string;
-}
-
-/** Runs on load and whenever the app becomes visible again. */
-export async function syncCalendar(today: string = todayISO()): Promise<PendingCatchUp | null> {
-  const db = getDB();
-  let changed = false;
-  const result = await db.transaction('rw', [db.cycles, db.transactions, db.dayRows, db.meta], async () => {
-    // A date far in the future is not believed at once: closing days is permanent.
-    const meta = await db.meta.get('main');
-    const vet = vetToday(meta?.calendarSeen, today, Date.now());
-    if (meta && vet.next !== meta.calendarSeen) await db.meta.update('main', { calendarSeen: vet.next });
-    if (!vet.use) return null;
-    const c = await latestCycle(db);
-    if (!c || c.currentDay > c.totalDays) return null;
-    const cal = calendarDay(c.startDate, today, c.totalDays);
-    if (c.currentDay >= cal) return null;
-    const all = (await db.transactions.where('cycleId').equals(c.id).toArray()).filter(alive);
-    const byDay = new Map<number, DayInfo>();
-    for (const t of all) {
-      const day = dayOfTxn(c, t.txnDate);
-      if (day === 0) continue;
-      const d = byDay.get(day) ?? { hasEntries: false, spent: 0 };
-      d.hasEntries = true;
-      if (!t.fromSavings) d.spent += t.amount;
-      byDay.set(day, d);
-    }
-    const plan = planSync(c, cal, (day) => byDay.get(day) ?? { hasEntries: false, spent: 0 });
-    if (plan.closes.length) {
-      await db.cycles.update(c.id, { currentDay: plan.state.currentDay, updatedAt: Date.now() });
-      await recompute(db, c.id);
-      changed = true;
-    }
-    if (!plan.gap) return null;
-    return { cycleId: c.id, gap: plan.gap, onPlan: onPlanTotal(plan.state, plan.gap), startDate: c.startDate };
-  });
-  if (changed) requestSync();
-  return result;
-}
+/* ---------- the day and the month ---------- */
 
 /**
- * "Skip, I'll log it later": closes the missed days with nothing spent and does NOT mark them as estimated, so
- * spends the user adds to those days afterwards (History / calendar) flow into the pool through `recompute`.
- * Until then the days count as unspent, which makes the daily amount a little higher.
+ * "Close the day" is a recap now: what today cost and what tomorrow's amount will be. It writes nothing; the day
+ * ends at midnight by itself, so it can't be closed twice, early or on two devices at once.
  */
-export async function skipCatchUp(cycleId: string, gap: { from: number; to: number }): Promise<void> {
+export async function previewCloseDay(today: string = todayISO()): Promise<CloseResult | null> {
   const db = getDB();
-  await db.transaction('rw', [db.cycles, db.transactions, db.dayRows], async () => {
-    const c = await db.cycles.get(cycleId);
-    if (!c || c.currentDay !== gap.from) return;
-    const r = catchUp(c, 0, gap);
-    await db.cycles.update(cycleId, { currentDay: r.state.currentDay, updatedAt: Date.now() });
-    await recompute(db, cycleId);
-  });
-  requestSync();
+  const c = await cycleFor(db, today, today);
+  if (!c || c.currentDay > c.totalDays) return null;
+  const spends = (await db.transactions.where('txnDate').equals(today).toArray()).filter(alive);
+  return closeDay(c, spentToday(spends));
 }
 
-export async function applyCatchUp(
-  cycleId: string,
-  total: number,
-  gap: { from: number; to: number },
-  now = new Date(),
-) {
-  void now;
-  const db = getDB();
-  await db.transaction('rw', [db.cycles, db.transactions, db.dayRows], async () => {
-    const c = await db.cycles.get(cycleId);
-    if (!c || c.currentDay !== gap.from) return;
-    const r = catchUp(c, total, gap);
-    const stamp = Date.now();
-    await db.transactions.bulkAdd(
-      r.entries.map((e) => {
-        const iso = dateOfDay(c.startDate, e.day);
-        const [y, m, d] = iso.split('-').map(Number);
-        const createdAt = new Date(y, m - 1, d, 12, 0, 0).getTime();
-        return {
-          id: txnId(),
-          updatedAt: stamp,
-          cycleId,
-          txnDate: iso,
-          amount: e.amount,
-          label: 'Rough total',
-          type: 'Other',
-          categoryId: 'other',
-          subtype: null,
-          event: null,
-          eventId: null,
-          payment: null,
-          note: null,
-          fromSavings: false,
-          adjustsPool: true,
-          isEstimate: true,
-          hour: 12,
-          createdAt,
-        } satisfies Txn;
-      }),
-    );
-    const estimated = Array.from(new Set([...c.estimatedDays, ...r.days.map((d) => d.day)])).sort((a, b) => a - b);
-    await db.cycles.update(cycleId, { currentDay: r.state.currentDay, estimatedDays: estimated, updatedAt: stamp });
-    await recompute(db, cycleId);
-  });
-  requestSync();
-}
-
+/** Marks last month's leftover as moved to savings (a note on the summary; money itself is never moved by the app). */
 export async function moveLeftoverToSavings(cycleId: string): Promise<void> {
   const db = getDB();
-  const c = await db.cycles.get(cycleId);
-  if (c && !c.leftoverMoved) {
-    await db.cycles.update(cycleId, { leftoverMoved: true, updatedAt: Date.now() });
-    requestSync();
-  }
+  const moved = (await db.meta.get('main'))?.leftoverMoved ?? [];
+  if (!moved.includes(cycleId)) await db.meta.update('main', { leftoverMoved: [...moved, cycleId] });
+}
+
+/** Hides the month-end summary of a finished month on this device. */
+export async function dismissMonthSummary(cycleId: string): Promise<void> {
+  const db = getDB();
+  const seen = (await db.meta.get('main'))?.monthSummarySeen ?? [];
+  if (!seen.includes(cycleId)) await db.meta.update('main', { monthSummarySeen: [...seen, cycleId] });
 }
 
 /* ---------- categories ----------
@@ -1141,100 +967,70 @@ export async function endEvent(): Promise<void> {
 export async function fillSample(now: Date = new Date()): Promise<void> {
   await ensureSeed();
   const db = getDB();
-  let plan: PlanInput | undefined = await latestPlan(db);
-  let addPlan = false;
-  if (!plan || !isPlanValid(plan) || plan.monthLength <= SAMPLE_DAYS) {
-    plan = DEFAULT_SAMPLE_PLAN;
-    addPlan = true;
-  }
+  const current = await latestPlan(db);
+  const plan: PlanInput = current && isPlanValid(current) ? current : DEFAULT_SAMPLE_PLAN;
   const today = todayISO(now);
   const startDate = addDays(today, -SAMPLE_DAYS);
   const spends = generateSampleSpends(startDate, SAMPLE_DAYS);
   const cats = await loadCategories(db);
   const stamp = Date.now();
 
-  await db.transaction(
-    'rw',
-    [db.plans, db.cycles, db.dayRows, db.transactions, db.evts, db.meta],
-    async () => {
-      await db.meta.update('main', { sampleLoaded: true });
-      // Tombstone whatever existed so the replacement syncs.
-      await db.cycles.toCollection().filter(alive).modify({ deletedAt: stamp, updatedAt: stamp });
-      await db.transactions.toCollection().filter(alive).modify({ deletedAt: stamp, updatedAt: stamp });
-      await db.evts.toCollection().filter(alive).modify({ deletedAt: stamp, updatedAt: stamp });
-      await db.dayRows.clear();
-      await db.evts.bulkAdd([
-        {
-          id: uuid(), updatedAt: stamp, name: 'Weekend getaway', note: 'Lonavala trip with friends',
-          categories: [], createdAt: stamp - 2000,
-        },
-        {
-          id: uuid(), updatedAt: stamp, name: 'Family dinner', note: 'Hosting parents at home',
-          categories: [], createdAt: stamp - 1000,
-        },
-      ]);
-      if (addPlan) {
-        await db.plans.add({
-          id: uuid(), updatedAt: stamp, createdAt: stamp,
-          income: plan!.income, bills: plan!.bills, savings: plan!.savings, monthLength: plan!.monthLength,
-          billItems: plan!.billItems, savingsItems: plan!.savingsItems,
+  await db.transaction('rw', [db.plans, db.transactions, db.evts, db.meta], async () => {
+    await db.meta.update('main', { sampleLoaded: true });
+    // Tombstone whatever existed so the replacement syncs.
+    await db.plans.toCollection().filter(alive).modify({ deletedAt: stamp, updatedAt: stamp });
+    await db.transactions.toCollection().filter(alive).modify({ deletedAt: stamp, updatedAt: stamp });
+    await db.evts.toCollection().filter(alive).modify({ deletedAt: stamp, updatedAt: stamp });
+    await db.evts.bulkAdd([
+      {
+        id: uuid(), updatedAt: stamp, name: 'Weekend getaway', note: 'Lonavala trip with friends',
+        categories: [], createdAt: stamp - 2000,
+      },
+      {
+        id: uuid(), updatedAt: stamp, name: 'Family dinner', note: 'Hosting parents at home',
+        categories: [], createdAt: stamp - 1000,
+      },
+    ]);
+    // The sample month starts SAMPLE_DAYS ago, so its period begins on that day of the month.
+    await db.plans.add({ id: uuid(), createdAt: stamp, effectiveFrom: startDate, ...planFields(plan, dayOfMonth(startDate), stamp) });
+    const txns: Txn[] = [];
+    for (let day = 1; day <= SAMPLE_DAYS; day++) {
+      const mine = spends.filter((s) => s.day === day);
+      const dayIso = dateOfDay(startDate, day);
+      const [y, m, d] = dayIso.split('-').map(Number);
+      mine.forEach((s, i) => {
+        const cat = cats.find((c) => c.name === s.category);
+        const sub = cat?.subcategories.find((t) => t === s.subcategory) ?? null;
+        const resolvedCat = cat ? cat.name : 'Other';
+        let sampleEvent: string | null = null;
+        if ((day === 14 || day === 15) && ['Travel', 'Food', 'Fun'].includes(resolvedCat)) {
+          sampleEvent = 'Weekend getaway';
+        } else if (day === 8 && ['Food', 'Home'].includes(resolvedCat)) {
+          sampleEvent = 'Family dinner';
+        }
+        txns.push({
+          id: txnId(),
+          updatedAt: stamp,
+          txnDate: dayIso,
+          amount: s.amount,
+          label: s.label,
+          type: resolvedCat,
+          categoryId: cat?.id ?? 'other',
+          subtype: cat ? sub : null,
+          event: sampleEvent,
+          eventId: null,
+          payment: resolvedCat === 'Bills' || resolvedCat === 'Shopping' ? 'Card' : s.amount <= 40 ? 'Cash' : 'UPI',
+          note: null,
+          fromSavings: s.fromSavings,
+          adjustsPool: true,
+          isEstimate: false,
+          hour: s.hour,
+          createdAt: new Date(y, m - 1, d, s.hour, i).getTime(),
         });
-      }
-      const state = initialCycleState(plan!);
-      const cycleId = uuid();
-      await db.cycles.add({
-        id: cycleId,
-        updatedAt: stamp,
-        startDate,
-        totalDays: state.totalDays,
-        planAmount: moneyToLiveOn(plan!),
-        currentDay: SAMPLE_DAYS + 1,
-        pool: state.pool,
-        fromSavingsTotal: 0,
-        leftoverMoved: false,
-        estimatedDays: [],
       });
-      const txns: Txn[] = [];
-      for (let day = 1; day <= SAMPLE_DAYS; day++) {
-        const mine = spends.filter((s) => s.day === day);
-        const dayIso = dateOfDay(startDate, day);
-        const [y, m, d] = dayIso.split('-').map(Number);
-        mine.forEach((s, i) => {
-          const cat = cats.find((c) => c.name === s.category);
-          const sub = cat?.subcategories.find((t) => t === s.subcategory) ?? null;
-          const resolvedCat = cat ? cat.name : 'Other';
-          let sampleEvent: string | null = null;
-          if ((day === 14 || day === 15) && ['Travel', 'Food', 'Fun'].includes(resolvedCat)) {
-            sampleEvent = 'Weekend getaway';
-          } else if (day === 8 && ['Food', 'Home'].includes(resolvedCat)) {
-            sampleEvent = 'Family dinner';
-          }
-          txns.push({
-            id: txnId(),
-            updatedAt: stamp,
-            cycleId,
-            txnDate: dayIso,
-            amount: s.amount,
-            label: s.label,
-            type: resolvedCat,
-            categoryId: cat?.id ?? 'other',
-            subtype: cat ? sub : null,
-            event: sampleEvent,
-            eventId: null,
-            payment: resolvedCat === 'Bills' || resolvedCat === 'Shopping' ? 'Card' : s.amount <= 40 ? 'Cash' : 'UPI',
-            note: null,
-            fromSavings: s.fromSavings,
-            adjustsPool: true,
-            isEstimate: false,
-            hour: s.hour,
-            createdAt: new Date(y, m - 1, d, s.hour, i).getTime(),
-          });
-        });
-      }
-      await db.transactions.bulkAdd(txns);
-      await recompute(db, cycleId);
-    },
-  );
+    }
+    await db.transactions.bulkAdd(txns);
+  });
   await persistStorage();
   requestSync();
 }
@@ -1243,20 +1039,14 @@ export async function fillSample(now: Date = new Date()): Promise<void> {
 
 export async function exportCSV(): Promise<string> {
   const db = getDB();
-  const [cycles, txns, names] = await Promise.all([db.cycles.toArray(), db.transactions.toArray(), loadLinkNames(db)]);
-  const byId = new Map(cycles.filter(alive).map((c) => [c.id, c]));
+  const [cycles, txns, names] = await Promise.all([allCycles(db), db.transactions.toArray(), loadLinkNames(db)]);
   const rows: CsvRow[] = txns
-    .filter((t) => alive(t) && t.cycleId != null && byId.has(t.cycleId))
-    .map((t) => ({ t, c: byId.get(t.cycleId!)! }))
-    .sort(
-      (a, b) =>
-        a.c.startDate.localeCompare(b.c.startDate) ||
-        a.t.txnDate.localeCompare(b.t.txnDate) ||
-        a.t.createdAt - b.t.createdAt,
-    )
+    .filter(alive)
+    .sort((a, b) => a.txnDate.localeCompare(b.txnDate) || a.createdAt - b.createdAt)
+    .map((t) => ({ t, c: cycleOfDate(cycles, t.txnDate) }))
     .map(({ t, c }) => ({
       date: t.txnDate,
-      day: dayOfTxn(c, t.txnDate),
+      day: c ? dayOfTxn(c, t.txnDate) : 0,
       amount: t.amount,
       label: t.label,
       category: catNameOf(t, names),
@@ -1289,21 +1079,17 @@ export async function deleteAllData(): Promise<void> {
   const now = Date.now();
   await db.transaction(
     'rw',
-    [db.plans, db.cycles, db.transactions, db.cats, db.evts, db.dayRows, db.meta],
+    [db.plans, db.transactions, db.cats, db.evts, db.meta],
     async () => {
       const tombstone = { deletedAt: now, updatedAt: now };
       await db.transactions.toCollection().modify(tombstone);
       await db.plans.toCollection().modify(tombstone);
       await db.cats.toCollection().modify(tombstone);
       await db.evts.toCollection().modify(tombstone);
-      // a tombstoned cycle must never count as the user's unfinished one
-      await db.cycles.toCollection().modify((c) => {
-        c.deletedAt = now;
-        c.updatedAt = now;
-        c.currentDay = Math.max(c.currentDay, c.totalDays + 1);
+      await db.meta.update('main', {
+        sampleLoaded: false, lastUsedLabel: null, activeEvent: null,
+        monthSummarySeen: [], leftoverMoved: [],
       });
-      await db.dayRows.clear();
-      await db.meta.update('main', { sampleLoaded: false, lastUsedLabel: null, activeEvent: null });
     },
   );
   await ensureSeed();

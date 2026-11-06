@@ -2,10 +2,11 @@ import 'fake-indexeddb/auto';
 import Dexie from 'dexie';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  addCategory, addEvent, addSpend, createPlanAndCycle, ensureSeed, exportCSV, loadLinkNames, removeCategory, removeEvent,
+  addCategory, addEvent, addSpend, createPlan, ensureSeed, exportCSV, loadLinkNames, removeCategory, removeEvent,
   renameCategory, renameEvent, startEvent, toEntry, updateEntry,
 } from '@/db/queries';
 import { getDB, openUserDB, StashDB } from '@/db/schema';
+import { cycleFor } from '@/db/queries';
 
 const store = new Map<string, string>();
 const plan = { income: 80000, bills: 25000, savings: 15000, monthLength: 30 };
@@ -13,8 +14,8 @@ const plan = { income: 80000, bills: 25000, savings: 15000, monthLength: 30 };
 async function setup(uid: string) {
   await openUserDB(uid);
   await ensureSeed();
-  await createPlanAndCycle(plan, '2026-10-01');
-  return (await getDB().cycles.toArray())[0];
+  await createPlan(plan, '2026-10-01');
+  return (await cycleFor(getDB()))!;
 }
 
 describe('transactions link to categories and events by id', () => {

@@ -11,20 +11,20 @@ import {
   addSubcategory,
   deleteAllData,
   exportCSV,
-  mergeAccidentalCycle,
   removeCategory,
   removeEvent,
   removeSubcategory,
-  useCanMergeCycle,
   useCategories,
   useCategoryCounts,
   useEventCounts,
   useEvents,
 } from '@/db/queries';
-import type { Category, Cycle, Plan, StashEvent } from '@/db/schema';
+import type { Category, Plan, StashEvent } from '@/db/schema';
+import type { DerivedCycle } from '@/lib/period';
 import { moneyToLiveOn } from '@/lib/budget';
 import { MAX_NAME } from '@/lib/categories';
 import { cycleEndDate, formatWithWeekday } from '@/lib/dates';
+import { ordinal } from '@/lib/period';
 import { inr } from '@/lib/format';
 import { useCurrency } from '@/lib/currency';
 import { useAuth } from '@/lib/auth';
@@ -50,7 +50,7 @@ export function UserTab({
   onAccountDeleted,
 }: {
   plan: Plan;
-  cycle: Cycle;
+  cycle: DerivedCycle;
   onChangePlan: () => void;
   onSwitchUser: () => void;
   onLogIn: () => void;
@@ -68,8 +68,6 @@ export function UserTab({
   const events = useEvents() ?? [];
   const eventCounts = useEventCounts();
 
-  const canMerge = useCanMergeCycle();
-  const [merging, setMerging] = useState(false);
   const [confirm, setConfirm] = useState<'delete' | 'account' | null>(null);
   const auth = useAuth();
   const username = auth.username ?? '';
@@ -96,7 +94,7 @@ export function UserTab({
     { label: 'Fixed bills', value: inr(plan.bills), items: plan.billItems },
     { label: 'Savings & investments', value: inr(plan.savings), items: plan.savingsItems },
     { label: 'Money to live on (Pool)', value: inr(moneyToLiveOn(plan)) },
-    { label: 'Days in cycle', value: `${plan.monthLength} days` },
+    { label: 'Month starts on', value: `the ${ordinal(plan.periodStartDay ?? 1)}` },
     { label: 'Current month ends', value: formatWithWeekday(cycleEndDate(cycle.startDate, cycle.totalDays)) },
   ];
 
@@ -177,39 +175,6 @@ export function UserTab({
           )}
         </div>
       </section>
-
-      {/* Accidental Cycle Merge Recovery Card */}
-      {canMerge && (
-        <section
-          className="mt-5 rounded-note border border-amber-300/80 bg-amber-50/80 p-4"
-          aria-label="Restore previous cycle"
-        >
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-[14px] font-semibold text-amber-900">
-                Accidental restarted month detected
-              </p>
-              <p className="mt-1 text-[12px] leading-relaxed text-amber-800">
-                You have earlier logs from your previous month. Click below to merge your latest
-                changes back into your original month without restarting the 30-day timeline.
-              </p>
-            </div>
-          </div>
-          <button
-            type="button"
-            disabled={merging}
-            onClick={async () => {
-              setMerging(true);
-              const res = await mergeAccidentalCycle();
-              setMerging(false);
-              toast(res.message);
-            }}
-            className="mt-3 flex h-9 items-center justify-center rounded-btn bg-amber-900 px-4 text-[13px] font-semibold text-white shadow-sm transition-transform active:scale-[0.99] hover:bg-amber-950"
-          >
-            {merging ? 'Restoring…' : 'Restore original month & merge logs'}
-          </button>
-        </section>
-      )}
 
       {/* Currency Settings */}
       <section className="mt-6 rounded-note border border-line p-4" aria-label="Currency settings">

@@ -3,9 +3,11 @@ import { useState } from 'react';
 import { BackIcon, IconButton, PrimaryButton, SecondaryButton } from '../ui/Button';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { deleteAllData, exportCSV } from '@/db/queries';
-import type { Cycle, Plan } from '@/db/schema';
+import type { Plan } from '@/db/schema';
+import type { DerivedCycle } from '@/lib/period';
 import { moneyToLiveOn } from '@/lib/budget';
 import { cycleEndDate, formatWithWeekday } from '@/lib/dates';
+import { ordinal } from '@/lib/period';
 import { inr } from '@/lib/format';
 import { useToast } from '@/store/toast';
 import { usePWA } from '@/store/pwa';
@@ -19,7 +21,7 @@ export function PlanScreen({
   onDeleted,
 }: {
   plan: Plan;
-  cycle: Cycle;
+  cycle: DerivedCycle;
   onClose: () => void;
   onSwitchUser?: () => void;
   onChangePlan: () => void;
@@ -35,7 +37,7 @@ export function PlanScreen({
     { label: 'Bills', value: inr(plan.bills), items: plan.billItems },
     { label: 'Savings and investments', value: inr(plan.savings), items: plan.savingsItems },
     { label: 'Money to live on', value: inr(moneyToLiveOn(plan)) },
-    { label: 'Days per month', value: String(plan.monthLength) },
+    { label: 'Month starts on', value: `the ${ordinal(plan.periodStartDay ?? 1)}` },
     { label: 'This month ends', value: formatWithWeekday(cycleEndDate(cycle.startDate, cycle.totalDays)) },
   ];
 

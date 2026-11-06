@@ -1,6 +1,6 @@
 import Dexie, { type Table } from 'dexie';
 import { useSyncExternalStore } from 'react';
-import { migrateV4ToV5, migrateCatsToOverrides, migrateTxnLinks } from './migrate';
+import { migrateV4ToV5, migrateCatsToOverrides, migrateTxnLinks, migrateToDerivedPeriods } from './migrate';
 import { V4_STORES } from './legacy';
 import type { DefaultCategory } from '@/lib/categories';
 
@@ -51,6 +51,10 @@ export interface Meta {
   profileCurrencyPushed?: string | null;
   /** Active display currency (e.g. 'INR', 'USD', 'EUR'). */
   currency?: string | null;
+  /** Period ids whose month-end summary was dismissed on this device. */
+  monthSummarySeen?: string[];
+  /** Period ids whose leftover the user marked as moved to savings. */
+  leftoverMoved?: string[];
 }
 
 export interface SyncFailure {
@@ -86,32 +90,19 @@ export interface Plan extends Syncable {
   income: number;
   bills: number;
   savings: number;
+  /** Length of the period the plan was saved in (kept for the server column; the real length is derived, see lib/period.ts). */
   monthLength: number;
+  /** Day of the month the money month starts on (1-31, clamped to short months). The newest plan's value is used. */
+  periodStartDay?: number;
+  /** yyyy-mm-dd this plan applies from. The earliest one is when budgeting started. */
+  effectiveFrom?: string;
   currency?: string;
   billItems?: { name: string; amount: number }[];
   savingsItems?: { name: string; amount: number }[];
   createdAt: number;
 }
 
-export interface Cycle extends Syncable {
-  startDate: string;
-  totalDays: number;
-  planAmount: number;
-  /** Cursor: first unclosed day. */
-  currentDay: number;
-  /** Cache written by recompute. */
-  pool: number;
-  /** Cache written by recompute. */
-  fromSavingsTotal: number;
-  /** CALC_VERSION the pool/fromSavingsTotal/dayRows caches were built with (local only, not synced). */
-  calcVersion?: number;
-  leftoverMoved: boolean;
-  /** Closed days that were back-filled with a rough total. */
-  estimatedDays: number[];
-}
-
 export interface Txn extends Syncable {
-  cycleId: string | null;
   /** Calendar date yyyy-mm-dd; the day is derived via dayOfTxn. */
   txnDate: string;
   amount: number;
@@ -132,15 +123,6 @@ export interface Txn extends Syncable {
   isEstimate: boolean;
   hour: number;
   createdAt: number;
-}
-
-/** Derived from transactions by recompute; never synced. */
-export interface DayRow {
-  cycleId: string;
-  day: number;
-  allowanceAtStart: number;
-  spent: number;
-  status: 'closed' | 'estimated';
 }
 
 /** Stored per-user row: a category the user created, or an override of a shared default (baseId). */
@@ -194,7 +176,7 @@ export interface Entry {
 export const PAYMENT_MODES = ['UPI', 'Card', 'Cash'] as const;
 export type PaymentMode = (typeof PAYMENT_MODES)[number];
 
-export const SCHEMA_VERSION = 10;
+export const SCHEMA_VERSION = 11;
 
 /* ---------- local revisions ----------
  * "What still needs pushing" must not depend on the phone's clock: a clock that moves backwards would
@@ -211,9 +193,9 @@ export function seedRev(n: number): void {
 }
 
 /** Tables whose rows sync; each gets `localRev` stamped by Dexie hooks. */
-export const SYNCED_TABLES = ['plans', 'cycles', 'transactions', 'cats', 'evts'] as const;
+export const SYNCED_TABLES = ['plans', 'transactions', 'cats', 'evts'] as const;
 /** Fields that are local caches (written by recompute): changing only these is not a user edit. */
-const CACHE_FIELDS = new Set(['pool', 'fromSavingsTotal', 'calcVersion', 'localRev']);
+const CACHE_FIELDS = new Set(['localRev']);
 let stampingOff = false;
 
 /** Runs `fn` without stamping `localRev`: for writing server state we already have (applyRemote). */
@@ -230,9 +212,7 @@ export class StashDB extends Dexie {
   users!: Table<UserRecord, string>;
   meta!: Table<Meta, string>;
   plans!: Table<Plan, string>;
-  cycles!: Table<Cycle, string>;
   transactions!: Table<Txn, string>;
-  dayRows!: Table<DayRow, [string, number]>;
   cats!: Table<CategoryRow, string>;
   evts!: Table<StashEvent, string>;
   syncBase!: Table<SyncBase, string>;
@@ -281,6 +261,15 @@ export class StashDB extends Dexie {
       cats: 'id, name, updatedAt, baseId, localRev',
       evts: 'id, name, updatedAt, localRev',
     });
+    // v11: months are derived from plans + transactions (lib/period.ts), so the stored `cycles` and `dayRows` tables
+    // and the transactions' cycle index go. The upgrade still sees `cycles` and carries the first cycle's start over.
+    this.version(11)
+      .stores({
+        cycles: null,
+        dayRows: null,
+        transactions: 'id, txnDate, type, event, categoryId, eventId, updatedAt, localRev',
+      })
+      .upgrade((tx) => migrateToDerivedPeriods(tx));
 
     for (const name of SYNCED_TABLES) {
       const t = this.table(name) as Table<Record<string, unknown>, string>;

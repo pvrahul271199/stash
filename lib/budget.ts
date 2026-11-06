@@ -29,7 +29,10 @@ export interface PlanInput {
   income: number;
   bills: number;
   savings: number;
+  /** Length of the month the plan is saved in (28-31); derived from `periodStartDay` (lib/period.ts). */
   monthLength: number;
+  /** Day of the month the money month starts on (1-31), e.g. salary day. */
+  periodStartDay?: number;
   /** Optional breakdown of `bills`. When present, `bills` equals their sum. */
   billItems?: PlanItem[];
   /** Optional breakdown of `savings`. When present, `savings` equals their sum. */
@@ -58,18 +61,10 @@ export function isPlanValid(p: PlanInput): boolean {
   );
 }
 
-export function initialCycleState(p: PlanInput): CycleState {
-  return { currentDay: 1, totalDays: p.monthLength, pool: moneyToLiveOn(p), fromSavingsTotal: 0 };
-}
-
 /* ---------- today ---------- */
 
 export function daysLeft(s: Pick<CycleState, 'totalDays' | 'currentDay'>): number {
   return s.totalDays - s.currentDay + 1;
-}
-
-export function isCycleOver(s: CycleState): boolean {
-  return s.currentDay > s.totalDays;
 }
 
 /** Amount for the current day, from the pool at the start of the day. */
@@ -96,10 +91,6 @@ export function displayLeft(allowance: number, spent: number): number {
   return Math.max(leftToday(allowance, spent), 0);
 }
 
-export function isPoolUsedUp(s: CycleState): boolean {
-  return s.pool <= 0;
-}
-
 /** "₹X over today. It spreads across the next N days, about ₹Y each." */
 export function overMessage(allowance: number, spent: number, s: CycleState): string | null {
   const over = spent - allowance;
@@ -117,11 +108,6 @@ export const POOL_USED_UP_MESSAGE =
 /** A spend is "big" when it is more than everything still available this cycle (the pool) and more than one day remains. */
 export function isBigSpend(amount: number, pool: number, s: Pick<CycleState, 'totalDays' | 'currentDay'>): boolean {
   return amount > Math.max(pool, 0) && daysLeft(s) > 1;
-}
-
-/** Taking a spend from savings leaves the pool (and so the daily amount) untouched. */
-export function addFromSavings(s: CycleState, amount: number): CycleState {
-  return { ...s, fromSavingsTotal: s.fromSavingsTotal + amount };
 }
 
 /* ---------- closing days ---------- */
@@ -152,70 +138,6 @@ export function closeDay(s: CycleState, spent: number, status: DayRecord['status
   else
     message = `You spent ${inr(spent - allowance)} more, so every day ahead adjusts by ${inr(-delta)}. It's spread out, so no single day takes the hit.`;
   return { state: next, record, tomorrowAllowance: tomorrow, delta, kind, message };
-}
-
-/* ---------- calendar sync ---------- */
-
-export interface DayInfo {
-  hasEntries: boolean;
-  spent: number;
-}
-
-export interface SyncPlan {
-  /** Days closed quietly (they had entries). */
-  closes: DayRecord[];
-  /** Days nobody logged, to ask the user about. */
-  gap: { from: number; to: number } | null;
-  state: CycleState;
-}
-
-export function planSync(s: CycleState, calDay: number, info: (day: number) => DayInfo): SyncPlan {
-  const closes: DayRecord[] = [];
-  let state = s;
-  while (state.currentDay < calDay && state.currentDay <= state.totalDays) {
-    const d = info(state.currentDay);
-    if (!d.hasEntries) break;
-    const r = closeDay(state, d.spent);
-    closes.push(r.record);
-    state = r.state;
-  }
-  const gap =
-    state.currentDay < calDay && state.currentDay <= state.totalDays
-      ? { from: state.currentDay, to: Math.min(calDay - 1, state.totalDays) }
-      : null;
-  return { closes, gap, state };
-}
-
-/** What the missed days would have cost had the user spent exactly their amount. */
-export function onPlanTotal(s: CycleState, gap: { from: number; to: number }): number {
-  const n = gap.to - gap.from + 1;
-  return Math.round(todayAllowance(s) * n);
-}
-
-export interface CatchUpResult {
-  state: CycleState;
-  days: DayRecord[];
-  /** Rough-total entries to create (only days with amount > 0). */
-  entries: { day: number; amount: number }[];
-}
-
-/** Split a rough total evenly across the missed days; all become `estimated`. */
-export function catchUp(s: CycleState, total: number, gap: { from: number; to: number }): CatchUpResult {
-  const n = gap.to - gap.from + 1;
-  const safe = Math.max(0, Math.round(total));
-  const base = Math.floor(safe / n);
-  const extra = safe % n;
-  const days: DayRecord[] = [];
-  const entries: { day: number; amount: number }[] = [];
-  let state = s;
-  for (let i = 0; i < n; i++) {
-    const spent = base + (i < extra ? 1 : 0);
-    const r = closeDay(state, spent, 'estimated');
-    days.push(r.record);
-    if (spent > 0) entries.push({ day: r.record.day, amount: spent });
-    state = r.state;
-  }
-  return { state, days, entries };
 }
 
 /* ---------- month end ---------- */
