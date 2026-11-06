@@ -10,6 +10,7 @@ import { cycleEndDate, formatWithWeekday } from '@/lib/dates';
 import { ordinal } from '@/lib/period';
 import { inr } from '@/lib/format';
 import { useToast } from '@/store/toast';
+import { withLoading } from '@/store/busy';
 import { usePWA } from '@/store/pwa';
 
 export function PlanScreen({
@@ -42,7 +43,7 @@ export function PlanScreen({
   ];
 
   async function doExport() {
-    const csv = await exportCSV();
+    const csv = await withLoading('Syncing your data…', exportCSV);
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
     const a = document.createElement('a');
     a.href = url;

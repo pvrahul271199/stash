@@ -6,12 +6,15 @@ import {
   createPlan,
   cycleFor,
   ensureSeed,
+  fillSample,
+  loadSnapshot,
   previewCloseDay,
   updateActivePlan,
 } from '@/db/queries';
-import { getDB, openUserDB } from '@/db/schema';
+import { getActiveDBUid, getDB, openUserDB } from '@/db/schema';
 import { addDays, todayISO, vetToday } from '@/lib/dates';
 import { buildAllCycles, monthView } from '@/lib/period';
+import { discardSampleAfterSignIn, enterSampleMode, exitSampleMode, resumeSampleMode } from '@/lib/sampleMode';
 import { shouldNudge } from '@/components/ui/BackupPrompt';
 
 const store = new Map<string, string>();
@@ -222,5 +225,192 @@ describe('the whole month can be logged into (calendar months, start day 1)', ()
     await addSpend(monthView((await cycleFor(getDB()))!), { amount: 90, label: 'x', category: 'Food' }, new Date(), undefined, '2026-10-15');
     expect((await cycleFor(getDB()))!.startDate).toBe('2026-11-20');
     expect(await getDB().transactions.where('txnDate').equals('2026-10-15').count()).toBe(1);
+  });
+});
+
+describe('last month\'s summary and the sample month', () => {
+  beforeEach(async () => {
+    vi.stubGlobal('window', { localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} } });
+    vi.useFakeTimers({ toFake: ['Date'] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+  const day = (iso: string) => {
+    const [y, m, d] = iso.split('-').map(Number);
+    vi.setSystemTime(new Date(y, m - 1, d, 12));
+  };
+
+  it('a plan started mid-month has NO "last month" (it used to summarise this month as last month: 0 spent, everything left over)', async () => {
+    day('2026-11-06');
+    await openUserDB(`prev-${Math.random()}`);
+    await ensureSeed();
+    await createPlan({ income: 99999, bills: 0, savings: 0, monthLength: 30 }, '2026-11-06');
+    const snap = await loadSnapshot(getDB(), '2026-11-06');
+    expect(snap.cycle?.startDate).toBe('2026-11-06');
+    expect(snap.previous).toBeUndefined();
+  });
+
+  it('a real previous month shows only once it has spends; an empty tracked month does not', async () => {
+    day('2026-10-20');
+    await openUserDB(`prev-${Math.random()}`);
+    await ensureSeed();
+    await createPlan({ income: 50000, bills: 0, savings: 0, monthLength: 31 }, '2026-10-20');
+    day('2026-11-02');
+    expect((await loadSnapshot(getDB(), '2026-11-02')).previous).toBeUndefined(); // October was tracked but nothing was spent
+    day('2026-10-25');
+    await addSpend(monthView((await cycleFor(getDB()))!), { amount: 400, label: 'x', category: 'Food' });
+    day('2026-11-02');
+    const snap = await loadSnapshot(getDB(), '2026-11-02');
+    expect(snap.previous?.startDate).toBe('2026-10-20');
+    expect(snap.previous?.monthEnd).toBe('2026-10-31');
+    expect(snap.previousSeen).toBe(false);
+  });
+
+  it('sample data is two calendar months: all of last month and this month up to yesterday', async () => {
+    day('2026-11-25');
+    await enterSampleMode(new Date(2026, 10, 25, 12));
+    const db = getDB();
+    const plan = (await db.plans.toArray()).find((p) => p.deletedAt == null)!;
+    expect([plan.periodStartDay, plan.effectiveFrom]).toEqual([1, '2026-10-01']);
+    const dates = (await db.transactions.toArray()).map((t) => t.txnDate);
+    expect(new Set(dates.map((d) => d.slice(0, 7)))).toEqual(new Set(['2026-10', '2026-11']));
+    expect(new Set(dates).size).toBe(31 + 24); // every day of October, 1-24 November (chai every day)
+    expect(dates.some((d) => d === '2026-11-25')).toBe(false); // today is left open
+    const months = buildAllCycles(await db.plans.toArray(), await db.transactions.toArray(), '2026-11-25');
+    expect(months.map((m) => m.monthStart)).toEqual(['2026-11-01', '2026-10-01']);
+    await exitSampleMode();
+  });
+
+  it('on the 1st the sample is last month in full and this month is still empty', async () => {
+    day('2026-11-01');
+    await enterSampleMode(new Date(2026, 10, 1, 12));
+    const db = getDB();
+    const dates = (await db.transactions.toArray()).map((t) => t.txnDate);
+    expect(new Set(dates).size).toBe(31);
+    expect(dates.every((d) => d.startsWith('2026-10'))).toBe(true);
+    const snap = await loadSnapshot(db, '2026-11-01');
+    expect(snap.cycle?.monthStart).toBe('2026-11-01');
+    expect(snap.previous?.monthStart).toBe('2026-10-01'); // a real month with spends: its summary may show
+    await exitSampleMode();
+  });
+
+  it('sample mode never touches a real guest\'s data, and exiting removes the sandbox', async () => {
+    day('2026-11-20');
+    await openUserDB('default');
+    await ensureSeed();
+    await createPlan({ ...plan, periodStartDay: 1 }, '2026-11-20');
+    await addSpend((await cycleFor(getDB()))!, { amount: 77, label: 'Real tea', category: 'Food' });
+    expect(await getDB().transactions.count()).toBe(1);
+
+    await enterSampleMode(new Date(2026, 10, 20, 12));
+    expect(getActiveDBUid()).toBe('sample');
+    expect(await getDB().transactions.count()).toBeGreaterThan(50);
+
+    await exitSampleMode();
+    expect(getActiveDBUid()).toBe('default');
+    const guest = getDB();
+    expect(await guest.transactions.count()).toBe(1); // untouched
+    expect((await guest.transactions.toArray())[0].label).toBe('Real tea');
+    expect((await guest.plans.toArray()).filter((p) => p.deletedAt == null)).toHaveLength(1);
+    expect((await indexedDB.databases()).map((d) => d.name)).not.toContain('stash-sample');
+    await guest.transactions.clear();
+    await guest.plans.clear();
+  });
+
+  it('what a visitor logs in sample mode is not kept: re-entering (a reload) gives fresh sample data', async () => {
+    day('2026-11-20');
+    await enterSampleMode(new Date(2026, 10, 20, 12));
+    const before = await getDB().transactions.count();
+    await addSpend((await cycleFor(getDB()))!, { amount: 12345, label: 'Visitor spend', category: 'Food' });
+    expect(await getDB().transactions.count()).toBe(before + 1); // visible in the app while they are in the sample
+    await enterSampleMode(new Date(2026, 10, 20, 12)); // what a reload does
+    expect(await getDB().transactions.count()).toBe(before);
+    expect((await getDB().transactions.toArray()).some((t) => t.label === 'Visitor spend')).toBe(false);
+    await exitSampleMode();
+  });
+
+  it('a reload inside sample mode resumes it; a signed-in user never gets the sample', async () => {
+    day('2026-11-20');
+    const store = new Map<string, string>();
+    vi.stubGlobal('window', { localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} }, sessionStorage: { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v), removeItem: (k: string) => void store.delete(k) } });
+    expect(await resumeSampleMode()).toBe(false); // flag not set: normal start
+    await enterSampleMode(new Date(2026, 10, 20, 12));
+    expect(store.get('stash:sample-mode')).toBe('1');
+    expect(await resumeSampleMode()).toBe(true);
+    expect(getActiveDBUid()).toBe('sample');
+    await exitSampleMode();
+    expect(store.has('stash:sample-mode')).toBe(false);
+
+    const auth = await import('@/lib/auth');
+    const spy = vi.spyOn(auth, 'getAuth').mockReturnValue({ status: 'signedIn', uid: 'u-1', username: 'bob' });
+    try {
+      await expect(enterSampleMode()).rejects.toThrow(/guests/);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  /** The same steps `signUp` takes: open the new account's DB, then claim the guest's data into it. */
+  const signUpFrom = async (uid: string) => {
+    const { claimGuestData } = await import('@/db/claim');
+    await openUserDB(uid);
+    return claimGuestData(uid);
+  };
+
+  it('creating an account from SAMPLE mode (no guest data): nothing moves, the account starts empty, the sandbox is dropped', async () => {
+    day('2026-11-20');
+    await openUserDB('default');
+    await ensureSeed();
+    await getDB().transactions.clear();
+    await getDB().plans.clear();
+    await enterSampleMode(new Date(2026, 10, 20, 12));
+    expect(await getDB().transactions.count()).toBeGreaterThan(50); // the sample is on screen
+
+    const claim = await signUpFrom('acct-from-sample');
+    expect(claim.claimed).toBe(false);
+    expect(await getDB().transactions.count()).toBe(0); // account is empty: no sample data came with it
+    expect(await getDB().plans.count()).toBe(0);
+
+    await discardSampleAfterSignIn(); // what the shell does once signed in
+    expect((await indexedDB.databases()).map((d) => d.name)).not.toContain('stash-sample');
+  });
+
+  it('creating an account from sample mode WITH real guest data: only the guest data moves, never the sample', async () => {
+    day('2026-11-20');
+    await openUserDB('default');
+    await ensureSeed();
+    await getDB().transactions.clear();
+    await getDB().plans.clear();
+    await createPlan({ ...plan, periodStartDay: 1 }, '2026-11-20');
+    await addSpend((await cycleFor(getDB()))!, { amount: 55, label: 'Real tea', category: 'Food' });
+    await enterSampleMode(new Date(2026, 10, 20, 12)); // browsing the sample in between
+
+    const claim = await signUpFrom('acct-with-guest');
+    expect(claim.claimed).toBe(true);
+    const txns = await getDB().transactions.toArray();
+    expect(txns.map((t) => t.label)).toEqual(['Real tea']); // exactly the guest's own spend, none of the ~55 sample ones
+    expect((await getDB().plans.toArray()).filter((p) => p.deletedAt == null)).toHaveLength(1);
+    await discardSampleAfterSignIn();
+  });
+
+  it('a guest database that still holds sample data from an older app version is never claimed either', async () => {
+    day('2026-11-20');
+    await openUserDB('default');
+    await ensureSeed();
+    await createPlan({ ...plan, periodStartDay: 1 }, '2026-11-20');
+    await addSpend((await cycleFor(getDB()))!, { amount: 55, label: 'Old sample row', category: 'Food' });
+    await getDB().meta.update('main', { sampleLoaded: true }); // what the old "fill sample" left behind
+    expect((await signUpFrom('acct-old-sample')).claimed).toBe(false);
+    expect(await getDB().transactions.count()).toBe(0);
+    await openUserDB('default');
+    await getDB().transactions.clear();
+    await getDB().plans.clear();
+    await getDB().meta.update('main', { sampleLoaded: false });
+  });
+
+  it('fillSample refuses to run anywhere but the sandbox (it must never overwrite a real account)', async () => {
+    await openUserDB(`real-${Math.random()}`);
+    await expect(fillSample()).rejects.toThrow(/sandbox/);
   });
 });

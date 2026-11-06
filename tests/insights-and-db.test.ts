@@ -32,7 +32,6 @@ import {
   deleteAllData,
   ensureSeed,
   exportCSV,
-  fillSample,
   removeCategory,
   removeEntry,
   removeEvent,
@@ -49,6 +48,7 @@ import { loadCategories, toEntry } from '@/db/queries';
 import { buildCalendar, buildMonthCalendar, compactINR, dayTotals, dayTotalsByDate, searchEntries } from '@/lib/history';
 import { sumItems } from '@/lib/budget';
 import { dateOfDay } from '@/lib/dates';
+import { enterSampleMode, exitSampleMode } from '@/lib/sampleMode';
 
 describe('validateName', () => {
   it('blocks empty, duplicate (case-insensitive), and >24 char names', () => {
@@ -80,8 +80,9 @@ describe('buildCSV', () => {
 
 describe('sample generator', () => {
   it('is deterministic and includes special days', () => {
-    const a = generateSampleSpends('2026-10-09', SAMPLE_DAYS, 42);
-    const b = generateSampleSpends('2026-10-09', SAMPLE_DAYS, 42);
+    // starting on the 1st, so sample day N is also the Nth of the month (monthly items follow the date)
+    const a = generateSampleSpends('2026-10-01', SAMPLE_DAYS, 42);
+    const b = generateSampleSpends('2026-10-01', SAMPLE_DAYS, 42);
     expect(a).toEqual(b);
     expect(a.some((s) => s.day === 3 && s.label === 'Recharge' && s.amount === 299)).toBe(true);
     expect(a.some((s) => s.day === 9 && s.label === 'Medicine' && s.amount === 360)).toBe(true);
@@ -231,16 +232,17 @@ describe('database queries', () => {
     expect(cycle.pool).toBe(cycle.planAmount - 700);
   });
 
-  it('fills sample month and exports CSV', async () => {
+  it('fills the sample sandbox with two months and exports CSV', async () => {
     at('2026-10-27');
-    await fillSample(new Date(2026, 9, 27, 12, 0));
+    await enterSampleMode(new Date(2026, 9, 27, 12, 0));
     const db = getDB();
     const cycle = await current();
-    expect(cycle.currentDay).toBe(SAMPLE_DAYS + 1);
+    expect([cycle.monthStart, cycle.currentDay]).toEqual(['2026-10-01', 27]);
     const csv = await exportCSV();
-    expect(csv.split('\n').length).toBeGreaterThan(20);
+    expect(csv.split('\n').length).toBeGreaterThan(80); // September and October
     const events = await db.evts.toArray();
     expect(events.length).toBeGreaterThanOrEqual(2);
+    await exitSampleMode();
   });
 
   it('creates events with custom text and tagged categories, logs event spends, and computes event analytics', async () => {

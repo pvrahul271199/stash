@@ -583,3 +583,47 @@ describe('account isolation (the app enforces it, not only RLS)', () => {
     auth.uid = owner;
   });
 });
+
+describe('export CSV syncs first', () => {
+  beforeEach(async () => {
+    vi.stubGlobal('fetch', fakeFetch);
+    vi.stubGlobal('navigator', { onLine: true });
+    vi.stubGlobal('window', { localStorage: { getItem: (k: string) => (k === 'stash:consent' ? JSON.stringify({ v: 1 }) : null), setItem: () => {}, removeItem: () => {} }, addEventListener: () => {} });
+    ignoreUserFilter = false;
+    await freshUser();
+  });
+
+  it('uploads what is still waiting on this phone and includes spends only the cloud had', async () => {
+    const { exportCSV } = await import('@/db/queries');
+    const { todayISO } = await import('@/lib/dates');
+    const today = todayISO();
+    await createPlan({ ...plan, periodStartDay: 1 }, today);
+    await addSpend((await cycleFor(getDB()))!, { amount: 90, label: 'Tea on this phone', category: 'Food' });
+    // a spend another device made: it exists only on the server
+    server.set('transactions', new Map([[`${'a'.repeat(8)}-0000-7000-8000-000000000001`, {
+      id: `${'a'.repeat(8)}-0000-7000-8000-000000000001`, user_id: auth.uid, client_updated_at: 1, version: 1, updated_at: new Date(clock++).toISOString(), deleted_at: null,
+      txn_date: today, amount: 450, type: 'Food', category_id: 'food', subtype: null, label: 'Lunch on the laptop', event: null, event_id: null,
+      payment: null, note: null, from_savings: false, adjusts_pool: true, is_estimate: false, hour: 13, created_at: 1,
+    }]]));
+    expect(await getDB().transactions.count()).toBe(1); // the laptop's spend is not here yet
+
+    const csv = await exportCSV(); // no explicit sync before this
+
+    expect(csv).toContain('Lunch on the laptop'); // pulled
+    expect(csv).toContain('Tea on this phone');
+    expect([...(server.get('transactions')?.values() ?? [])].some((r) => r.label === 'Tea on this phone')).toBe(true); // pushed
+  });
+
+  it('a guest (not signed in) just exports, without touching the network', async () => {
+    const { exportCSV } = await import('@/db/queries');
+    const auth2 = await import('@/lib/auth');
+    const spy = vi.spyOn(auth2, 'getAuth').mockReturnValue({ status: 'guest' } as never);
+    const before = calls.length;
+    try {
+      await exportCSV();
+    } finally {
+      spy.mockRestore();
+    }
+    expect(calls.length).toBe(before);
+  });
+});

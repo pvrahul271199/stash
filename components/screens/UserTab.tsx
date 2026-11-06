@@ -28,6 +28,7 @@ import { ordinal } from '@/lib/period';
 import { inr } from '@/lib/format';
 import { useCurrency } from '@/lib/currency';
 import { useAuth } from '@/lib/auth';
+import { useSampleMode } from '@/lib/sampleMode';
 import { withLoading } from '@/store/busy';
 import { useToast } from '@/store/toast';
 import { usePWA } from '@/store/pwa';
@@ -44,6 +45,7 @@ export function UserTab({
   cycle,
   onChangePlan,
   onSwitchUser,
+  onLeaveSample,
   onLogIn,
   onCreateAccount,
   onDeleted,
@@ -53,6 +55,8 @@ export function UserTab({
   cycle: DerivedCycle;
   onChangePlan: () => void;
   onSwitchUser: () => void;
+  /** Leave the sample sandbox (only offered while in it). */
+  onLeaveSample?: () => void;
   onLogIn: () => void;
   onCreateAccount: () => void;
   onDeleted: () => void;
@@ -60,6 +64,7 @@ export function UserTab({
   onAccountDeleted?: () => void;
 }) {
   const toast = useToast((s) => s.show);
+  const inSample = useSampleMode();
   const installEvent = usePWA((s) => s.installEvent);
   const setPWA = usePWA((s) => s.set);
   const { currency, setCurrency, currencies } = useCurrency();
@@ -99,7 +104,7 @@ export function UserTab({
   ];
 
   async function doExport() {
-    const csv = await exportCSV();
+    const csv = await withLoading('Syncing your data…', exportCSV);
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
     const a = document.createElement('a');
     a.href = url;
@@ -124,6 +129,22 @@ export function UserTab({
         <h1 className="text-[20px] font-semibold tracking-tight text-ink">User Profile & Plan</h1>
         <SyncStatusPill />
       </div>
+
+      {inSample && onLeaveSample && (
+        <section className="mt-5 rounded-note border border-line bg-tint p-4" aria-label="Sample data">
+          <p className="text-[14px] font-semibold text-ink">You&apos;re exploring sample data</p>
+          <p className="mt-1 text-[13px] leading-relaxed text-soft">
+            Two months of made-up spends. What you log here is only for this visit and isn&apos;t saved.
+          </p>
+          <button
+            type="button"
+            onClick={onLeaveSample}
+            className="mt-3 flex h-10 items-center justify-center rounded-btn bg-ink px-4 text-[14px] font-semibold text-white active:opacity-80"
+          >
+            Leave the sample
+          </button>
+        </section>
+      )}
 
       {/* Profile Card */}
       <section className="mt-5 rounded-note border border-line bg-white p-4" aria-label="User identity">

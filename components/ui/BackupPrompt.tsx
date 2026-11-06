@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/lib/auth';
 import { useSpendCount } from '@/db/queries';
+import { useSampleMode } from '@/lib/sampleMode';
 
 const KEY = 'stash:backup-nudge-until';
 const DAY = 24 * 60 * 60 * 1000;
@@ -36,9 +37,11 @@ function snooze() {
 /** Bottom sheet (same style as the day peek) reminding guests that their month lives only on this phone. */
 export function BackupPrompt({ onCreate }: { onCreate: () => void }) {
   const auth = useAuth();
+  const inSample = useSampleMode();
   const spends = useSpendCount();
   const [open, setOpen] = useState(false);
-  const eligible = shouldNudge(auth.status === 'guest', spends, readSnooze(), Date.now());
+  // sample data is not the visitor's month, so there is nothing to back up
+  const eligible = !inSample && shouldNudge(auth.status === 'guest', spends, readSnooze(), Date.now());
 
   useEffect(() => {
     if (!eligible || shownThisSession) return;

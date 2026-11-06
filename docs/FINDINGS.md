@@ -20,7 +20,7 @@ Status values: `open` · `fixed` · `wontfix` · `by-design` (update this column
 | F-12 | Medium | Sync | Double push, no mutex, swallowed child-table errors, false "synced", retry drops `user_id` | fixed (2026-11-01) |
 | F-13 | Medium | Budget | "Close the day" has no calendar guard | fixed (2026-11-04) |
 | F-14 | Medium | Budget | Changing plan can shorten the cycle below `currentDay`; plan history overwritten | open |
-| F-15 | Medium | Data | Sample data wipes real history and is pushed to the cloud | open |
+| F-15 | Medium | Data | Sample data wipes real history and is pushed to the cloud | fixed (2026-11-06): sample runs in its own throwaway database `stash-sample` (lib/sampleMode.ts); a real guest's data is never touched, nothing is synced or claimed |
 | F-16 | Medium | Sync | Deletes are not durable (no tombstones, `days`/`plans` never deleted remotely) | open |
 | F-17 | Low | Product | "Move leftover to savings" is cosmetic | open |
 | F-18 | Low | Product | Currency is a label only; thresholds are not currency-aware | open |
@@ -49,6 +49,7 @@ Status values: `open` · `fixed` · `wontfix` · `by-design` (update this column
 | F-40 | High | Budget | Merge card shown to everyone with 2+ cycles; merge reopened the original before closing the restart, so the push broke `uq_cycles_one_active` and was quarantined; `mergeRows` max(current_day) also undid it | fixed (2026-11-06): superseded by E-4 (no stored cycles, no merge) |
 | F-41 | High | Sync | After login, a slow/failed restore (8 s timeout) dropped the user into onboarding; the new plan became a second cycle next to the cloud one | fixed (2026-11-06): "couldn't reach your saved data" screen with Retry; onboarding only on explicit "I'm new here" |
 | F-43 | Medium | Privacy | Logout offered "keep my data on this phone" and a second "remove it" button | fixed (2026-11-06): logging out always removes the local copy after a final sync; warns if changes could not upload |
+| F-44 | Medium | Budget | "Last month, wrapped up" showed for a brand-new plan: "last month" was looked up as the day before tracking began, which is in the same calendar month when tracking starts mid-month (0 spent, whole plan "left over"). Sample data also straddled months ("19 Oct - 18 Nov") | fixed (2026-11-06): last month = the calendar month before this one and only if it has spends; the sample stays inside the current month |
 | F-42 | Medium | Data | Guest data is claimed into a new account without asking (origin of the 2026-11-01 "Sort later 2,555" rows) | open (future-dated spends are the intended "log ahead" feature, not a bug) |
 
 ---

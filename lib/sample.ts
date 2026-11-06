@@ -1,4 +1,4 @@
-import { weekdayOfDay } from './dates';
+import { dateOfDay, weekdayOfDay } from './dates';
 
 export interface SampleSpend {
   day: number;
@@ -25,6 +25,7 @@ export const DEFAULT_SAMPLE_PLAN = {
     { name: 'Emergency fund', amount: 4000 },
   ],
 };
+/** Sample data fills last month and this month so far (see `fillSample`); this is only the length of a typical stretch. */
 export const SAMPLE_DAYS = 18;
 
 /** Small seeded PRNG so the sample month is identical every time. */
@@ -56,6 +57,7 @@ export function generateSampleSpends(startDate: string, days = SAMPLE_DAYS, seed
 
   for (let day = 1; day <= days; day++) {
     const wd = weekdayOfDay(startDate, day);
+    const dom = Number(dateOfDay(startDate, day).slice(8)); // monthly items follow the date, so every month has them
     const weekend = wd === 0 || wd === 6;
 
     // 1-2 chai daily
@@ -74,10 +76,10 @@ export function generateSampleSpends(startDate: string, days = SAMPLE_DAYS, seed
     if (rnd() < 0.3) add(day, round10(between(280, 450)), 'Delivery', 'Food', 'Delivery', 21);
     if (day % 4 === 0) add(day, round10(between(600, 1300)), 'Groceries', 'Home', 'Groceries', 18);
 
-    if (day === 3) add(day, 299, 'Recharge', 'Bills', 'Recharge', 10);
-    if (day === 9) add(day, 360, 'Medicine', 'Health', 'Medicine', 20);
-    if (day === 12) add(day, 2400, 'Clothes', 'Shopping', 'Clothes', 15, true);
-    if (day === 15) add(day, round10(between(180, 350)), 'Cab', 'Travel', 'Cab', 22);
+    if (dom === 3) add(day, 299, 'Recharge', 'Bills', 'Recharge', 10);
+    if (dom === 9) add(day, 360, 'Medicine', 'Health', 'Medicine', 20);
+    if (dom === 12) add(day, 2400, 'Clothes', 'Shopping', 'Clothes', 15, true);
+    if (dom === 15) add(day, round10(between(180, 350)), 'Cab', 'Travel', 'Cab', 22);
   }
   return out;
 }

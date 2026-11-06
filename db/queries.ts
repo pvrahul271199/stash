@@ -4,6 +4,8 @@ import { useLiveQuery as useDexieLive } from 'dexie-react-hooks';
 import {
   DEFAULT_CATEGORIES,
   SCHEMA_VERSION,
+  SAMPLE_UID,
+  getActiveDBUid,
   getDB,
   useActiveUid,
   type Category,
@@ -41,7 +43,7 @@ import {
 } from '@/lib/period';
 import { resolveLabel } from '@/lib/suggestions';
 import { addDays, dateOfDay, daysBetween, toISO, todayISO } from '@/lib/dates';
-import { DEFAULT_SAMPLE_PLAN, SAMPLE_DAYS, generateSampleSpends } from '@/lib/sample';
+import { DEFAULT_SAMPLE_PLAN, generateSampleSpends } from '@/lib/sample';
 import { buildCSV, type CsvRow } from '@/lib/csv';
 import { resolveCategories, validateName, type ResolvedCategory } from '@/lib/categories';
 import { getStoredCurrencyCode } from '@/lib/currency';
@@ -203,16 +205,21 @@ export interface Snapshot {
   previousSeen: boolean;
 }
 
+/** Everything the shell needs about "now": the plan, this month and last month's summary. */
+export async function loadSnapshot(db: StashDB, today: string): Promise<Snapshot> {
+  const [plan, cycle, meta] = await Promise.all([latestPlan(db), cycleFor(db, today, today), db.meta.get('main')]);
+  // Last month = the calendar month before this one (NOT the day before tracking began, which is in this same month when
+  // tracking started mid-month). It must exist (tracking had started) and have spends, or there is nothing to summarise.
+  const earlier = cycle ? await cycleFor(db, addDays(cycle.monthStart, -1), today) : undefined;
+  const previous = earlier && (earlier.fromSavingsTotal > 0 || earlier.days.some((d) => d.spent > 0)) ? earlier : undefined;
+  const previousSeen = !previous || (meta?.monthSummarySeen ?? []).includes(previous.id);
+  return { plan, cycle, previous, previousSeen };
+}
+
 /** `undefined` while loading, then always an object (maybe with empty fields). */
 export function useSnapshot(): Snapshot | undefined {
   const today = useToday();
-  return useLiveQuery(async () => {
-    const db = getDB();
-    const [plan, cycle, meta] = await Promise.all([latestPlan(db), cycleFor(db, today, today), db.meta.get('main')]);
-    const previous = cycle ? await cycleFor(db, addDays(cycle.startDate, -1), today) : undefined;
-    const previousSeen = !previous || (meta?.monthSummarySeen ?? []).includes(previous.id);
-    return { plan, cycle, previous, previousSeen };
-  }, [today]);
+  return useLiveQuery(async () => loadSnapshot(getDB(), today), [today]);
 }
 
 /** Spends of one day of a derived cycle (`cycleId` = period id), newest first. */
@@ -964,23 +971,24 @@ export async function endEvent(): Promise<void> {
 
 /* ---------- sample data ---------- */
 
+/**
+ * Fills the sample sandbox with two months of dummy spends: all of last month, and this month up to yesterday. Only ever
+ * runs on the throwaway sample database (lib/sampleMode.ts), never on a real account or a real guest's data.
+ */
 export async function fillSample(now: Date = new Date()): Promise<void> {
+  if (getActiveDBUid() !== SAMPLE_UID) throw new Error('Sample data only goes into the sample sandbox');
   await ensureSeed();
   const db = getDB();
-  const current = await latestPlan(db);
-  const plan: PlanInput = current && isPlanValid(current) ? current : DEFAULT_SAMPLE_PLAN;
+  const plan: PlanInput = DEFAULT_SAMPLE_PLAN;
   const today = todayISO(now);
-  const startDate = addDays(today, -SAMPLE_DAYS);
-  const spends = generateSampleSpends(startDate, SAMPLE_DAYS);
+  const startDate = periodFor(1, addDays(periodFor(1, today).start, -1)).start; // the 1st of last month
+  const sampleDays = daysBetween(startDate, today); // through yesterday (0 spends on the 1st of a month for "this month")
+  const spends = generateSampleSpends(startDate, sampleDays);
   const cats = await loadCategories(db);
   const stamp = Date.now();
 
   await db.transaction('rw', [db.plans, db.transactions, db.evts, db.meta], async () => {
     await db.meta.update('main', { sampleLoaded: true });
-    // Tombstone whatever existed so the replacement syncs.
-    await db.plans.toCollection().filter(alive).modify({ deletedAt: stamp, updatedAt: stamp });
-    await db.transactions.toCollection().filter(alive).modify({ deletedAt: stamp, updatedAt: stamp });
-    await db.evts.toCollection().filter(alive).modify({ deletedAt: stamp, updatedAt: stamp });
     await db.evts.bulkAdd([
       {
         id: uuid(), updatedAt: stamp, name: 'Weekend getaway', note: 'Lonavala trip with friends',
@@ -991,21 +999,21 @@ export async function fillSample(now: Date = new Date()): Promise<void> {
         categories: [], createdAt: stamp - 1000,
       },
     ]);
-    // The sample month starts SAMPLE_DAYS ago, so its period begins on that day of the month.
-    await db.plans.add({ id: uuid(), createdAt: stamp, effectiveFrom: startDate, ...planFields(plan, dayOfMonth(startDate), stamp) });
+    await db.plans.add({ id: uuid(), createdAt: stamp, effectiveFrom: startDate, ...planFields(plan, 1, stamp) });
     const txns: Txn[] = [];
-    for (let day = 1; day <= SAMPLE_DAYS; day++) {
+    for (let day = 1; day <= sampleDays; day++) {
       const mine = spends.filter((s) => s.day === day);
       const dayIso = dateOfDay(startDate, day);
       const [y, m, d] = dayIso.split('-').map(Number);
+      const dom = d;
       mine.forEach((s, i) => {
         const cat = cats.find((c) => c.name === s.category);
         const sub = cat?.subcategories.find((t) => t === s.subcategory) ?? null;
         const resolvedCat = cat ? cat.name : 'Other';
         let sampleEvent: string | null = null;
-        if ((day === 14 || day === 15) && ['Travel', 'Food', 'Fun'].includes(resolvedCat)) {
+        if ((dom === 14 || dom === 15) && ['Travel', 'Food', 'Fun'].includes(resolvedCat)) {
           sampleEvent = 'Weekend getaway';
-        } else if (day === 8 && ['Food', 'Home'].includes(resolvedCat)) {
+        } else if (dom === 8 && ['Food', 'Home'].includes(resolvedCat)) {
           sampleEvent = 'Family dinner';
         }
         txns.push({
@@ -1031,13 +1039,16 @@ export async function fillSample(now: Date = new Date()): Promise<void> {
     }
     await db.transactions.bulkAdd(txns);
   });
-  await persistStorage();
-  requestSync();
 }
 
 /* ---------- export / delete ---------- */
 
 export async function exportCSV(): Promise<string> {
+  // Signed in: sync first, so the file has everything this account holds (other devices' spends) and anything still
+  // waiting on this phone is uploaded. Offline or a slow network never blocks the export: it waits a few seconds, then exports.
+  if (getAuth().uid) {
+    await Promise.race([syncNow().catch(() => {}), new Promise<void>((r) => setTimeout(r, 8000))]);
+  }
   const db = getDB();
   const [cycles, txns, names] = await Promise.all([allCycles(db), db.transactions.toArray(), loadLinkNames(db)]);
   const rows: CsvRow[] = txns

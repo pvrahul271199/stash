@@ -305,6 +305,8 @@ export const DEFAULT_CATEGORIES: DefaultCategory[] = [
 ];
 
 export const GUEST_UID = 'default';
+/** The throwaway database "explore with sample data" runs in (lib/sampleMode.ts). Never synced, never claimed. */
+export const SAMPLE_UID = 'sample';
 
 export function dbNameFor(uid: string): string {
   return `stash-${uid}`;

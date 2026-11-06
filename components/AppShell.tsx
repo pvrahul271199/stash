@@ -1,6 +1,7 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Toast } from './ui/Toast';
+import { SampleNote } from './ui/SampleNote';
 import { GhostButton, PrimaryButton } from './ui/Button';
 import { TabBar, type Tab } from './ui/TabBar';
 import { Welcome } from './screens/Welcome';
@@ -24,15 +25,15 @@ import {
   createPlan,
   dismissMonthSummary,
   ensureSeed,
-  fillSample,
   updateActivePlan,
   useSnapshot,
 } from '@/db/queries';
 import { isPlanValid, type PlanInput } from '@/lib/budget';
-import { todayISO } from '@/lib/dates';
+import { daysBetween, todayISO } from '@/lib/dates';
 import { periodFor } from '@/lib/period';
 import { requestSync, syncNow } from '@/lib/sync';
 import { getAuth, initAuth, logOut, useAuth } from '@/lib/auth';
+import { discardSampleAfterSignIn, enterSampleMode, exitSampleMode, isSampleFilling, resumeSampleMode, useSampleMode } from '@/lib/sampleMode';
 import { useUI } from '@/store/ui';
 import { useToast } from '@/store/toast';
 import { useBusy, withLoading } from '@/store/busy';
@@ -81,6 +82,8 @@ export function AppShell() {
   }, [ready]);
 
   const auth = useAuth();
+  const inSample = useSampleMode();
+  const [sampleIntro, setSampleIntro] = useState(false); // the 3-second "you're exploring sample data" note
   const [restoring, setRestoring] = useState(false);
   const restoredFor = useRef<string | null>(null);
   // Signed-in user whose cloud data could not be checked. While set (and no cycle is on the device) we must not
@@ -107,10 +110,22 @@ export function AppShell() {
     // Hold the loader for a minimum time so it doesn't just flash on fast local boots.
     const minShow = new Promise<void>((r) => setTimeout(r, 450));
     initAuth()
+      .then(() => resumeSampleMode()) // a reload inside sample mode rebuilds the sandbox
       .then(() => ensureSeed())
       .then(() => minShow)
       .then(() => setReady(true));
   }, []);
+
+  // Signing in leaves sample mode for good (the sandbox is dropped; nothing from it is ever claimed).
+  useEffect(() => {
+    if (auth.status === 'signedIn') void discardSampleAfterSignIn();
+  }, [auth.status]);
+
+  // Emptying the sandbox (e.g. "delete my data" inside the sample) would strand the visitor on the welcome screen with the
+  // sandbox still open, where "Try now" would save into it. Leave sample mode instead.
+  useEffect(() => {
+    if (ready && inSample && snap && !snap.cycle && !isSampleFilling()) void exitSampleMode();
+  }, [ready, inSample, snap]);
 
   // The auth screen records consent when an account is created or logged into: pick that up.
   useEffect(() => {
@@ -140,9 +155,20 @@ export function AppShell() {
 
   async function handleSample() {
     setForceWelcome(false);
-    await withLoading('Loading a sample month…', fillSample);
+    await withLoading('Loading two sample months…', () => enterSampleMode());
     setSheet('none');
-    setTab('insights');
+    setTab('today');
+    setSampleIntro(true);
+  }
+
+  function leaveSample() {
+    setSampleIntro(false);
+    void withLoading('Leaving the sample…', exitSampleMode).then(() => {
+      setDraft(null);
+      setForceWelcome(true);
+      setFlow('welcome');
+      setTab('today');
+    });
   }
 
   let body: React.ReactNode = null;
@@ -215,7 +241,8 @@ export function AppShell() {
     );
   } else if (snap.cycle && snap.plan && flow !== 'onboarding' && flow !== 'summary' && !forceWelcome) {
     // A new month started in the last few days and last month's summary wasn't seen on this device yet.
-    const lastMonth = snap.previous && !snap.previousSeen && snap.cycle.currentDay <= 3 ? snap.previous : null;
+    const dayOfMonthNow = daysBetween(snap.cycle.monthStart, todayISO()) + 1;
+    const lastMonth = snap.previous && !snap.previousSeen && dayOfMonthNow <= 3 ? snap.previous : null;
     if (lastMonth) {
       body = <MonthEnd cycle={lastMonth} plan={snap.plan} onDone={() => void dismissMonthSummary(lastMonth.id)} />;
     } else {
@@ -245,6 +272,7 @@ export function AppShell() {
                   setFlow('changePlan');
                 }}
                 onSwitchUser={() => setAskLogout(true)}
+                onLeaveSample={leaveSample}
                 onLogIn={() => {
                   setAuthMode('login');
                   setFlow('auth');
@@ -401,6 +429,7 @@ export function AppShell() {
         />
       )}
       {showDemo && <Demo onClose={() => setShowDemo(false)} />}
+      {sampleIntro && inSample && ready && snap?.cycle && <SampleNote onDone={() => setSampleIntro(false)} />}
       <Toast />
       <PWAManager />
     </div>

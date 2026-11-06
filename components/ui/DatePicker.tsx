@@ -112,11 +112,21 @@ export function DatePicker({
         ))}
       </div>
 
-      <p className="mt-2 border-t border-line px-1 pt-2.5 text-[12px] leading-snug text-soft">
-        {value === max
-          ? 'Starting today. Pick an earlier day to include spends you already made.'
-          : `${tracked} days tracked, from ${formatLong(value)} to today.`}
-      </p>
+      <div className="mt-2 border-t border-line px-1 pt-2.5">
+        <p className="text-[12.5px] font-medium leading-snug text-ink">
+          {value === max ? 'Starting today.' : `${tracked} days tracked, from ${formatLong(value)} to today.`}
+        </p>
+        <p className="mt-1 flex items-start gap-1.5 text-[12px] leading-snug text-soft">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="mt-px shrink-0 text-good">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          <span>
+            {value === max
+              ? 'Pick an earlier day to include spends you already made. You can also log older spends any time from the month on your Today screen.'
+              : 'You can also log older spends any time from the month on your Today screen.'}
+          </span>
+        </p>
+      </div>
     </div>
   );
 }
