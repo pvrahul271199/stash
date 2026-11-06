@@ -154,6 +154,11 @@ select:focus {
 /* Loader wordmark: letters appear one by one, like being written. */
 @keyframes stash-letter { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 .stash-letter { display: inline-block; opacity: 0; animation: stash-letter 0.28s ease-out forwards; }
+/* Content rises into place (staggered with animation-delay); bars grow up from their base. */
+@keyframes stash-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+.stash-rise { opacity: 0; animation: stash-rise 0.55s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+@keyframes stash-grow { from { transform: scaleY(0.15); opacity: 0; } to { transform: scaleY(1); opacity: 1; } }
+.stash-grow { transform-origin: bottom; opacity: 0; animation: stash-grow 0.5s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
 @keyframes stash-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
 .stash-draw { stroke-dasharray: 1; stroke-dashoffset: 1; animation: stash-draw 0.9s ease-out forwards; }
 @keyframes stash-breathe { 0%, 100% { transform: scale(0.94); } 50% { transform: scale(1); } }

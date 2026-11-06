@@ -13,13 +13,9 @@ import { DayClosed } from './DayClosed';
 import { EditSpendSheet } from './EditSpendSheet';
 import { IosHint } from '../pwa/IosHint';
 import { BackupPrompt } from '../ui/BackupPrompt';
-import {
-  closeCurrentDay,
-  useCycleEntries,
-  useDayEntries,
-  useDayRows,
-} from '@/db/queries';
-import type { Cycle, Entry, Plan } from '@/db/schema';
+import { dayRowsOf, previewCloseDay, useDayEntries } from '@/db/queries';
+import type { Entry, Plan } from '@/db/schema';
+import { monthView, type DerivedCycle } from '@/lib/period';
 import {
   POOL_USED_UP_MESSAGE,
   daysLeft,
@@ -30,14 +26,13 @@ import {
   type CloseResult,
   type CycleState,
 } from '@/lib/budget';
-import { calendarDay, dateOfDay, formatWithWeekday, todayISO } from '@/lib/dates';
+import { dateOfDay, daysBetween, formatWithWeekday, todayISO } from '@/lib/dates';
 import { inr } from '@/lib/format';
 import { useUI } from '@/store/ui';
-import { BottomPrompt } from '../ui/BottomPrompt';
 
 type View = 'today' | 'log' | 'close' | 'closed';
 
-export function TodayTab({ cycle, plan, onCreateAccount }: { cycle: Cycle; plan: Plan; onCreateAccount: () => void }) {
+export function TodayTab({ cycle, plan, onCreateAccount }: { cycle: DerivedCycle; plan: Plan; onCreateAccount: () => void }) {
   const [view, setView] = useState<View>('today');
   const [logReturn, setLogReturn] = useState<View>('today');
   const [logDay, setLogDay] = useState<number | undefined>(undefined);
@@ -46,9 +41,8 @@ export function TodayTab({ cycle, plan, onCreateAccount }: { cycle: Cycle; plan:
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<Entry | null>(null);
   const setSheet = useUI((s) => s.setSheet);
-  const [notYet, setNotYet] = useState(false);
   const entries = useDayEntries(cycle.id, cycle.currentDay) ?? [];
-  const dayRows = useDayRows(cycle.id) ?? [];
+  const dayRows = dayRowsOf(cycle);
   const todayEntries = entries.slice(0, 10);
 
   // Lets the shell hold back the month-end screen until the user has seen "Day closed".
@@ -65,27 +59,28 @@ export function TodayTab({ cycle, plan, onCreateAccount }: { cycle: Cycle; plan:
   const over = overMessage(allowance, spent, state);
   const used = state.pool <= 0;
 
-  const week: WeekDay[] = Array.from({ length: cycle.totalDays }, (_, i) => i + 1).map((day) => {
-    const row = dayRows.find((r) => r.day === day);
+  // The strip shows the whole month (1..30/31). Days before tracking began are muted but can still be logged into.
+  const month = monthView(cycle);
+  const week: WeekDay[] = Array.from({ length: cycle.monthDays }, (_, i) => i + 1).map((day) => {
+    const cd = daysBetween(cycle.startDate, dateOfDay(cycle.monthStart, day)) + 1; // this day's number in the tracked cycle
+    const row = dayRows.find((r) => r.day === cd);
     return {
       day,
-      status: row ? row.status : day === cycle.currentDay ? 'today' : day < cycle.currentDay ? 'closed' : 'future',
+      status: cd < 1 ? 'before' : row ? row.status : cd === cycle.currentDay ? 'today' : cd < cycle.currentDay ? 'closed' : 'future',
     };
   });
+  const monthDay = daysBetween(cycle.monthStart, todayISO()) + 1;
   const remaining = Math.max(state.pool - spent, 0);
-  // A day can only be closed once its calendar date has arrived (closing day 1 moves Today on to tomorrow).
-  const dayHasBegun = cycle.currentDay <= calendarDay(cycle.startDate, todayISO(), cycle.totalDays);
 
+  /** A recap only: nothing is written, the day ends at midnight by itself. */
   async function close() {
     setBusy(true);
-    // Hold back the month-end screen before the write lands (see effect above).
-    setSheet('dayClosed');
-    const r = await closeCurrentDay(cycle.id!);
+    const r = await previewCloseDay();
     setBusy(false);
     if (r) {
       setResult(r);
       setView('closed');
-    } else setSheet('none');
+    }
   }
 
   return (
@@ -105,7 +100,7 @@ export function TodayTab({ cycle, plan, onCreateAccount }: { cycle: Cycle; plan:
         <p className="mt-3 text-[14px] text-soft">
           {formatWithWeekday(dateOfDay(cycle.startDate, cycle.currentDay))} ·{' '}
           <span className="num">
-            Day {cycle.currentDay}/{cycle.totalDays}
+            Day {monthDay}/{cycle.monthDays}
           </span>
         </p>
 
@@ -127,7 +122,7 @@ export function TodayTab({ cycle, plan, onCreateAccount }: { cycle: Cycle; plan:
         <div className="mt-2">
           <WeekRow
             days={week}
-            startDate={cycle.startDate}
+            startDate={cycle.monthStart}
             onSelect={(day) => setPeekDay(day)}
           />
         </div>
@@ -179,14 +174,7 @@ export function TodayTab({ cycle, plan, onCreateAccount }: { cycle: Cycle; plan:
         >
           Log a spend
         </PrimaryButton>
-        <SecondaryButton
-          onClick={() => {
-            if (dayHasBegun) setView('close');
-            else setNotYet(true);
-          }}
-        >
-          Close the day
-        </SecondaryButton>
+        <SecondaryButton onClick={() => setView('close')}>Close the day</SecondaryButton>
       </div>
 
       {view === 'close' && (
@@ -202,14 +190,14 @@ export function TodayTab({ cycle, plan, onCreateAccount }: { cycle: Cycle; plan:
           }}
         />
       )}
-      {view === 'log' && <LogSpend cycle={cycle} plan={plan} targetDay={logDay} onClose={() => setView(logReturn)} />}
+      {view === 'log' && <LogSpend cycle={month} plan={plan} targetDay={logDay} onClose={() => setView(logReturn)} />}
       {peekDay != null && view === 'today' && (
         <DayPeek
-          cycle={cycle}
+          cycle={month}
           day={peekDay}
           onClose={() => setPeekDay(null)}
           onLog={() => {
-            setLogDay(peekDay === cycle.currentDay ? undefined : peekDay);
+            setLogDay(peekDay === month.currentDay ? undefined : peekDay);
             setLogReturn('today');
             setPeekDay(null);
             setView('log');
@@ -218,15 +206,6 @@ export function TodayTab({ cycle, plan, onCreateAccount }: { cycle: Cycle; plan:
       )}
       {view === 'today' && peekDay == null && !editing && <BackupPrompt onCreate={onCreateAccount} />}
       {editing && <EditSpendSheet entry={editing} onClose={() => setEditing(null)} />}
-      {notYet && (
-        <BottomPrompt
-          title="This day starts tomorrow"
-          body="You can close it then. Until then, keep logging spends as usual."
-          actionLabel="Got it"
-          onAction={() => setNotYet(false)}
-          onClose={() => setNotYet(false)}
-        />
-      )}
       {view === 'closed' && result && <DayClosed cycle={cycle} result={result} onNext={() => setView('today')} />}
     </>
   );

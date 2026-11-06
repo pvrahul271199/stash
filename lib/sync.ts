@@ -1,5 +1,5 @@
 import Dexie from 'dexie';
-import { getDB, getActiveDBUid, dbNameFor, GUEST_UID, nextRev, withoutRevStamp, type CategoryRow, type Cycle, type Plan, type StashDB, type StashEvent, type SyncBase, type SyncFailure, type Txn } from '@/db/schema';
+import { getDB, getActiveDBUid, dbNameFor, GUEST_UID, nextRev, withoutRevStamp, type CategoryRow, type Plan, type StashDB, type StashEvent, type SyncBase, type SyncFailure, type Txn } from '@/db/schema';
 import { getAuth, getAccessToken } from './auth';
 import { getSupabase, supabaseEnv } from './supabaseClient';
 import { decodeBase64Username, encodeUsernameToBase64 } from './user';
@@ -75,6 +75,8 @@ export const MAPPERS = {
       currency: p.currency ?? null,
       bill_items: p.billItems ?? null,
       savings_items: p.savingsItems ?? null,
+      period_start_day: p.periodStartDay ?? null,
+      effective_from: p.effectiveFrom ?? null,
       created_at: p.createdAt,
     }),
     toLocal: (r: Remote): Plan => ({
@@ -88,39 +90,15 @@ export const MAPPERS = {
       currency: (r.currency as string | null) ?? undefined,
       billItems: (r.bill_items as Plan['billItems'] | null) ?? undefined,
       savingsItems: (r.savings_items as Plan['savingsItems'] | null) ?? undefined,
+      periodStartDay: (r.period_start_day as number | null) ?? undefined,
+      effectiveFrom: (r.effective_from as string | null) ?? undefined,
       createdAt: r.created_at as number,
-    }),
-  },
-  cycles: {
-    local: 'cycles' as const,
-    toRemote: (c: Cycle) => ({
-      ...common(c),
-      start_date: c.startDate,
-      total_days: c.totalDays,
-      plan_amount: c.planAmount,
-      current_day: c.currentDay,
-      leftover_moved: c.leftoverMoved,
-      estimated_days: c.estimatedDays,
-    }),
-    toLocal: (r: Remote): Cycle => ({
-      id: r.id,
-      updatedAt: r.client_updated_at,
-      deletedAt: ms(r.deleted_at),
-      startDate: r.start_date as string,
-      totalDays: r.total_days as number,
-      planAmount: r.plan_amount as number,
-      currentDay: r.current_day as number,
-      leftoverMoved: !!r.leftover_moved,
-      estimatedDays: (r.estimated_days as number[]) ?? [],
-      pool: r.plan_amount as number, // derived by recompute
-      fromSavingsTotal: 0,
     }),
   },
   transactions: {
     local: 'transactions' as const,
     toRemote: (t: Txn) => ({
       ...common(t),
-      cycle_id: t.cycleId,
       txn_date: t.txnDate,
       amount: t.amount,
       type: t.type,
@@ -141,7 +119,6 @@ export const MAPPERS = {
       id: r.id,
       updatedAt: r.client_updated_at,
       deletedAt: ms(r.deleted_at),
-      cycleId: (r.cycle_id as string | null) ?? null,
       txnDate: r.txn_date as string,
       amount: r.amount as number,
       type: r.type as string,
@@ -206,8 +183,11 @@ export const MAPPERS = {
 };
 
 type TableName = keyof typeof MAPPERS;
-/** Parents first: transactions reference categories and events (events.id is a real FK remotely). */
-export const TABLE_ORDER: TableName[] = ['plans', 'cycles', 'categories', 'events', 'transactions'];
+/**
+ * Parents first: transactions reference categories and events (events.id is a real FK remotely).
+ * `cycles` is not synced any more: months are derived from plans + transactions (lib/period.ts, E-4).
+ */
+export const TABLE_ORDER: TableName[] = ['plans', 'categories', 'events', 'transactions'];
 
 export type RemoteRows = Partial<Record<TableName, Remote[]>>;
 
@@ -318,8 +298,6 @@ export function mergeRows(
     if (base && sameField(k, sv, base[k])) out[k] = lv; // only we changed it
     else out[k] = localWins ? lv : sv; // both changed
   }
-  // a cycle's day cursor only ever moves forward
-  if (table === 'cycles') out.current_day = Math.max(Number(local.current_day), Number(server.current_day));
   out.client_updated_at = Math.max(Number(local.client_updated_at), Number(server.client_updated_at));
   return out;
 }
@@ -512,7 +490,7 @@ async function scanDirty(db: StashDB, cutoff: number): Promise<{ refs: Ref[]; ma
   const seen = new Set<string>();
   // One read transaction over every table: a write that already took its rev has either committed
   // (and is seen) or is still running (and this read waits for it), so no lower rev can appear later.
-  await db.transaction('r', [db.plans, db.cycles, db.cats, db.evts, db.transactions], async () => {
+  await db.transaction('r', [db.plans, db.cats, db.evts, db.transactions], async () => {
     for (const name of TABLE_ORDER) {
       const table = db[MAPPERS[name].local] as unknown as Dexie.Table<{ id: string; updatedAt: number; localRev?: number }, string>;
       const dirty = await table.where('localRev').above(sinceRev).toArray();
@@ -570,8 +548,7 @@ async function pullTable(
   owner: string,
   name: TableName,
   cursor: Cursor | null,
-): Promise<{ cursor: Cursor | null; touchedCycles: Set<string> }> {
-  const touched = new Set<string>();
+): Promise<{ cursor: Cursor | null }> {
   let cur = cursor;
   // Always ask for this user's rows only. RLS should already enforce it, but the app must never depend on that alone.
   const mine = `&user_id=eq.${encodeURIComponent(owner)}`;
@@ -581,8 +558,7 @@ async function pullTable(
     const res = await authed(`${name}?select=*${mine}&order=updated_at.asc,id.asc&limit=${PAGE}${filter}`, { method: 'GET' });
     const rows = (await res.json()) as Remote[];
     if (rows.length) {
-      const t = await applyRemote(db, { [name]: rows }, owner);
-      t.forEach((id) => touched.add(id));
+      await applyRemote(db, { [name]: rows }, owner);
       const last = rows[rows.length - 1];
       const next = { ts: last.updated_at as string, id: last.id };
       // the overlap window re-reads old rows first; never let the stored cursor move backwards
@@ -591,7 +567,7 @@ async function pullTable(
     }
     if (rows.length < PAGE) break;
   }
-  return { cursor: cur, touchedCycles: touched };
+  return { cursor: cur };
 }
 
 /** Pulls everything newer than the stored per-table cursors. Never clears local data. */
@@ -609,19 +585,20 @@ export async function pullSince(db: StashDB, owner: string): Promise<void> {
 /**
  * Applies server rows. A row we never edited is replaced; a row with local edits is merged field by
  * field against the last synced version (`mergeRows`), and what still differs from the server stays
- * dirty so the next push sends it. Cycle.currentDay merges as max(local, remote); touched cycles are
- * re-derived. Returns the touched cycle ids.
+ * dirty so the next push sends it. Nothing is re-derived here: months and day totals are computed from plans and
+ * transactions when read (lib/period.ts). Returns how many rows were written.
  *
  * Ownership is checked here, on the client: a row whose `user_id` is not `owner` (the signed-in user this
  * DB belongs to) is dropped and never written, whatever the server sent. Rows without a `user_id` are dropped too.
  */
-export async function applyRemote(db: StashDB, rows: RemoteRows, owner: string | undefined = getAuth().uid): Promise<Set<string>> {
-  const touched = new Set<string>();
+export async function applyRemote(db: StashDB, rows: RemoteRows, owner: string | undefined = getAuth().uid): Promise<number> {
+  let written = 0;
+  let foreign = 0;
   if (!owner || owner === GUEST_UID) throw new SyncError('Not signed in', 'auth');
-  const { recompute, dedupeCategories } = await import('@/db/queries');
+  const { dedupeCategories, migrateToPeriods } = await import('@/db/queries');
   await db.transaction(
     'rw',
-    [db.plans, db.cycles, db.transactions, db.cats, db.evts, db.dayRows, db.meta, db.syncBase],
+    [db.plans, db.transactions, db.cats, db.evts, db.meta, db.syncBase],
     async () => {
       for (const name of TABLE_ORDER) {
         const list = rows[name];
@@ -630,7 +607,7 @@ export async function applyRemote(db: StashDB, rows: RemoteRows, owner: string |
         const table = db[m.local] as unknown as Dexie.Table<Record<string, unknown> & { id: string; updatedAt: number }, string>;
         for (const r of list) {
           if (r.user_id !== owner) {
-            foreignRowsDropped++;
+            foreign++;
             continue;
           }
           const key = baseKey(name, r.id);
@@ -647,31 +624,24 @@ export async function applyRemote(db: StashDB, rows: RemoteRows, owner: string |
             next = m.toLocal({ ...r, ...merged } as Remote) as never;
             next.updatedAt = dirty ? Math.max(Date.now(), local.updatedAt) : Number(merged.client_updated_at);
             if (dirty) next.localRev = nextRev(); // still differs from the server: the next push sends it
-            if (name === 'cycles') {
-              const c = next as unknown as Cycle;
-              c.pool = (local as unknown as Cycle).pool;
-              c.fromSavingsTotal = (local as unknown as Cycle).fromSavingsTotal;
-            }
           }
           // server state we already have is not a local edit: don't stamp it for push
           if (next.localRev != null) await table.put(next);
           else await withoutRevStamp(() => table.put(next));
           if (version != null) await db.syncBase.put({ key, version, row: r });
-          if (name === 'cycles') touched.add(r.id);
-          if (name === 'transactions') {
-            const cid = (next as unknown as Txn).cycleId;
-            const prev = (local as unknown as Txn | undefined)?.cycleId;
-            if (cid) touched.add(cid);
-            if (prev) touched.add(prev);
-          }
+          written++;
         }
       }
       if (rows.categories?.length) await dedupeCategories(db);
-      for (const id of touched) await recompute(db, id);
+      // a plan from a device that predates derived months: give it its start day / effective date
+      if (rows.plans?.length) await migrateToPeriods(db);
     },
   );
-  if (foreignRowsDropped && typeof console !== 'undefined') console.warn(`[sync] dropped ${foreignRowsDropped} row(s) that belong to another account`);
-  return touched;
+  if (foreign) {
+    foreignRowsDropped += foreign;
+    console.warn(`[sync] dropped ${foreign} row(s) that belong to another account`);
+  }
+  return written;
 }
 
 /** Rows the server sent that belonged to another account (should always stay 0). Exposed for tests / diagnostics. */

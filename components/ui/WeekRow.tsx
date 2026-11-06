@@ -5,7 +5,8 @@ import { dateOfDay, formatShort, weekdayOfDay, weekdayShort } from '@/lib/dates'
 
 export interface WeekDay {
   day: number;
-  status: 'closed' | 'estimated' | 'today' | 'future';
+  /** `before`: a day of this month from before you started (still tappable: logging on it starts tracking there). */
+  status: 'closed' | 'estimated' | 'today' | 'future' | 'before';
 }
 
 /** 7 days around the current day, clipped to the cycle. */
@@ -17,7 +18,7 @@ export function weekWindow(currentDay: number, totalDays: number): number[] {
   return Array.from({ length: count }, (_, i) => first + i);
 }
 
-const STATUS_LABEL = { closed: 'closed', estimated: 'estimated', today: 'today', future: 'upcoming' } as const;
+const STATUS_LABEL = { closed: 'closed', estimated: 'estimated', today: 'today', future: 'upcoming', before: 'before you started' } as const;
 
 export function WeekRow({
   days,
@@ -84,7 +85,9 @@ export function WeekRow({
             ? 'bg-ink text-white'
             : isToday
                 ? 'border-2 border-ink bg-white text-ink'
-                : 'border border-line bg-white text-faint';
+                : d.status === 'before'
+                  ? 'border border-dashed border-line bg-white text-faint'
+                  : 'border border-line bg-white text-faint';
         return (
           <li key={d.day} className={scrolling ? 'w-[46px]' : undefined}>
           <button

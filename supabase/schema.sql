@@ -139,35 +139,22 @@ create table if not exists public.plans (
   created_at bigint not null
 );
 create index if not exists idx_plans_user_updated on public.plans (user_id, updated_at);
+-- Derived months (docs/ENHANCEMENTS.md E-4): the month starts on this day (1-31, clamped to short months) and a
+-- plan applies from effective_from; the earliest one is when budgeting started. The client derives everything else.
+alter table public.plans add column if not exists period_start_day int;
+alter table public.plans add column if not exists effective_from date;
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'plans_period_start_day_check') then
+    alter table public.plans add constraint plans_period_start_day_check
+      check (period_start_day is null or period_start_day between 1 and 31) not valid;
+  end if;
+end $$;
 alter table public.plans add column if not exists version bigint not null default 1;
 drop trigger if exists trg_plans_lww on public.plans;
 create trigger trg_plans_lww before update on public.plans
   for each row execute function public.stash_lww_guard();
 drop trigger if exists trg_plans_touch on public.plans;
 create trigger trg_plans_touch before insert or update on public.plans
-  for each row execute function public.stash_touch();
-
--- ---------- cycles ----------
-create table if not exists public.cycles (
-  id uuid primary key,
-  user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
-  client_updated_at bigint not null,
-  updated_at timestamptz not null default now(),
-  deleted_at timestamptz,
-  start_date date not null,
-  total_days int not null,
-  plan_amount int not null,
-  current_day int not null,
-  leftover_moved boolean not null default false,
-  estimated_days jsonb not null default '[]'::jsonb
-);
-create index if not exists idx_cycles_user_updated on public.cycles (user_id, updated_at);
-alter table public.cycles add column if not exists version bigint not null default 1;
-drop trigger if exists trg_cycles_lww on public.cycles;
-create trigger trg_cycles_lww before update on public.cycles
-  for each row execute function public.stash_lww_guard();
-drop trigger if exists trg_cycles_touch on public.cycles;
-create trigger trg_cycles_touch before insert or update on public.cycles
   for each row execute function public.stash_touch();
 
 -- ---------- transactions ----------
@@ -177,7 +164,6 @@ create table if not exists public.transactions (
   client_updated_at bigint not null,
   updated_at timestamptz not null default now(),
   deleted_at timestamptz,
-  cycle_id uuid,
   txn_date date not null,
   amount int not null check (amount > 0),
   type text not null,
@@ -363,42 +349,12 @@ returns boolean language sql immutable as $$
 $$;
 
 do $$ begin
-  if not exists (select 1 from pg_constraint where conname = 'cycles_total_days_check') then
-    alter table public.cycles add constraint cycles_total_days_check check (total_days between 1 and 366) not valid;
-  end if;
-  if not exists (select 1 from pg_constraint where conname = 'cycles_current_day_check') then
-    alter table public.cycles add constraint cycles_current_day_check check (current_day between 1 and total_days + 1) not valid;
-  end if;
   if not exists (select 1 from pg_constraint where conname = 'plans_nonneg_check') then
     alter table public.plans add constraint plans_nonneg_check check (income >= 0 and bills >= 0 and savings >= 0) not valid;
   end if;
   if not exists (select 1 from pg_constraint where conname = 'plans_items_shape_check') then
     alter table public.plans add constraint plans_items_shape_check
       check (public.stash_valid_items(bill_items) and public.stash_valid_items(savings_items)) not valid;
-  end if;
-end $$;
-
--- A cycle is over once current_day passes total_days; derived so clients can't disagree with it.
-alter table public.cycles add column if not exists status text
-  generated always as (case when current_day > total_days then 'closed' else 'active' end) stored;
-
--- One unfinished cycle per user. Skipped (with a notice) while old data still has duplicates.
-do $$ begin
-  if exists (select 1 from public.cycles where status = 'active' and deleted_at is null group by user_id having count(*) > 1) then
-    raise notice 'uq_cycles_one_active NOT created: some users have several active cycles; fix them and re-run';
-  else
-    create unique index if not exists uq_cycles_one_active on public.cycles (user_id) where status = 'active' and deleted_at is null;
-  end if;
-end $$;
-
--- A transaction can only point at a cycle of the same user. Deferred, so a batch (or an out-of-order
--- pull/push) may insert the transaction before its cycle as long as both exist at commit.
-create unique index if not exists uq_cycles_user_id on public.cycles (user_id, id);
-do $$ begin
-  if not exists (select 1 from pg_constraint where conname = 'transactions_user_cycle_fkey') then
-    alter table public.transactions add constraint transactions_user_cycle_fkey
-      foreign key (user_id, cycle_id) references public.cycles (user_id, id)
-      deferrable initially deferred not valid;
   end if;
 end $$;
 
@@ -421,15 +377,14 @@ create policy push_mutations_own on public.push_mutations for all
 -- Applies everything in ONE transaction (SECURITY INVOKER: RLS and the caller's grants apply).
 --   * a row whose server version differs from _base_version (or that exists when _base_version is null)
 --     is a conflict: nothing is written and the current server rows come back for the client to merge;
---   * otherwise parents are written first (plans, cycles, categories, events, transactions), updates
---     before inserts so a cycle can be closed before its successor is created;
+--   * otherwise parents are written first (plans, categories, events, transactions), updates before inserts;
 --   * a retry with the same p_mutation_id returns the stored result and writes nothing.
 -- Returns {"status":"ok","versions":{table:{id:version}}} or {"status":"conflict","conflicts":{table:[row]}}.
 create or replace function public.push_changes(p_mutation_id uuid, p_changes jsonb)
 returns jsonb language plpgsql as $$
 declare
   v_uid uuid := auth.uid();
-  v_tables constant text[] := array['plans', 'cycles', 'categories', 'events', 'transactions'];
+  v_tables constant text[] := array['plans', 'categories', 'events', 'transactions'];
   t text;
   r jsonb;
   v_cur jsonb;
@@ -525,11 +480,6 @@ revoke all on public.plans from anon;
 drop policy if exists plans_own on public.plans;
 create policy plans_own on public.plans for all
   using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
-alter table public.cycles enable row level security;
-revoke all on public.cycles from anon;
-drop policy if exists cycles_own on public.cycles;
-create policy cycles_own on public.cycles for all
-  using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
 alter table public.transactions enable row level security;
 revoke all on public.transactions from anon;
 drop policy if exists transactions_own on public.transactions;
@@ -560,7 +510,6 @@ create index if not exists idx_transactions_user_updated_id on public.transactio
 create index if not exists idx_transactions_event on public.transactions (event_id) where event_id is not null;
 drop index if exists public.idx_transactions_user_updated;
 drop index if exists public.idx_transactions_user_date;
-drop index if exists public.idx_transactions_user_cycle;
 drop index if exists public.idx_transactions_user_category;
 drop index if exists public.idx_transactions_user_event;
 
@@ -569,12 +518,11 @@ drop index if exists public.idx_transactions_user_event;
 -- (the client keeps its own copies for the same period). A device that stays offline for longer than that and
 -- then pushes an old copy would bring a deleted row back: accepted, it is the cost of not keeping tombstones forever.
 --  * categories with base_id set are "the user removed a built-in category" markers, not deleted data: kept.
---  * a cycle is only purged once nothing references it.
 create or replace function public.purge_deleted_data(p_older_than interval default interval '30 days')
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare
   v_cut timestamptz := now() - p_older_than;
-  v_tx bigint; v_ev bigint; v_cat bigint; v_cy bigint; v_pl bigint; v_mut bigint;
+  v_tx bigint; v_ev bigint; v_cat bigint; v_pl bigint; v_mut bigint;
 begin
   delete from public.transactions where deleted_at is not null and deleted_at < v_cut;
   get diagnostics v_tx = row_count;
@@ -582,14 +530,11 @@ begin
   get diagnostics v_ev = row_count;
   delete from public.categories where deleted_at is not null and deleted_at < v_cut and base_id is null;
   get diagnostics v_cat = row_count;
-  delete from public.cycles c where c.deleted_at is not null and c.deleted_at < v_cut
-    and not exists (select 1 from public.transactions t where t.user_id = c.user_id and t.cycle_id = c.id);
-  get diagnostics v_cy = row_count;
   delete from public.plans where deleted_at is not null and deleted_at < v_cut;
   get diagnostics v_pl = row_count;
   delete from public.push_mutations where created_at < now() - interval '14 days';
   get diagnostics v_mut = row_count;
-  return jsonb_build_object('transactions', v_tx, 'events', v_ev, 'categories', v_cat, 'cycles', v_cy, 'plans', v_pl, 'push_mutations', v_mut);
+  return jsonb_build_object('transactions', v_tx, 'events', v_ev, 'categories', v_cat, 'plans', v_pl, 'push_mutations', v_mut);
 end $$;
 revoke all on function public.purge_deleted_data(interval) from public, anon, authenticated;
 
@@ -737,6 +682,17 @@ do $$ begin
     ) not valid;
   end if;
 end $$;
+
+-- ============================================================================
+-- Derived months (docs/ENHANCEMENTS.md E-4): the app no longer stores or syncs cycles. A month is computed from the
+-- plans (period_start_day, effective_from) and the transactions' dates. Run this AFTER the new app is deployed: devices
+-- still on the old app ask for `cycles` on every sync and get an error until they update.
+-- Irreversible: it deletes the old cycle rows and the transactions.cycle_id column (nothing reads either any more).
+-- ============================================================================
+alter table public.transactions drop constraint if exists transactions_user_cycle_fkey;
+drop index if exists public.uq_cycles_one_active;
+alter table public.transactions drop column if exists cycle_id;
+drop table if exists public.cycles cascade;
 
 -- ============================================================================
 -- CUTOVER (run once): the old username-keyed tables and their data are dropped.

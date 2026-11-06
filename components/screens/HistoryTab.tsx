@@ -4,12 +4,12 @@ import {
   removeEntry,
   useAllCycles,
   useAllEntries,
-  useCycleEntries,
   useDateEntries,
   useDateTotals,
-  useDayRows,
+  dayRowsOf,
 } from '@/db/queries';
-import type { Cycle, Entry, Plan } from '@/db/schema';
+import type { Entry, Plan } from '@/db/schema';
+import { monthView, type DerivedCycle } from '@/lib/period';
 import { EditSpendSheet } from './EditSpendSheet';
 import { LogSpend } from './LogSpend';
 import {
@@ -19,7 +19,6 @@ import {
 } from '@/lib/history';
 import {
   MONTHS,
-  cycleEndDate,
   dateOfDay,
   daysBetween,
   formatMonthYear,
@@ -32,17 +31,13 @@ import { useCurrency } from '@/lib/currency';
 
 const WEEKDAY_HEADERS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
-export function HistoryTab({ activeCycle, plan }: { activeCycle: Cycle; plan?: Plan }) {
+export function HistoryTab({ activeCycle, plan }: { activeCycle: DerivedCycle; plan?: Plan }) {
   const { currency } = useCurrency();
   const allCycles = useAllCycles() ?? [activeCycle];
-  const [selectedCycleId, setSelectedCycleId] = useState<string>(activeCycle.id);
   const [query, setQuery] = useState('');
   const isSearching = query.trim().length > 0;
   const allEntries = useAllEntries(true) ?? [];
-  const cycle = allCycles.find((c) => c.id === selectedCycleId) ?? activeCycle;
-
-  const cycleEntries = useCycleEntries(cycle.id) ?? [];
-  const dayRows = useDayRows(activeCycle.id) ?? [];
+  const dayRows = useMemo(() => dayRowsOf(activeCycle), [activeCycle]);
 
   const today = todayISO();
   const [viewYear, setViewYear] = useState<number>(() => Number(today.slice(0, 4)));
@@ -95,16 +90,19 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: Cycle; plan?: P
     [allEntries, allCycles, query],
   );
 
-  const cycleTotalSpent = useMemo(
-    () => cycleEntries.filter((e) => !e.fromSavings).reduce((s, e) => s + e.amount, 0),
-    [cycleEntries],
-  );
+  // Spent in the calendar month being viewed (the calendar below picks the month; no separate month chips).
+  const monthPrefix = `${viewYear}-${String(viewMonth).padStart(2, '0')}`;
+  const monthSpent = useMemo(() => {
+    let sum = 0;
+    for (const [iso, t] of totalsByDate) if (iso.startsWith(monthPrefix)) sum += t.spent;
+    return sum;
+  }, [totalsByDate, monthPrefix]);
 
   return (
     <div className="flex-1 overflow-y-auto px-6 pb-8 pt-6">
       <div className="flex items-baseline justify-between">
         <h1 className="text-question font-semibold text-ink">History</h1>
-        <span className="num text-[14px] text-soft">{inr(cycleTotalSpent)} spent</span>
+        <span className="num text-[14px] text-soft">{inr(monthSpent)} spent in {MONTHS[viewMonth - 1]}</span>
       </div>
 
       {/* Search bar across all days and cycles */}
@@ -128,41 +126,6 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: Cycle; plan?: P
           </button>
         )}
       </div>
-
-      {/* Cycle switcher pills */}
-      {!query.trim() && (
-        <div className="mt-5">
-          <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">Cycle</p>
-        <div className="no-scrollbar -mx-6 overflow-x-auto px-6 touch-pan-x" role="group" aria-label="Cycles">
-          <div className="flex w-max gap-2 pb-1">
-            {allCycles.map((c, idx) => {
-              const isSel = c.id === cycle.id;
-              const startLbl = formatShort(c.startDate);
-              const endLbl = formatShort(cycleEndDate(c.startDate, c.totalDays));
-              return (
-                <button
-                  key={c.id ?? idx}
-                  type="button"
-                  aria-pressed={isSel}
-                  onClick={() => {
-                    setSelectedCycleId(c.id);
-                    setViewYear(Number(c.startDate.slice(0, 4)));
-                    setViewMonth(Number(c.startDate.slice(5, 7)));
-                    setSelectedIso(c.startDate);
-                  }}
-                  className={`min-h-[36px] rounded-full border px-3.5 text-[13px] font-medium transition-colors ${
-                    isSel ? 'border-ink bg-ink text-white' : 'border-line bg-white text-ink'
-                  }`}
-                >
-                  {startLbl} – {endLbl}
-                  {c.id === activeCycle.id ? ' (Current)' : ''}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-        </div>
-      )}
 
       {/* Search results mode */}
       {query.trim() ? (
@@ -490,7 +453,7 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: Cycle; plan?: P
                       : selectedIso === today
                         ? 'Today (open)'
                         : `Day ${activeDayNumber}/${activeCycle.totalDays}`
-                    : 'Historical date (outside active 30-day cycle)'}
+                    : 'Date outside this month'}
                   {selectedStat.fromSavings ? ` · +${inr(selectedStat.fromSavings)} from savings` : ''}
                 </p>
               </div>
@@ -584,7 +547,7 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: Cycle; plan?: P
       {editing && <EditSpendSheet entry={editing} onClose={() => setEditing(null)} />}
       {addingForDate && (
         <LogSpend
-          cycle={activeCycle}
+          cycle={monthView(activeCycle)}
           plan={
             plan ?? {
               income: activeCycle.planAmount,

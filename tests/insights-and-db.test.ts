@@ -1,5 +1,5 @@
 import 'fake-indexeddb/auto';
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { validateName } from '@/lib/categories';
 import { buildCSV } from '@/lib/csv';
 import { generateSampleSpends, SAMPLE_DAYS } from '@/lib/sample';
@@ -27,33 +27,28 @@ import {
   addEvent,
   addSpend,
   addSubcategory,
-  applyCatchUp,
-  skipCatchUp,
-  closeCurrentDay,
-  createPlanAndCycle,
+  createPlan,
+  cycleFor,
   deleteAllData,
   ensureSeed,
   exportCSV,
-  fillSample,
   removeCategory,
   removeEntry,
   removeEvent,
   removeSubcategory,
   startEvent,
   endEvent,
-  syncCalendar,
   toggleEventCategory,
   updateEntry,
   updateEventNote,
   updateActivePlan,
-  mergeAccidentalCycle,
-  findAccidentalPair,
 } from '@/db/queries';
 import { getDB } from '@/db/schema';
 import { loadCategories, toEntry } from '@/db/queries';
 import { buildCalendar, buildMonthCalendar, compactINR, dayTotals, dayTotalsByDate, searchEntries } from '@/lib/history';
 import { sumItems } from '@/lib/budget';
-import { addDays, dateOfDay, todayISO } from '@/lib/dates';
+import { dateOfDay } from '@/lib/dates';
+import { enterSampleMode, exitSampleMode } from '@/lib/sampleMode';
 
 describe('validateName', () => {
   it('blocks empty, duplicate (case-insensitive), and >24 char names', () => {
@@ -85,8 +80,9 @@ describe('buildCSV', () => {
 
 describe('sample generator', () => {
   it('is deterministic and includes special days', () => {
-    const a = generateSampleSpends('2026-10-09', SAMPLE_DAYS, 42);
-    const b = generateSampleSpends('2026-10-09', SAMPLE_DAYS, 42);
+    // starting on the 1st, so sample day N is also the Nth of the month (monthly items follow the date)
+    const a = generateSampleSpends('2026-10-01', SAMPLE_DAYS, 42);
+    const b = generateSampleSpends('2026-10-01', SAMPLE_DAYS, 42);
     expect(a).toEqual(b);
     expect(a.some((s) => s.day === 3 && s.label === 'Recharge' && s.amount === 299)).toBe(true);
     expect(a.some((s) => s.day === 9 && s.label === 'Medicine' && s.amount === 360)).toBe(true);
@@ -166,22 +162,34 @@ describe('database queries', () => {
   beforeEach(async () => {
     await deleteAllData();
   });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
-  it('seeds categories, logs spends, closes day, and attributes post-close spends to next day', async () => {
+  /** Pins "today" (only Date is faked; IndexedDB timers stay real). Moving it forward = a day passing. */
+  const at = (iso: string) => {
+    const [y, m, d] = iso.split('-').map(Number);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(y, m - 1, d, 12, 0, 0));
+  };
+  const current = async () => (await cycleFor(getDB()))!;
+
+  it('logs spends on today; once the date changes they belong to yesterday and new ones to the next day', async () => {
+    at('2026-10-27');
     await ensureSeed();
-    await createPlanAndCycle({ income: 50000, bills: 18000, savings: 10000, monthLength: 30 }, '2026-10-27');
+    await createPlan({ income: 50000, bills: 18000, savings: 10000, monthLength: 30 }, '2026-10-27');
     const db = getDB();
-    let cycle = (await db.cycles.orderBy('startDate').last())!;
+    let cycle = await current();
     expect(cycle.currentDay).toBe(1);
 
     const e1 = await addSpend(cycle, { amount: 200, label: 'Chai' });
     expect(e1.day).toBe(1);
     expect(e1.category).toBe('Food');
 
-    const res = await closeCurrentDay(cycle.id!);
-    expect(res?.state.currentDay).toBe(2);
-
-    cycle = (await db.cycles.orderBy('startDate').last())!;
+    at('2026-10-28');
+    cycle = await current();
+    expect(cycle.currentDay).toBe(2);
+    expect(cycle.pool).toBe(22000 - 200);
     const e2 = await addSpend(cycle, { amount: 150, label: 'Auto' });
     expect(e2.day).toBe(2);
 
@@ -191,10 +199,9 @@ describe('database queries', () => {
 
   it('handles category and subcategory editing safely', async () => {
     await ensureSeed();
-    await createPlanAndCycle({ income: 50000, bills: 18000, savings: 10000, monthLength: 30 }, '2026-10-27');
+    await createPlan({ income: 50000, bills: 18000, savings: 10000, monthLength: 30 }, '2026-10-27');
     const db = getDB();
-    const cycle = (await db.cycles.orderBy('startDate').last())!;
-    const e = await addSpend(cycle, { amount: 100, label: 'Chai' });
+    const e = await addSpend(await current(), { amount: 100, label: 'Chai' });
 
     const food = (await loadCategories()).find((c) => c.name === 'Food')!;
     await removeSubcategory(food.id!, 'Chai & snacks');
@@ -209,55 +216,40 @@ describe('database queries', () => {
     expect(await addSubcategory(pets.id!, 'Vet')).toBeNull();
   });
 
-  it('syncs calendar and applies catch-up', async () => {
+  it('days nobody logged simply count as nothing spent (no catch-up prompt), and spends added later reach the pool', async () => {
+    at('2026-10-23');
     await ensureSeed();
-    await createPlanAndCycle({ income: 50000, bills: 18000, savings: 10000, monthLength: 30 }, '2026-10-20');
-    const gap = await syncCalendar('2026-10-23');
-    expect(gap?.gap).toEqual({ from: 1, to: 3 });
-
-    await applyCatchUp(gap!.cycleId, 900, gap!.gap);
+    await createPlan({ income: 50000, bills: 18000, savings: 10000, monthLength: 30 }, '2026-10-20');
     const db = getDB();
-    const cycle = (await db.cycles.get(gap!.cycleId))!;
+    let cycle = await current();
     expect(cycle.currentDay).toBe(4);
-    const est = await db.transactions.where('cycleId').equals(cycle.id).toArray();
-    expect(est).toHaveLength(3);
-    expect(est.every((x) => x.isEstimate)).toBe(true);
-  });
-
-  it('skipping the catch-up closes the days with nothing spent, and spends added later reach the pool', async () => {
-    await ensureSeed();
-    await createPlanAndCycle({ income: 50000, bills: 18000, savings: 10000, monthLength: 30 }, '2026-10-20');
-    const gap = await syncCalendar('2026-10-23');
-    await skipCatchUp(gap!.cycleId, gap!.gap);
-    const db = getDB();
-    let cycle = (await db.cycles.get(gap!.cycleId))!;
-    expect(cycle.currentDay).toBe(4);
-    expect(cycle.estimatedDays).toEqual([]);
     expect(cycle.pool).toBe(cycle.planAmount); // nothing spent yet
-    expect(await db.transactions.where('cycleId').equals(cycle.id).count()).toBe(0);
+    expect(await db.transactions.count()).toBe(0);
 
-    // later: log a spend on skipped day 2 (like History does); it comes off the pool
+    // later: log a spend on day 2 (like History does); it comes off the pool
     await addSpend(cycle, { amount: 700, label: 'Lunch', category: 'Food' }, new Date(2026, 9, 23, 10), 2);
-    cycle = (await db.cycles.get(gap!.cycleId))!;
+    cycle = await current();
     expect(cycle.pool).toBe(cycle.planAmount - 700);
   });
 
-  it('fills sample month and exports CSV', async () => {
-    await fillSample(new Date(2026, 9, 27, 12, 0));
+  it('fills the sample sandbox with two months and exports CSV', async () => {
+    at('2026-10-27');
+    await enterSampleMode(new Date(2026, 9, 27, 12, 0));
     const db = getDB();
-    const cycle = (await db.cycles.orderBy('startDate').last())!;
-    expect(cycle.currentDay).toBe(SAMPLE_DAYS + 1);
+    const cycle = await current();
+    expect([cycle.monthStart, cycle.currentDay]).toEqual(['2026-10-01', 27]);
     const csv = await exportCSV();
-    expect(csv.split('\n').length).toBeGreaterThan(20);
+    expect(csv.split('\n').length).toBeGreaterThan(80); // September and October
     const events = await db.evts.toArray();
     expect(events.length).toBeGreaterThanOrEqual(2);
+    await exitSampleMode();
   });
 
   it('creates events with custom text and tagged categories, logs event spends, and computes event analytics', async () => {
     await ensureSeed();
-    await createPlanAndCycle({ income: 50000, bills: 18000, savings: 10000, monthLength: 30 }, '2026-10-27');
+    await createPlan({ income: 50000, bills: 18000, savings: 10000, monthLength: 30 }, '2026-10-27');
     const db = getDB();
-    const cycle = (await db.cycles.orderBy('startDate').last())!;
+    const cycle = await current();
 
     expect(await addEvent('Goa Trip', ['Travel', 'Food', 'Fun'], '4 days with college friends')).toBeNull();
     expect(await addEvent('goa trip', ['Food'])).toBe('That one already exists.');
@@ -292,11 +284,9 @@ describe('database queries', () => {
       { name: 'Shopping', total: 0, count: 0 },
     ]);
 
-    // Focused category filters event breakdown too
     const foodOnly = eventTotals(allEntries, allEvents, 'Food');
     expect(foodOnly[0].total).toBe(800);
 
-    // Removing the event keeps the spends and their categories, clearing only the event tag
     await removeEvent(ev.id!);
     expect((await db.evts.get(ev.id!))?.deletedAt).toBeTruthy();
     expect((await db.transactions.get(e1.id))?.event).toBeNull();
@@ -306,9 +296,9 @@ describe('database queries', () => {
 
   it('tags every spend with the active event until it ends', async () => {
     await ensureSeed();
-    await createPlanAndCycle({ income: 50000, bills: 18000, savings: 10000, monthLength: 30 }, '2026-10-27');
+    await createPlan({ income: 50000, bills: 18000, savings: 10000, monthLength: 30 }, '2026-10-27');
     const db = getDB();
-    const cycle = (await db.cycles.orderBy('startDate').last())!;
+    const cycle = await current();
 
     expect(await startEvent('Goa trip', 'With friends')).toBeNull();
     expect((await db.meta.get('main'))?.activeEvent).toBe('Goa trip');
@@ -321,33 +311,25 @@ describe('database queries', () => {
     const c = await addSpend(cycle, { amount: 20, label: 'Chai' });
     expect(c.event).toBeNull();
 
-    // Starting with the same name (any case) resumes the existing event instead of duplicating it
     expect(await startEvent('goa TRIP')).toBeNull();
     expect(await db.evts.count()).toBe(1);
     expect((await db.meta.get('main'))?.activeEvent).toBe('Goa trip');
 
-    // Removing the active event also stops logging into it
     const ev = (await db.evts.toArray())[0];
     await removeEvent(ev.id!);
     expect((await db.meta.get('main'))?.activeEvent).toBeNull();
   });
 
   it('tracks payment modes (UPI, Card, Cash), itemised bills/savings, and history calendar + search', async () => {
+    at('2026-10-09');
     await ensureSeed();
     const billItems = [
       { name: 'Rent', amount: 12000 },
       { name: 'Health EMI', amount: 3500 },
     ];
     const savingsItems = [{ name: 'Mutual fund SIP', amount: 5000 }];
-    await createPlanAndCycle(
-      {
-        income: 50000,
-        bills: sumItems(billItems),
-        savings: sumItems(savingsItems),
-        monthLength: 30,
-        billItems,
-        savingsItems,
-      },
+    await createPlan(
+      { income: 50000, bills: sumItems(billItems), savings: sumItems(savingsItems), monthLength: 30, billItems, savingsItems },
       '2026-10-09',
     );
     const db = getDB();
@@ -356,7 +338,7 @@ describe('database queries', () => {
     expect(plan.billItems).toEqual(billItems);
     expect(plan.savingsItems).toEqual(savingsItems);
 
-    const cycle = (await db.cycles.orderBy('startDate').last())!;
+    const cycle = await current();
     await addSpend(cycle, { amount: 250, label: 'Lunch', category: 'Food', payment: 'UPI' });
     await addSpend(cycle, { amount: 1200, label: 'Groceries', category: 'Home', payment: 'Card' });
     await addSpend(cycle, { amount: 40, label: 'Chai', category: 'Food', payment: 'Cash' });
@@ -367,7 +349,6 @@ describe('database queries', () => {
     expect(pm.map((p) => p.name)).toEqual(['Card', 'UPI', 'Cash']);
     expect(pm[0].total).toBe(1200);
 
-    // Calendar grid & dayTotals
     const weeks = buildCalendar(cycle.startDate, cycle.totalDays);
     expect(weeks.length).toBeGreaterThanOrEqual(4);
     expect(weeks.every((w) => w.length === 7)).toBe(true);
@@ -376,199 +357,82 @@ describe('database queries', () => {
     expect(compactINR(420)).toBe('₹420');
     expect(compactINR(1490)).toBe('₹1.5k');
 
-    // Search across cycles
-    const cycles = await db.cycles.toArray();
-    expect(searchEntries(entries, cycles, 'Card')).toHaveLength(1);
-    expect(searchEntries(entries, cycles, '1200')[0].entries[0].label).toBe('Groceries');
-    expect(searchEntries(entries, cycles, 'food cash')[0].entries[0].label).toBe('Chai');
+    expect(searchEntries(entries, [cycle], 'Card')).toHaveLength(1);
+    expect(searchEntries(entries, [cycle], '1200')[0].entries[0].label).toBe('Groceries');
+    expect(searchEntries(entries, [cycle], 'food cash')[0].entries[0].label).toBe('Chai');
   });
 
-  it('logs optional spend notes and edits existing spends while keeping closed day and pool in sync', async () => {
+  it('logs optional spend notes and edits existing spends while keeping past days and pool in sync', async () => {
+    at('2026-10-09');
     await ensureSeed();
-    await createPlanAndCycle({ income: 50000, bills: 18000, savings: 10000, monthLength: 30 }, '2026-10-09');
+    await createPlan({ income: 50000, bills: 18000, savings: 10000, monthLength: 30 }, '2026-10-09');
     const db = getDB();
-    const cycle = (await db.cycles.orderBy('startDate').last())!;
+    const day1 = async () => (await current()).days.find((d) => d.day === 1)!;
 
-    const e = await addSpend(cycle, {
-      amount: 300,
-      label: 'Lunch',
-      category: 'Food',
-      payment: 'UPI',
-      note: 'Team lunch at Indiranagar',
-    });
+    const e = await addSpend(await current(), { amount: 300, label: 'Lunch', category: 'Food', payment: 'UPI', note: 'Team lunch at Indiranagar' });
     expect(e.note).toBe('Team lunch at Indiranagar');
 
-    await closeCurrentDay(cycle.id!);
-    const closedBefore = (await db.dayRows.get([cycle.id!, 1]))!;
-    expect(closedBefore.spent).toBe(300);
+    at('2026-10-10'); // day 1 is now a past day
+    expect((await day1()).spent).toBe(300);
 
-    // Edit amount from 300 -> 450, payment -> Card, note -> Updated note
-    const edited = await updateEntry(e.id, {
-      amount: 450,
-      payment: 'Card',
-      note: 'Updated lunch note',
-    });
+    const edited = await updateEntry(e.id, { amount: 450, payment: 'Card', note: 'Updated lunch note' });
     expect(edited?.amount).toBe(450);
     expect(edited?.payment).toBe('Card');
     expect(edited?.note).toBe('Updated lunch note');
+    expect((await day1()).spent).toBe(450);
 
-    const closedAfter = (await db.dayRows.get([cycle.id!, 1]))!;
-    expect(closedAfter.spent).toBe(450);
-
-    // Adding a forgotten transaction directly to Day 1 from History with adjustPool: true updates Day 1's spent total and pool
-    const cycleBeforeBackdate = (await db.cycles.get(cycle.id!))!;
-    const backdated = await addSpend(
-      cycleBeforeBackdate,
-      { amount: 150, label: 'Auto', category: 'Travel', payment: 'UPI', adjustPool: true },
-      new Date(),
-      1,
-    );
+    // a forgotten spend added to day 1 from History, rebalancing the month
+    const before = await current();
+    const backdated = await addSpend(before, { amount: 150, label: 'Auto', category: 'Travel', payment: 'UPI', adjustPool: true }, new Date(), 1);
     expect(backdated.day).toBe(1);
     expect(backdated.date).toBe('2026-10-09');
     expect(backdated.adjustsPool).toBe(true);
-    const closedAfterBackdate = (await db.dayRows.get([cycle.id!, 1]))!;
-    expect(closedAfterBackdate.spent).toBe(600);
-    const cycleAfterBackdate = (await db.cycles.get(cycle.id!))!;
-    expect(cycleAfterBackdate.pool).toBe(cycleBeforeBackdate.pool - 150);
+    expect((await day1()).spent).toBe(600);
+    const after = await current();
+    expect(after.pool).toBe(before.pool - 150);
 
-    // Adding a transaction to Day 1 with adjustPool: false updates Day 1's spent total WITHOUT changing the remaining month pool
-    const backdatedNoAdjust = await addSpend(
-      cycleAfterBackdate,
-      { amount: 200, label: 'Dinner', category: 'Food', payment: 'Cash', adjustPool: false },
-      new Date(),
-      1,
-    );
-    expect(backdatedNoAdjust.day).toBe(1);
-    expect(backdatedNoAdjust.date).toBe('2026-10-09');
-    expect(backdatedNoAdjust.adjustsPool).toBe(false);
-    expect((await db.dayRows.get([cycle.id!, 1]))?.spent).toBe(800);
-    expect((await db.cycles.get(cycle.id!))?.pool).toBe(cycleAfterBackdate.pool);
+    // record-only: day 1's total changes, the month's remaining money does not
+    const noAdjust = await addSpend(after, { amount: 200, label: 'Dinner', category: 'Food', payment: 'Cash', adjustPool: false }, new Date(), 1);
+    expect(noAdjust.day).toBe(1);
+    expect(noAdjust.adjustsPool).toBe(false);
+    expect((await day1()).spent).toBe(800);
+    expect((await current()).pool).toBe(after.pool);
 
-    // Day 2 entries should strictly be empty and not contain any Day 1 transactions
-    const day2Entries = await db.transactions.where('[cycleId+txnDate]').equals([cycle.id, dateOfDay(cycle.startDate, 2)]).toArray();
-    expect(day2Entries).toHaveLength(0);
+    expect(await db.transactions.where('txnDate').equals(dateOfDay('2026-10-09', 2)).count()).toBe(0);
 
-    const cycles = await db.cycles.toArray();
-    const allEntries = (await db.transactions.toArray()).map((t) => toEntry(t, cycle));
-    expect(allEntries.every((e) => Boolean(e.date))).toBe(true);
-    expect(searchEntries(allEntries, cycles, 'Updated lunch')).toHaveLength(1);
+    const allEntries = (await db.transactions.toArray()).map((t) => toEntry(t, after));
+    expect(allEntries.every((x) => Boolean(x.date))).toBe(true);
+    expect(searchEntries(allEntries, [after], 'Updated lunch')).toHaveLength(1);
   });
 
-  it('edits plan without resetting current day, adjusting remaining pool and distributing differences to remaining days', async () => {
+  it('edits plan without resetting the day, re-spreading the remaining money over the days left', async () => {
+    at('2026-10-01');
     await ensureSeed();
-    // Start with 50,000 income, 15,000 bills, 5,000 savings => 30,000 pool, 30 days => 1,000 / day
-    await createPlanAndCycle({ income: 50000, bills: 15000, savings: 5000, monthLength: 30 }, '2026-10-01');
-    const db = getDB();
-    let cycle = (await db.cycles.orderBy('startDate').last())!;
+    // 50,000 - 15,000 - 5,000 = 30,000 for October (31 days, salary day 1)
+    await createPlan({ income: 50000, bills: 15000, savings: 5000, monthLength: 30 }, '2026-10-01');
+    let cycle = await current();
     expect(cycle.currentDay).toBe(1);
     expect(cycle.pool).toBe(30000);
-    expect(cycle.planAmount).toBe(30000);
+    expect(cycle.totalDays).toBe(31);
 
-    // Day 1: spend 1,200 (200 over) and close day
     await addSpend(cycle, { amount: 1200, label: 'Day 1 Grocery' });
-    await closeCurrentDay(cycle.id!);
-
-    // Day 2: spend 800 (200 under) and close day
-    cycle = (await db.cycles.get(cycle.id!))!;
-    expect(cycle.currentDay).toBe(2);
-    await addSpend(cycle, { amount: 800, label: 'Day 2 Fuel' });
-    await closeCurrentDay(cycle.id!);
-
-    // Day 3: now on Day 3. Total spent in closed days 1 and 2 = 1,200 + 800 = 2,000.
-    cycle = (await db.cycles.get(cycle.id!))!;
+    at('2026-10-02');
+    await addSpend(await current(), { amount: 800, label: 'Day 2 Fuel' });
+    at('2026-10-03');
+    cycle = await current();
     expect(cycle.currentDay).toBe(3);
-    expect(cycle.pool).toBe(28000); // 30,000 - 2,000 = 28,000
-    // Remaining days = 30 - 3 + 1 = 28 days.
-    // Daily allowance for Day 3 = 28,000 / 28 = 1,000 / day.
+    expect(cycle.pool).toBe(28000);
 
-    // User edits the plan mid-cycle:
-    // Income increases to 65,000, bills 15,000, savings 10,000 => new moneyToLiveOn = 40,000 (+10,000 increase)
-    await updateActivePlan({
-      income: 65000,
-      bills: 15000,
-      savings: 10000,
-      monthLength: 30,
-    });
-
-    const updatedCycle = (await db.cycles.get(cycle.id!))!;
-    // CRITICAL REQUIREMENT 1: Does NOT restart day back to Day 1
-    expect(updatedCycle.currentDay).toBe(3);
-    expect(updatedCycle.startDate).toBe('2026-10-01');
-    expect(updatedCycle.totalDays).toBe(30);
-
-    // CRITICAL REQUIREMENT 2: Plan amount updated to 40,000
-    expect(updatedCycle.planAmount).toBe(40000);
-
-    // CRITICAL REQUIREMENT 3: Previous day spending (2,000) is deducted from new money to live on (40,000)
-    // New remaining pool = 40,000 - 2,000 = 38,000
-    expect(updatedCycle.pool).toBe(38000);
-
-    // The remaining 28 days each get 38,000 / 28 = ~1,357 / day (+357 / day from the +10,000 increase)
-    const remainingDays = updatedCycle.totalDays - updatedCycle.currentDay + 1;
-    expect(remainingDays).toBe(28);
-    const newAllowance = updatedCycle.pool / remainingDays;
-    expect(Math.round(newAllowance)).toBe(1357);
-
-    // History and closed days 1 and 2 records remain completely intact
-    const day1 = (await db.dayRows.get([cycle.id!, 1]))!;
-    const day2 = (await db.dayRows.get([cycle.id!, 2]))!;
-    expect(day1.spent).toBe(1200);
-    expect(day2.spent).toBe(800);
-  });
-
-  it('merges an accidentally restarted cycle back into original month, re-attaching logs and restoring correct timeline', async () => {
-    await ensureSeed();
-    // 1. Original month started 10 days ago (Day 1..30), so a restart today falls inside it
-    const originalStart = addDays(todayISO(), -10);
-    await createPlanAndCycle({ income: 50000, bills: 20000, savings: 0, monthLength: 30 }, originalStart);
-    const db = getDB();
-    const cycle1 = (await db.cycles.orderBy('startDate').last())!;
-
-    // Log spend on Day 1 (1,000) and close it
-    await addSpend(cycle1, { amount: 1000, label: 'Groceries' }, new Date(), 1);
-    await closeCurrentDay(cycle1.id!);
-
-    // Log spend on Day 2 (500)
-    await addSpend(cycle1, { amount: 500, label: 'Snacks' }, new Date(), 2);
-
-    // 2. Accidental restart happened earlier (e.g. user clicked "Edit my plan" before the fix, creating cycle2 on todayISO())
-    await createPlanAndCycle({ income: 60000, bills: 20000, savings: 0, monthLength: 30 }, todayISO());
-    const cycle2 = (await db.cycles.orderBy('startDate').last())!;
-    expect(cycle2.id).not.toBe(cycle1.id);
-    expect((await db.cycles.toArray()).length).toBe(2);
-
-    // Log a spend in cycle2 (350)
-    const e2 = await addSpend(cycle2, { amount: 350, label: 'Coffee' });
-    expect(e2.cycleId).toBe(cycle2.id);
-
-    // 3. Perform recovery merge
-    const result = await mergeAccidentalCycle();
-    expect(result.success).toBe(true);
-
-    // 4. Verify only Cycle 1 exists now
-    const remainingCycles = (await db.cycles.toArray()).filter((c) => c.deletedAt == null);
-    expect(remainingCycles).toHaveLength(1);
-    expect(remainingCycles[0].id).toBe(cycle1.id);
-    expect(remainingCycles[0].startDate).toBe(originalStart);
-
-    // 5. Verify the spend from cycle2 was moved to cycle1
-    const movedEntry = await db.transactions.get(e2.id);
-    expect(movedEntry?.cycleId).toBe(cycle1.id);
-
-    // 6. Pool is derived: 40,000 - 1,000 (day 1) - 500 (day 2, now a closed day) = 38,500
-    expect(remainingCycles[0].planAmount).toBe(40000);
-    expect(remainingCycles[0].pool).toBe(38500);
-  });
-
-  it('does not offer or perform a merge for a normal next month (no date overlap)', async () => {
-    await ensureSeed();
-    const db = getDB();
-    await createPlanAndCycle({ income: 50000, bills: 20000, savings: 0, monthLength: 30 }, addDays(todayISO(), -40));
-    await createPlanAndCycle({ income: 50000, bills: 20000, savings: 0, monthLength: 30 }, todayISO());
-    expect(findAccidentalPair(await db.cycles.toArray())).toBeNull();
-    const result = await mergeAccidentalCycle();
-    expect(result.success).toBe(false);
-    expect((await db.cycles.toArray()).filter((c) => c.deletedAt == null)).toHaveLength(2);
+    await updateActivePlan({ income: 65000, bills: 15000, savings: 10000, monthLength: 31 });
+    const updated = await current();
+    expect(updated.currentDay).toBe(3);
+    expect(updated.startDate).toBe('2026-10-01');
+    expect(updated.planAmount).toBe(40000);
+    expect(updated.pool).toBe(38000); // what days 1-2 used stays used
+    const remainingDays = updated.totalDays - updated.currentDay + 1;
+    expect(remainingDays).toBe(29);
+    expect(Math.round(updated.pool / remainingDays)).toBe(1310);
+    expect(updated.days.map((d) => d.spent)).toEqual([1200, 800]);
   });
 
   it('buildMonthCalendar generates a full Mon-Sun grid with correct cycle day and active status', () => {
@@ -585,25 +449,16 @@ describe('database queries', () => {
 
     const weeks = buildMonthCalendar(2026, 10, cycle, '2026-10-14');
     expect(weeks.length).toBeGreaterThanOrEqual(4);
-    // Each week has 7 days (Mon-Sun)
     expect(weeks[0].length).toBe(7);
-
-    // 2026-10-01 is Thursday, so Monday of first week is 2026-09-28
     expect(weeks[0][0].iso).toBe('2026-09-28');
     expect(weeks[0][0].isCurrentMonth).toBe(false);
-
-    // Find 2026-10-10 (Cycle Start / Day 1)
     const day10 = weeks.flat().find((c) => c.iso === '2026-10-10');
     expect(day10).toBeDefined();
     expect(day10?.dayInCycle).toBe(1);
     expect(day10?.isWithinActiveCycle).toBe(true);
-
-    // Find 2026-10-14 (Today / Day 5)
     const day14 = weeks.flat().find((c) => c.iso === '2026-10-14');
     expect(day14?.isToday).toBe(true);
     expect(day14?.dayInCycle).toBe(5);
-
-    // Day before cycle: 2026-10-09
     const day9 = weeks.flat().find((c) => c.iso === '2026-10-09');
     expect(day9?.isWithinActiveCycle).toBe(false);
     expect(day9?.dayInCycle).toBeNull();
@@ -616,94 +471,59 @@ describe('database queries', () => {
       { id: '3', cycleId: '1', day: 5, date: '2026-10-15', amount: 500, label: 'Gift', category: 'Shopping', subcategory: null, hour: 12, createdAt: 3, fromSavings: true, isEstimate: false },
       { id: '4', cycleId: '1', day: 6, date: '2026-10-16', amount: 150, label: 'Metro', category: 'Travel', subcategory: null, hour: 9, createdAt: 4, fromSavings: false, isEstimate: false },
     ];
-
     const totals = dayTotalsByDate(entries);
     const day15 = totals.get('2026-10-15');
     expect(day15?.spent).toBe(500);
     expect(day15?.fromSavings).toBe(500);
     expect(day15?.count).toBe(3);
-
     const day16 = totals.get('2026-10-16');
     expect(day16?.spent).toBe(150);
     expect(day16?.fromSavings).toBe(0);
     expect(day16?.count).toBe(1);
   });
 
-  it('allows logging spends on dates outside active 30-day cycle without deducting from active cycle pool', async () => {
+  it('a spend dated in another month counts only in that month; a past day of this month rebalances it', async () => {
+    at('2026-10-10');
     await ensureSeed();
-    // Active cycle starts on 2026-10-01 for 30 days (covers 2026-10-01 to 2026-10-30)
-    await createPlanAndCycle({ income: 50000, bills: 20000, savings: 0, monthLength: 30 }, '2026-10-01');
-    const db = getDB();
-    const cycle = (await db.cycles.orderBy('startDate').last())!;
-    const initialPool = cycle.pool; // 30,000
+    await createPlan({ income: 50000, bills: 20000, savings: 0, monthLength: 30 }, '2026-08-01');
+    await getDB().plans.toCollection().modify({ periodStartDay: 1 });
+    const cycle = await current();
+    expect(cycle.startDate).toBe('2026-10-01');
+    const initialPool = cycle.pool;
 
-    // 1. Log an older spend on a historical date outside the active cycle range (e.g. 2026-08-15)
-    const oldEntry = await addSpend(
-      cycle,
-      { amount: 1500, label: 'August Doctor Checkup', category: 'Health' },
-      new Date(),
-      undefined,
-      '2026-08-15',
-    );
-
+    const oldEntry = await addSpend(cycle, { amount: 1500, label: 'August Doctor Checkup', category: 'Health' }, new Date(), undefined, '2026-08-15');
     expect(oldEntry.date).toBe('2026-08-15');
-    expect(oldEntry.amount).toBe(1500);
-    expect(oldEntry.adjustsPool).toBe(false);
+    expect(oldEntry.day).toBe(0); // outside this month
+    expect((await current()).pool).toBe(initialPool);
+    const august = (await cycleFor(getDB(), '2026-08-15'))!;
+    expect(august.pool).toBe(30000 - 1500);
 
-    // Active cycle pool must NOT be touched
-    const cycleAfterOldSpend = (await db.cycles.get(cycle.id!))!;
-    expect(cycleAfterOldSpend.pool).toBe(initialPool);
-
-    // Day rows for active cycle must not have an entry for August 15
-    const daysInActiveCycle = await db.dayRows.where('cycleId').equals(cycle.id!).toArray();
-    expect(daysInActiveCycle).toHaveLength(0);
-
-    // 2. Advance cycle to Day 10 so Day 5 is a past day in the active cycle
-    await db.cycles.update(cycle.id!, { currentDay: 10 });
-    const freshCycle = (await db.cycles.get(cycle.id!))!;
-
-    // Log a spend on Day 5 (within active cycle range: 2026-10-05) with adjustPool: true
-    const cycleEntry = await addSpend(
-      freshCycle,
-      { amount: 500, label: 'Groceries', category: 'Home', adjustPool: true },
-      new Date(),
-      undefined,
-      '2026-10-05',
-    );
-
-    expect(cycleEntry.date).toBe('2026-10-05');
-    expect(cycleEntry.day).toBe(5); // 2026-10-05 is Day 5 of cycle starting 2026-10-01
-    expect(cycleEntry.adjustsPool).toBe(true);
-
-    // Active cycle day 5 row is created / updated
-    const day5Row = await db.dayRows.get([cycle.id!, 5]);
-    expect(day5Row).toBeDefined();
-    expect(day5Row?.spent).toBe(500);
-
-    // Active cycle pool is deducted by 500
-    const finalCycle = (await db.cycles.get(cycle.id!))!;
+    const inMonth = await addSpend(cycle, { amount: 500, label: 'Groceries', category: 'Home', adjustPool: true }, new Date(), undefined, '2026-10-05');
+    expect(inMonth.day).toBe(5);
+    expect(inMonth.adjustsPool).toBe(true);
+    const finalCycle = await current();
+    expect(finalCycle.days.find((d) => d.day === 5)?.spent).toBe(500);
     expect(finalCycle.pool).toBe(initialPool - 500);
   });
 });
 
 describe('deleteAllData for a signed-in user', () => {
-  it('tombstones every synced row instead of clearing, and ends the cycle', async () => {
-    const { vi } = await import('vitest');
+  it('tombstones every synced row instead of clearing', async () => {
     const auth = await import('@/lib/auth');
     const spy = vi.spyOn(auth, 'getAuth').mockReturnValue({ status: 'signedIn', uid: 'u1', username: 'bob' });
     try {
       await deleteAllData();
       await ensureSeed();
-      await createPlanAndCycle({ income: 50000, bills: 18000, savings: 10000, monthLength: 30 }, '2026-10-27');
+      await createPlan({ income: 50000, bills: 18000, savings: 10000, monthLength: 30 }, '2026-10-27');
       const db = getDB();
-      await addSpend((await db.cycles.toArray())[0], { amount: 100, label: 'Chai' });
+      await addSpend((await cycleFor(db))!, { amount: 100, label: 'Chai' });
       await deleteAllData();
-      for (const t of [db.plans, db.cycles, db.transactions]) {
+      for (const t of [db.plans, db.transactions]) {
         const rows = await t.toArray();
         expect(rows.length).toBeGreaterThan(0);
         expect(rows.every((r) => r.deletedAt != null)).toBe(true);
       }
-      expect(await db.dayRows.count()).toBe(0);
+      expect(await cycleFor(db)).toBeUndefined();
     } finally {
       spy.mockRestore();
       await deleteAllData();

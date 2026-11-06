@@ -13,14 +13,14 @@ Status values: `open` · `fixed` · `wontfix` · `by-design` (update this column
 | F-05 | High | Sync | Device-local auto-increment ids used as remote primary keys; whole-state last-write-wins | open |
 | F-06 | High | Sync | Boot/restore `pull()` overwrites fresh local state | open |
 | F-07 | High | Sync | `pull()` "repair/align" silently drops or fabricates data | open |
-| F-08 | High | Budget | Catch-up gap swallows days that already have entries | open |
-| F-09 | High | Budget | "Merge accidental cycle" is offered for every user with 2+ cycles and corrupts the pool | open |
+| F-08 | High | Budget | Catch-up gap swallows days that already have entries | fixed (2026-11-06, E-4): missed days are only the unlogged run before today |
+| F-09 | High | Budget | "Merge accidental cycle" is offered for every user with 2+ cycles and corrupts the pool | fixed (2026-11-06): merge removed, months derived (E-4) |
 | F-10 | Medium | Budget | Pool clamping is asymmetric (add clamps, delete refunds in full; negative pool is reset to 0) | open |
 | F-11 | Medium | Budget | `updateEntry` ≠ `addSpend` bookkeeping; `day=0` entries | open |
 | F-12 | Medium | Sync | Double push, no mutex, swallowed child-table errors, false "synced", retry drops `user_id` | fixed (2026-11-01) |
 | F-13 | Medium | Budget | "Close the day" has no calendar guard | fixed (2026-11-04) |
 | F-14 | Medium | Budget | Changing plan can shorten the cycle below `currentDay`; plan history overwritten | open |
-| F-15 | Medium | Data | Sample data wipes real history and is pushed to the cloud | open |
+| F-15 | Medium | Data | Sample data wipes real history and is pushed to the cloud | fixed (2026-11-06): sample runs in its own throwaway database `stash-sample` (lib/sampleMode.ts); a real guest's data is never touched, nothing is synced or claimed |
 | F-16 | Medium | Sync | Deletes are not durable (no tombstones, `days`/`plans` never deleted remotely) | open |
 | F-17 | Low | Product | "Move leftover to savings" is cosmetic | open |
 | F-18 | Low | Product | Currency is a label only; thresholds are not currency-aware | open |
@@ -46,9 +46,11 @@ Status values: `open` · `fixed` · `wontfix` · `by-design` (update this column
 | F-09b | High | Budget | "Merge accidental cycle" (F-09) | deliberately left as is (owner decision, 2026-11-04) |
 | F-38 | Critical | Security | Pull trusted RLS alone: `GET <table>?select=*` had no `user_id` filter and applyRemote wrote any row it got; a sync during a login/logout switch could upload one account's DB into another | fixed (2026-11-06): pull filters `user_id=eq.<uid>`, applyRemote drops rows not owned by the signed-in user, syncNow refuses when the open DB isn't that user's |
 | F-39 | High | Data | Categories doubled: user rows named like a default (old full copies, claimed guest data, two devices) listed next to the default | fixed (2026-11-06): `dedupeCategories` (boot + after pull) re-points spends, keeps extra subcategories, tombstones the duplicate; resolver never shows a name twice |
-| F-40 | High | Budget | Merge card shown to everyone with 2+ cycles; merge reopened the original before closing the restart, so the push broke `uq_cycles_one_active` and was quarantined | fixed (2026-11-06): card only when the newest cycle starts inside the previous one (`findAccidentalPair`); write order fixed. Supersedes F-09/F-09b |
+| F-40 | High | Budget | Merge card shown to everyone with 2+ cycles; merge reopened the original before closing the restart, so the push broke `uq_cycles_one_active` and was quarantined; `mergeRows` max(current_day) also undid it | fixed (2026-11-06): superseded by E-4 (no stored cycles, no merge) |
 | F-41 | High | Sync | After login, a slow/failed restore (8 s timeout) dropped the user into onboarding; the new plan became a second cycle next to the cloud one | fixed (2026-11-06): "couldn't reach your saved data" screen with Retry; onboarding only on explicit "I'm new here" |
-| F-42 | Medium | Data | Guest data is claimed into a new account without asking (origin of the 2026-11-01 "Sort later 2,555" rows); spends can be logged on future dates | open |
+| F-43 | Medium | Privacy | Logout offered "keep my data on this phone" and a second "remove it" button | fixed (2026-11-06): logging out always removes the local copy after a final sync; warns if changes could not upload |
+| F-44 | Medium | Budget | "Last month, wrapped up" showed for a brand-new plan: "last month" was looked up as the day before tracking began, which is in the same calendar month when tracking starts mid-month (0 spent, whole plan "left over"). Sample data also straddled months ("19 Oct - 18 Nov") | fixed (2026-11-06): last month = the calendar month before this one and only if it has spends; the sample stays inside the current month |
+| F-42 | Medium | Data | Guest data is claimed into a new account without asking (origin of the 2026-11-01 "Sort later 2,555" rows) | open (future-dated spends are the intended "log ahead" feature, not a bug) |
 
 ---
 

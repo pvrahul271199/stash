@@ -9,14 +9,16 @@ export function BottomPrompt({
   actionLabel,
   onAction,
   secondaryLabel,
+  onSecondary,
   onClose,
 }: {
   title: string;
   body: React.ReactNode;
   actionLabel: string;
   onAction: () => void;
-  /** Shown as a quiet text button; closes the prompt. */
+  /** Shown as a quiet text button; closes the prompt unless `onSecondary` says otherwise. */
   secondaryLabel?: string;
+  onSecondary?: () => void;
   onClose: () => void;
 }) {
   const actionRef = useRef<HTMLButtonElement>(null);
@@ -67,7 +69,7 @@ export function BottomPrompt({
           {secondaryLabel && (
             <button
               type="button"
-              onClick={onClose}
+              onClick={onSecondary ?? onClose}
               className="min-h-[44px] w-full text-[15px] font-medium text-soft"
             >
               {secondaryLabel}

@@ -120,10 +120,11 @@ function fakeFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Respon
   })();
 }
 
-import { addCategory, addSpend, updateEntry, createPlanAndCycle, removeEntry, ensureSeed } from '@/db/queries';
+import { addCategory, addSpend, updateEntry, createPlan, removeEntry, ensureSeed } from '@/db/queries';
 import { getDB, openUserDB } from '@/db/schema';
 import { applyRemote, mergeRows, requestSync, syncNow } from '@/lib/sync';
 import { supabaseSync } from '@/lib/sync';
+import { cycleFor } from '@/db/queries';
 
 const settle = async () => {
   await new Promise((r) => setTimeout(r, 4)); // writes in the same ms as the push cutoff wait for the next sync
@@ -165,13 +166,13 @@ describe('sync engine', () => {
   });
 
   it('pushes only dirty rows, parents first, then nothing on a second sync', async () => {
-    await createPlanAndCycle(plan, '2026-10-01');
-    const cycle = (await getDB().cycles.toArray())[0];
+    await createPlan(plan, '2026-10-01');
+    const cycle = (await cycleFor(getDB()))!;
     await addSpend(cycle, { amount: 90, label: 'Tea', category: 'Food' });
     await settle();
     const posts = calls.filter((c) => c.method === 'POST').map((c) => c.table);
     expect(posts.indexOf('plans')).toBeLessThan(posts.indexOf('transactions'));
-    expect(posts.indexOf('cycles')).toBeLessThan(posts.indexOf('transactions'));
+    expect(posts).not.toContain('cycles'); // months are derived, never synced (E-4)
     calls.length = 0;
     await settle();
     expect(calls.filter((c) => c.method === 'POST')).toHaveLength(0);
@@ -183,11 +184,11 @@ describe('sync engine', () => {
   });
 
   it('20 rapid writes give one sync with one request in flight', async () => {
-    await createPlanAndCycle(plan, '2026-10-01');
+    await createPlan(plan, '2026-10-01');
     await settle();
     calls.length = 0;
     maxInFlight = 0;
-    const cycle = (await getDB().cycles.toArray())[0];
+    const cycle = (await cycleFor(getDB()))!;
     for (let i = 0; i < 20; i++) {
       await addSpend(cycle, { amount: i + 1, label: 'x', category: 'Food' });
       requestSync();
@@ -200,8 +201,8 @@ describe('sync engine', () => {
   });
 
   it('a failing table gives an error and does not advance the push cursor', async () => {
-    await createPlanAndCycle(plan, '2026-10-01');
-    const cycle = (await getDB().cycles.toArray())[0];
+    await createPlan(plan, '2026-10-01');
+    const cycle = (await cycleFor(getDB()))!;
     await addSpend(cycle, { amount: 5, label: 'x', category: 'Food' });
     failTable = 'transactions';
     await expect(settle()).rejects.toThrow(/Sync failed/);
@@ -214,8 +215,8 @@ describe('sync engine', () => {
   });
 
   it('tombstone round-trip: delete pushes deleted_at and a remote tombstone applies locally', async () => {
-    await createPlanAndCycle(plan, '2026-10-01');
-    const cycle = (await getDB().cycles.toArray())[0];
+    await createPlan(plan, '2026-10-01');
+    const cycle = (await cycleFor(getDB()))!;
     const e = await addSpend(cycle, { amount: 200, label: 'x', category: 'Food' });
     await settle();
     await removeEntry(e.id);
@@ -235,8 +236,8 @@ describe('sync engine', () => {
   });
 
   it('same field changed on both sides with no common ancestor: the newer client time is the tiebreaker', async () => {
-    await createPlanAndCycle(plan, '2026-10-01');
-    const cycle = (await getDB().cycles.toArray())[0];
+    await createPlan(plan, '2026-10-01');
+    const cycle = (await cycleFor(getDB()))!;
     const e = await addSpend(cycle, { amount: 100, label: 'x', category: 'Food' });
     const local = (await getDB().transactions.get(e.id))!;
     const remote = (amount: number, at: number) =>
@@ -251,31 +252,30 @@ describe('sync engine', () => {
     expect((await getDB().transactions.get(e.id))!.amount).toBe(777);
   });
 
-  it('cycle currentDay merges as max, then the cycle is re-derived', async () => {
-    await createPlanAndCycle(plan, '2026-10-01');
-    const cycle = (await getDB().cycles.toArray())[0];
+  it('a plan from an older device (no start day / effective date) is completed locally and pushed back', async () => {
     const remote = {
-      id: cycle.id, user_id: auth.uid, client_updated_at: cycle.updatedAt - 5, deleted_at: null, start_date: cycle.startDate,
-      total_days: 30, plan_amount: cycle.planAmount, current_day: 4, leftover_moved: false, estimated_days: [],
+      id: 'old-plan', user_id: auth.uid, client_updated_at: 1, version: 1, deleted_at: null, income: 50000, bills: 20000,
+      savings: 0, month_length: 30, currency: null, bill_items: null, savings_items: null, created_at: new Date(2026, 9, 30, 12).getTime(),
     } as never;
-    await applyRemote(getDB(), { cycles: [remote] }); // local is newer, but remote day is ahead
-    const c = (await getDB().cycles.get(cycle.id))!;
-    expect(c.currentDay).toBe(4);
-    expect(await getDB().dayRows.count()).toBe(3);
+    await applyRemote(getDB(), { plans: [remote] });
+    const p = (await getDB().plans.get('old-plan'))!;
+    expect(p.effectiveFrom).toBe('2026-10-30');
+    expect(p.periodStartDay).toBe(1); // calendar months unless the user picked another day
+    expect(p.localRev).toBeDefined(); // dirty: the next push sends the completed plan
   });
 
   it('pull never clears local rows when the server is empty', async () => {
-    await createPlanAndCycle(plan, '2026-10-01');
+    await createPlan(plan, '2026-10-01');
     server.clear();
-    const before = await getDB().cycles.count();
+    const before = await getDB().plans.count();
     await settle(); // pushes, then pulls its own data back
-    expect(await getDB().cycles.count()).toBe(before);
+    expect(await getDB().plans.count()).toBe(before);
   });
 
   it('401 refreshes the session once and retries', async () => {
-    await createPlanAndCycle(plan, '2026-10-01');
+    await createPlan(plan, '2026-10-01');
     await new Promise((r) => setTimeout(r, 450)); // let the debounced background sync settle
-    await getDB().cycles.toCollection().modify({ updatedAt: Date.now() });
+    await getDB().plans.toCollection().modify({ income: 81000, updatedAt: Date.now() });
     refreshSession.mockClear();
     unauthorizedOnce = true;
     await settle();
@@ -290,7 +290,7 @@ describe('sync engine', () => {
   it('a name already taken by another device is renamed locally and the push succeeds', async () => {
     uniqueNames = true;
     server.set('categories', new Map([['other-device', { id: 'other-device', user_id: auth.uid, client_updated_at: 1, version: 1, updated_at: new Date(1).toISOString(), deleted_at: null, name: 'Pets' }]]));
-    await createPlanAndCycle(plan, '2026-10-01');
+    await createPlan(plan, '2026-10-01');
     await addCategory('pets');
     await addCategory('Books');
     await settle();
@@ -301,8 +301,8 @@ describe('sync engine', () => {
   });
 
   it('phone edits the note, laptop edits the amount: both survive', async () => {
-    await createPlanAndCycle(plan, '2026-10-01');
-    const cycle = (await getDB().cycles.toArray())[0];
+    await createPlan(plan, '2026-10-01');
+    const cycle = (await cycleFor(getDB()))!;
     const e = await addSpend(cycle, { amount: 100, label: 'Lunch', category: 'Food' });
     await settle(); // both devices start from version 1
 
@@ -327,8 +327,8 @@ describe('sync engine', () => {
   });
 
   it('only the rows that changed are sent, and they carry the version they were based on', async () => {
-    await createPlanAndCycle(plan, '2026-10-01');
-    const cycle = (await getDB().cycles.toArray())[0];
+    await createPlan(plan, '2026-10-01');
+    const cycle = (await cycleFor(getDB()))!;
     const e = await addSpend(cycle, { amount: 100, label: 'Lunch', category: 'Food' });
     await settle();
     await updateEntry(e.id, { note: 'x' });
@@ -340,8 +340,8 @@ describe('sync engine', () => {
   });
 
   it('a push whose response was lost is resent with the same mutation id and applied once', async () => {
-    await createPlanAndCycle(plan, '2026-10-01');
-    const cycle = (await getDB().cycles.toArray())[0];
+    await createPlan(plan, '2026-10-01');
+    const cycle = (await cycleFor(getDB()))!;
     await addSpend(cycle, { amount: 7, label: 'Tea', category: 'Food' });
     loseResponseOnce = true; // server applies the batch, the client never hears back
     await expect(settle()).rejects.toThrow();
@@ -408,10 +408,6 @@ describe('mergeRows', () => {
     expect(mergeRows('transactions', t, base, server).deleted_at).toBe('2026-11-02T10:00:00+00:00');
   });
 
-  it('never moves a cycle day cursor backwards', () => {
-    const b = { id: 'c', client_updated_at: 1, current_day: 3 };
-    expect(mergeRows('cycles', { ...b, client_updated_at: 9, current_day: 4 }, b, { ...b, current_day: 6 }).current_day).toBe(6);
-  });
 });
 
 
@@ -436,8 +432,8 @@ describe('sync robustness (B1, B2, M2)', () => {
 
 
   it('B1: an edit made while the phone clock runs backwards is still pushed', async () => {
-    await createPlanAndCycle(plan, '2026-10-01');
-    const cycle = (await getDB().cycles.toArray())[0];
+    await createPlan(plan, '2026-10-01');
+    const cycle = (await cycleFor(getDB()))!;
     await addSpend(cycle, { amount: 20, label: 'Tea', category: 'Food' });
     await settle();
     const real = Date.now;
@@ -468,8 +464,8 @@ describe('sync robustness (B1, B2, M2)', () => {
   });
 
   it('B2: one rejected row is quarantined and the rest of the batch still syncs', async () => {
-    await createPlanAndCycle(plan, '2026-10-01');
-    const cycle = (await getDB().cycles.toArray())[0];
+    await createPlan(plan, '2026-10-01');
+    const cycle = (await cycleFor(getDB()))!;
     for (let i = 1; i <= 6; i++) await addSpend(cycle, { amount: i * 10, label: `t${i}`, category: 'Food' });
     const txns = await getDB().transactions.toArray();
     const bad = txns.find((t) => t.amount === 40)!;
@@ -493,8 +489,8 @@ describe('sync robustness (B1, B2, M2)', () => {
   });
 
   it('B2: finding the bad row among N rows costs about 2·log2(N) requests, not N', async () => {
-    await createPlanAndCycle(plan, '2026-10-01');
-    const cycle = (await getDB().cycles.toArray())[0];
+    await createPlan(plan, '2026-10-01');
+    const cycle = (await cycleFor(getDB()))!;
     for (let i = 1; i <= 64; i++) await addSpend(cycle, { amount: i, label: `t${i}`, category: 'Food' });
     const bad = (await getDB().transactions.toArray()).find((t) => t.amount === 17)!;
     rejectIds.add(bad.id);
@@ -505,10 +501,10 @@ describe('sync robustness (B1, B2, M2)', () => {
   });
 
   it('M2: the profile is only PATCHed when the currency changed', async () => {
-    await createPlanAndCycle(plan, '2026-10-01');
+    await createPlan(plan, '2026-10-01');
     await settle();
     expect(patchCount).toBe(1);
-    const cycle = (await getDB().cycles.toArray())[0];
+    const cycle = (await cycleFor(getDB()))!;
     await addSpend(cycle, { amount: 5, label: 'x', category: 'Food' });
     await settle();
     await settle();
@@ -517,14 +513,14 @@ describe('sync robustness (B1, B2, M2)', () => {
 
   it('H2: nothing is uploaded until the privacy notice is accepted', async () => {
     vi.stubGlobal('window', { localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} }, addEventListener: () => {} });
-    await createPlanAndCycle(plan, '2026-10-01');
+    await createPlan(plan, '2026-10-01');
     await expect(syncNow()).rejects.toThrow(/Privacy notice/);
     expect(rpcCalls).toHaveLength(0);
   });
 
   it('M5: countUnsynced reflects pending changes and drops to zero after a sync', async () => {
     const { countUnsynced } = await import('@/lib/sync');
-    await createPlanAndCycle(plan, '2026-10-01');
+    await createPlan(plan, '2026-10-01');
     expect(await countUnsynced()).toBeGreaterThan(0);
     await settle();
     expect(await countUnsynced()).toBe(0);
@@ -547,7 +543,7 @@ describe('account isolation (the app enforces it, not only RLS)', () => {
   });
 
   it('every pull asks only for the signed-in user', async () => {
-    await createPlanAndCycle(plan, '2026-10-01');
+    await createPlan(plan, '2026-10-01');
     await settle();
     const gets: string[] = [];
     vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) => {
@@ -563,7 +559,7 @@ describe('account isolation (the app enforces it, not only RLS)', () => {
     ignoreUserFilter = true;
     server.set('transactions', new Map([['foreign-1', foreignTxn('foreign-1')]]));
     server.set('categories', new Map([['foreign-cat', { id: 'foreign-cat', user_id: 'someone-else', client_updated_at: 1, version: 1, updated_at: new Date(clock++).toISOString(), deleted_at: null, name: 'Food', sort_order: 0, is_system: false, subcategories: [], base_id: null, sub_added: [], sub_removed: [] }]]));
-    await createPlanAndCycle(plan, '2026-10-01');
+    await createPlan(plan, '2026-10-01');
     await settle();
     expect(await getDB().transactions.get('foreign-1')).toBeUndefined();
     expect(await getDB().cats.get('foreign-cat')).toBeUndefined();
@@ -579,11 +575,55 @@ describe('account isolation (the app enforces it, not only RLS)', () => {
   });
 
   it('refuses to sync when the open DB belongs to a different user (login/logout switch)', async () => {
-    await createPlanAndCycle(plan, '2026-10-01');
+    await createPlan(plan, '2026-10-01');
     const owner = auth.uid;
     auth.uid = 'another-account'; // auth already switched, DB not yet
     await expect(syncNow()).rejects.toThrow(/switching/);
     expect(server.get('plans')).toBeUndefined(); // nothing from the other DB was uploaded into this account
     auth.uid = owner;
+  });
+});
+
+describe('export CSV syncs first', () => {
+  beforeEach(async () => {
+    vi.stubGlobal('fetch', fakeFetch);
+    vi.stubGlobal('navigator', { onLine: true });
+    vi.stubGlobal('window', { localStorage: { getItem: (k: string) => (k === 'stash:consent' ? JSON.stringify({ v: 1 }) : null), setItem: () => {}, removeItem: () => {} }, addEventListener: () => {} });
+    ignoreUserFilter = false;
+    await freshUser();
+  });
+
+  it('uploads what is still waiting on this phone and includes spends only the cloud had', async () => {
+    const { exportCSV } = await import('@/db/queries');
+    const { todayISO } = await import('@/lib/dates');
+    const today = todayISO();
+    await createPlan({ ...plan, periodStartDay: 1 }, today);
+    await addSpend((await cycleFor(getDB()))!, { amount: 90, label: 'Tea on this phone', category: 'Food' });
+    // a spend another device made: it exists only on the server
+    server.set('transactions', new Map([[`${'a'.repeat(8)}-0000-7000-8000-000000000001`, {
+      id: `${'a'.repeat(8)}-0000-7000-8000-000000000001`, user_id: auth.uid, client_updated_at: 1, version: 1, updated_at: new Date(clock++).toISOString(), deleted_at: null,
+      txn_date: today, amount: 450, type: 'Food', category_id: 'food', subtype: null, label: 'Lunch on the laptop', event: null, event_id: null,
+      payment: null, note: null, from_savings: false, adjusts_pool: true, is_estimate: false, hour: 13, created_at: 1,
+    }]]));
+    expect(await getDB().transactions.count()).toBe(1); // the laptop's spend is not here yet
+
+    const csv = await exportCSV(); // no explicit sync before this
+
+    expect(csv).toContain('Lunch on the laptop'); // pulled
+    expect(csv).toContain('Tea on this phone');
+    expect([...(server.get('transactions')?.values() ?? [])].some((r) => r.label === 'Tea on this phone')).toBe(true); // pushed
+  });
+
+  it('a guest (not signed in) just exports, without touching the network', async () => {
+    const { exportCSV } = await import('@/db/queries');
+    const auth2 = await import('@/lib/auth');
+    const spy = vi.spyOn(auth2, 'getAuth').mockReturnValue({ status: 'guest' } as never);
+    const before = calls.length;
+    try {
+      await exportCSV();
+    } finally {
+      spy.mockRestore();
+    }
+    expect(calls.length).toBe(before);
   });
 });

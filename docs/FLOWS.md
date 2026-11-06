@@ -76,6 +76,12 @@ Triggered from `UserTab`/`PlanScreen` → `onSwitchUser`:
 
 `TodayTab` list or History → `EditSpendSheet` → `updateEntry(id, patch)` / `removeEntry(id)`; pool/day rows adjusted per ARCHITECTURE §4; `removeEntry` also `deleteRemoteEntry`. `CloseDay` has its own ✕ remove button. ⚠ F-09, F-10, F-11.
 
+> **2026-11-06 (E-4):** sections 7, 8, 9 and 18 below describe the old stored-cycle flows. Now: 7 = "Close the day"
+> (`previewCloseDay`, a read-only recap; nothing is closed and the day ends at midnight). Today's strip shows the whole
+> calendar month; tapping a day before tracking began and logging there moves the tracking start back to it. 8 = removed (no catch-up screen; unlogged days count as nothing spent). 9 = no "Start next month": a new month begins on the salary day by itself; `MonthEnd` is a dismissible summary
+> of last month in the first 3 days (`meta.monthSummarySeen`). 18 = removed (a restart can no longer happen).
+> Onboarding asks for the day the **month starts on** (default 1) instead of "days until next salary".
+
 ## 7. Close the day
 
 1. Today → "Close the day" → `CloseDay` review list (can remove or "Paid cash or forgot something?" → log).

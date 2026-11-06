@@ -31,14 +31,14 @@ Keep these three up to date when behaviour changes. `FINDINGS.md` has a status c
 ```bash
 npm run dev        # next dev --webpack -H 0.0.0.0  (http://localhost:3000)
 npm run lint       # tsc --noEmit  (there is no ESLint)
-npm test           # vitest run   (153 tests, fake-indexeddb)
+npm test           # vitest run   (171 tests, fake-indexeddb)
 npm run build      # next build --webpack && node scripts/build-sw.mjs  → out/
 npm start          # node scripts/serve-out.mjs → http://127.0.0.1:3100
 npm run test:e2e   # Playwright; needs `npm run build` first, mobile 390x844 + desktop
 npm run icons      # regenerate PWA icons
 ```
 
-State when this file was written (2026-11-01): `tsc` clean, 103/103 unit tests pass, e2e not run.
+State (2026-11-06): `tsc` clean, 171/171 unit tests pass, `npm run build` passes. e2e specs are stale (they walk an older multi-step onboarding) and were not run.
 
 ## Layout
 
@@ -48,7 +48,7 @@ components/
   AppShell.tsx       top-level state machine (flows, tabs, catch-up, sync bootstrapping)
   screens/           one file per screen/sheet (Today, History, Insights, User, Onboarding, …)
   ui/ charts/ pwa/   primitives, SVG charts, SW/iOS-hint
-db/schema.ts         Dexie schema (v4), types, default categories, getDB()
+db/schema.ts         Dexie schema (v11), types, default categories, getDB()
 db/queries.ts        ALL reads (useLiveQuery hooks) and writes (transactions)
 lib/budget.ts        pure budget math (closeDay, planSync, catchUp, pace, projection)
 lib/dates.ts         pure ISO-date helpers (UTC-midnight arithmetic)
@@ -64,13 +64,15 @@ stash-mobile/        Expo app (separate package.json)
 
 ## Core concepts (memorise these)
 
-- **Cycle** = one "month" of `totalDays` days starting at `startDate`. Days are 1-based; `currentDay` is the first *unclosed* day. A cycle is over when `currentDay > totalDays`.
-- **`pool`** = spending money **not yet consumed by closed days**. Today's allowance = `max(pool,0) / daysLeft`. Open-day spends do **not** touch `pool`; only *closing* a day subtracts that day's spend (`closeDay`). Past-day edits adjust `pool` directly.
-- **`planAmount`** = `moneyToLiveOn(plan)` at cycle start; `planAmount − pool` = amount consumed by closed days.
-- **`DayRow`** = snapshot written when a day closes (`closed`) or is back-filled with a rough total (`estimated`).
-- **`fromSavings`** entries never touch pool/allowance; they only add to `cycle.fromSavingsTotal`.
-- **`adjustsPool`** (entry flag): for past-day spends, whether it rebalanced the remaining pool. Persisted only in `metadata` on the remote.
-- **Identity** = `normalizeUsername` (trim+lowercase) → base64 = `userId`. Remote rows carry both `user_id` and `workspace_id` (kept equal). Guest ⇒ `'default'`.
+- **The month is derived, never stored** (E-4, `lib/period.ts`). `periodFor(plan.periodStartDay, date)` = start day of this month .. the day before next month's. **The start day is 1 (calendar months)**; plans created before may carry another `periodStartDay` and keep it. A month's end is never stored: it is the day before the next month's start (`periodFor`). Setup asks for a *start date* (`DatePicker` calendar; today by default, any earlier day of this month allowed) which becomes the first plan's `effectiveFrom`. Budgeting (`startDate`) begins there (tracking start), but `monthStart/monthEnd/monthDays` always cover the whole month: the Today strip shows 1..30/31 via `monthView(cycle)`, and logging on a day before tracking began pulls `effectiveFrom` back to it (`extendTrackingStart`, first month only). Insights are per month (`useAllCycles` + month picker). `cycleFor(db, date)` / `useSnapshot()` build a `DerivedCycle` (same fields the UI always read: `id = p:<start>:<days>`, `startDate`, `totalDays`, `planAmount`, `currentDay` = today's day, `pool`, `days`) from plans + transactions. Two devices with the same rows always show the same numbers; there is nothing to close, restart or merge.
+- **`pool`** = plan amount minus spends on days **before today** in this month. Today's allowance = `max(pool,0) / daysLeft`. Today's own spends lower "left today", not the pool; at midnight they become yesterday's. Spends logged ahead on an upcoming day lower the pool now.
+- **Plans are versioned by `effectiveFrom`**: `planInEffect` = latest plan that started on or before the month's last day. `updateActivePlan` edits in place within the month the plan started, else adds a version from today, so past months keep their amounts.
+- **Sample mode** ("explore with sample data") runs in its own throwaway Dexie DB `stash-sample` (`lib/sampleMode.ts`): two months of dummy spends are really in a DB, anything logged there is discarded (the sandbox is rebuilt on every visit/reload and dropped on exit), and `fillSample` refuses to run on any other DB. Never write sample data into a guest or account DB.
+- **"Close the day"** (`previewCloseDay`; read-only recap, nothing is closed). There is no catch-up / "rough total" screen: days nobody logged count as nothing spent, so the allowance just rises. Month-summary-seen and leftover-moved live in `meta` (per device).
+- **There are no `cycles` or `dayRows` tables** (Dexie v11 dropped them; the upgrade `migrateToDerivedPeriods` first carried the first cycle's start into the first plan's `effectiveFrom`). Transactions have no `cycleId`; a month is found by `txnDate`. On the server the `cycles` table and `transactions.cycle_id` are dropped (run the last block of `supabase/schema.sql` after deploying). Never reintroduce stored month state.
+- **`fromSavings`** entries never touch pool/allowance; they only add to `fromSavingsTotal`.
+- **`adjustsPool`** (entry flag): for past-day spends of this month, whether it rebalanced the remaining pool (false = record-only).
+- **Identity** = Supabase `auth.uid()`; one Dexie DB per user (`stash-<uid>`, guest `stash-default`). The client filters every pull by `user_id` and drops foreign rows (F-38).
 - Money is **integer** in whole currency units; `Math.round` on write. Currency is a *label*, not a conversion.
 
 ## Conventions / gotchas for editing

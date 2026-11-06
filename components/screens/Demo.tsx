@@ -47,7 +47,6 @@ const POOL_1 = POOL - SPENT_1;
 const NEXT_1 = Math.round(POOL_1 / (DAYS - 1));
 const POOL_2 = POOL_1 - SPENT_2;
 const NEXT_2 = Math.round(POOL_2 / (DAYS - 2));
-const SETUP_MS = 9000;
 
 /* ---------- canvas: fixed unit space (320 wide, H tall) scaled uniformly ---------- */
 
@@ -385,32 +384,51 @@ const BASICS_CALLOUTS: Callout[] = [
   { text: 'Spent more? No guilt. It is shared across the days ahead.', target: [120, BARS_TOP + BARS_H - 66 - 12], from: [200, 150], label: { x: 16, y: 100, w: 200 }, bend: -0.3 },
 ];
 
-/** Step 0: income is typed in, fixed spend and investment come off, the rest is split over the month. */
-function SetupAnim() {
-  const [t, setT] = useState(0);
+/** Taps it takes to play step 0 through: income, fixed spend, investment, what is left, the split over the days. */
+const SETUP_STAGES = 5;
+const SETUP_HINTS = [
+  'Tap to add your income',
+  'Tap to take off fixed spend',
+  'Tap to take off investments',
+  'Tap to see what is left',
+  'Tap to split it over the days',
+] as const;
+
+/**
+ * Step 0, one tap at a time: stage 1 types in the income, 2 the fixed spend, 3 the investment, 4 shows what is left to
+ * live on, 5 splits it over the month's days. Each stage animates when it begins; earlier stages stay shown in full.
+ */
+function SetupAnim({ stage }: { stage: number }) {
+  const [now, setNow] = useState(0); // ms since the current stage began
   useEffect(() => {
-    const id = setInterval(() => setT((v) => (v >= SETUP_MS ? v : v + 50)), 50);
+    setNow(0);
+    const t0 = performance.now();
+    const id = setInterval(() => {
+      const e = performance.now() - t0;
+      setNow(e);
+      if (e > 2500) clearInterval(id);
+    }, 50);
     return () => clearInterval(id);
-  }, []);
-  const typed = (value: number, start: number) => {
-    if (t < start) return null;
+  }, [stage]);
+  const typed = (value: number, rowStage: number) => {
+    if (stage < rowStage) return null;
+    if (stage > rowStage) return { text: inr(value), done: true };
     const digits = String(value);
-    const n = Math.min(digits.length, Math.floor((t - start) / 230) + 1);
+    const n = Math.min(digits.length, Math.floor(now / 230) + 1);
     return { text: inr(Number(digits.slice(0, n))), done: n === digits.length };
   };
   const rows = [
-    { label: 'Income', value: PLAN.income, start: 300, sign: '' },
-    { label: 'Fixed spend', value: PLAN.bills, start: 2200, sign: '− ' },
-    { label: 'Investment', value: PLAN.savings, start: 3900, sign: '− ' },
+    { label: 'Income', value: PLAN.income, stage: 1, sign: '' },
+    { label: 'Fixed spend', value: PLAN.bills, stage: 2, sign: '− ' },
+    { label: 'Investment', value: PLAN.savings, stage: 3, sign: '− ' },
   ];
-  const resultAt = 5400;
-  const splitAt = 6600;
-  const shown = t < resultAt ? 0 : Math.round(POOL * Math.min(1, (t - resultAt) / 900));
-  const split = t >= splitAt;
+  const showResult = stage >= 4;
+  const shown = stage < 4 ? 0 : stage > 4 ? POOL : Math.round(POOL * Math.min(1, now / 900));
+  const split = stage >= 5;
   return (
     <>
       {rows.map((r, i) => {
-        const ty = typed(r.value, r.start);
+        const ty = typed(r.value, r.stage);
         const active = ty && !ty.done;
         return (
           <Box key={r.label} x={16} y={12 + i * 40} w={288} h={32} className={`justify-between rounded-[10px] border px-3 text-[14px] transition-opacity duration-300 ${ty ? 'border-line opacity-100' : 'border-transparent opacity-0'}`}>
@@ -422,11 +440,11 @@ function SetupAnim() {
           </Box>
         );
       })}
-      <Box x={16} y={136} w={288} h={1} plain className={`bg-line transition-opacity duration-300 ${t >= resultAt ? 'opacity-100' : 'opacity-0'}`} />
-      <Box x={16} y={144} w={288} h={52} plain className={`transition-opacity duration-300 ${t >= resultAt ? 'opacity-100' : 'opacity-0'}`}>
+      <Box x={16} y={136} w={288} h={1} plain className={`bg-line transition-opacity duration-300 ${showResult ? 'opacity-100' : 'opacity-0'}`} />
+      <Box x={16} y={144} w={288} h={52} plain className={`transition-opacity duration-300 ${showResult ? 'opacity-100' : 'opacity-0'}`}>
         <HugeNumber value={shown} size={48} />
       </Box>
-      <Box x={16} y={198} w={288} h={16} className={`text-[12px] text-soft transition-opacity duration-300 ${t >= resultAt ? 'opacity-100' : 'opacity-0'}`}>
+      <Box x={16} y={198} w={288} h={16} className={`text-[12px] text-soft transition-opacity duration-300 ${showResult ? 'opacity-100' : 'opacity-0'}`}>
         left to live on this month
       </Box>
       <Box x={16} y={BARS_TOP + 22} w={288} h={BARS_H - 22} plain className="flex items-end gap-[3px]">
@@ -447,7 +465,7 @@ function SetupAnim() {
   );
 }
 
-function Basics({ step }: { step: number }) {
+function Basics({ step, stage }: { step: number; stage: number }) {
   const cur = BASICS[step];
   const future = step <= 1 ? BASE : step === 2 ? NEXT_1 : NEXT_2;
   return (
@@ -458,7 +476,7 @@ function Basics({ step }: { step: number }) {
       </div>
       <div className="mt-4">
         <Canvas H={BASICS_H} callout={step === 0 ? undefined : BASICS_CALLOUTS[step]} id={`basics-${step}`}>
-          {step === 0 && <SetupAnim />}
+          {step === 0 && <SetupAnim stage={stage} />}
           {step > 0 && (<>
           <Box x={16} y={10} w={288} h={52} plain>
             <HugeNumber value={cur.big} size={48} />
@@ -743,13 +761,17 @@ export function Demo({ onClose }: { onClose: () => void }) {
   const [ch, setCh] = useState(0); // 0 = basics, 1.. = CHAPTERS[ch - 1]
   const [step, setStep] = useState(0);
   const [hot, setHot] = useState(0);
+  const [stage, setStage] = useState(0); // "Set it once" plays one tap at a time (see SetupAnim)
   // Steps move on only when the user taps Next (nothing auto-advances).
 
   const names = ['Basics', ...CHAPTERS.map((c) => c.name), 'Install'];
   const goChapter = (i: number) => {
     setCh(i);
     setHot(0);
-    if (i === 0) setStep(0);
+    if (i === 0) {
+      setStep(0);
+      setStage(0);
+    }
   };
 
   const isInstall = ch === names.length - 1;
@@ -757,8 +779,12 @@ export function Demo({ onClose }: { onClose: () => void }) {
   const lastInChapter = isInstall ? true : tour ? hot >= tour.callouts.length - 1 : step >= BASICS.length - 1;
   const lastChapter = ch === names.length - 1;
 
+  const inSetup = ch === 0 && step === 0 && stage < SETUP_STAGES;
+
   function next() {
-    if (!lastInChapter) {
+    if (inSetup) {
+      setStage((s) => s + 1); // income, then fixed spend, then investment ... one tap each
+    } else if (!lastInChapter) {
       if (tour) setHot((h) => h + 1);
       else setStep((s) => s + 1);
     } else if (!lastChapter) goChapter(ch + 1);
@@ -794,7 +820,7 @@ export function Demo({ onClose }: { onClose: () => void }) {
       {/* Tap anywhere below the tabs to move on; the hint is a quiet nudge, not a button. */}
       <div className="mt-5 flex min-h-0 flex-1 cursor-pointer flex-col" onClick={next}>
         <div className="flex-1 overflow-y-auto">
-          {isInstall ? <InstallStep /> : tour ? <Tour key={tour.name} chapter={tour} hot={hot} setHot={setHot} /> : <Basics step={step} />}
+          {isInstall ? <InstallStep /> : tour ? <Tour key={tour.name} chapter={tour} hot={hot} setHot={setHot} /> : <Basics step={step} stage={stage} />}
         </div>
 
         <div className="flex flex-col items-center pt-3">
@@ -822,7 +848,11 @@ export function Demo({ onClose }: { onClose: () => void }) {
               </svg>
             </span>
             <span className="text-[13px]">
-              {lastInChapter ? (lastChapter ? 'Tap anywhere to finish' : `Tap anywhere for ${names[ch + 1]}`) : 'Tap anywhere to continue'}
+              {inSetup
+                ? SETUP_HINTS[stage]
+                : lastInChapter
+                  ? (lastChapter ? 'Tap anywhere to finish' : `Tap anywhere for ${names[ch + 1]}`)
+                  : 'Tap anywhere to continue'}
             </span>
           </div>
           {/* keyboard and screen-reader users get a real control */}
@@ -834,7 +864,7 @@ export function Demo({ onClose }: { onClose: () => void }) {
               next();
             }}
           >
-            {lastInChapter ? (lastChapter ? 'Finish' : `Next: ${names[ch + 1]}`) : 'Next'}
+            {inSetup ? SETUP_HINTS[stage] : lastInChapter ? (lastChapter ? 'Finish' : `Next: ${names[ch + 1]}`) : 'Next'}
           </button>
         </div>
       </div>

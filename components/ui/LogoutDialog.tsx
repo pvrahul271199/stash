@@ -3,17 +3,11 @@ import { useEffect, useRef, useState } from 'react';
 import { unsyncedBeforeLogout } from '@/lib/auth';
 
 /**
- * Log-out choice. On a shared phone the next person could open this app and read the finances left on the
- * device, so removing the local copy is offered up front. Removal first tries a final sync, and warns if
- * changes could not be uploaded (they would be lost once the local copy is gone).
+ * Log-out confirmation. Logging out always removes this account's data from the phone (it lives in the account and
+ * comes back on the next login), so nobody who picks the phone up next can read it. A last sync runs first; if some
+ * changes could not be uploaded (offline, rejected) the user is told they would be lost and must confirm.
  */
-export function LogoutDialog({
-  onLogout,
-  onCancel,
-}: {
-  onLogout: (removeLocalData: boolean) => void;
-  onCancel: () => void;
-}) {
+export function LogoutDialog({ onLogout, onCancel }: { onLogout: () => void; onCancel: () => void }) {
   const [checking, setChecking] = useState(false);
   const [unsynced, setUnsynced] = useState<number | null>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
@@ -24,11 +18,11 @@ export function LogoutDialog({
     return () => window.removeEventListener('keydown', onKey);
   }, [onCancel]);
 
-  async function askRemove() {
+  async function confirm() {
     setChecking(true);
     const n = await unsyncedBeforeLogout();
     setChecking(false);
-    if (n === 0) onLogout(true);
+    if (n === 0) onLogout();
     else setUnsynced(n);
   }
 
@@ -40,26 +34,21 @@ export function LogoutDialog({
         </h2>
         <p id="lo-body" className="mt-2 text-body text-soft">
           {unsynced == null
-            ? 'Your data stays safe in your account. If other people use this phone, also remove your data from it: you get it all back when you log in again.'
-            : 'They could not be uploaded (you may be offline). If you remove your data from this phone now, they are lost.'}
+            ? 'Your data stays safe in your account and comes back when you log in again. It is removed from this phone.'
+            : 'They could not be uploaded (you may be offline). If you log out now, they are lost.'}
         </p>
         <div className="mt-5 flex flex-col gap-2">
           {unsynced == null ? (
-            <>
-              <button onClick={() => onLogout(false)} className="h-[54px] w-full rounded-btn bg-warmBg text-[16px] font-semibold text-warm">
-                Log out
-              </button>
-              <button
-                onClick={askRemove}
-                disabled={checking}
-                className="h-[50px] w-full rounded-btn border border-line text-[16px] font-semibold text-ink disabled:opacity-60"
-              >
-                {checking ? 'Syncing first…' : 'Log out and remove my data from this phone'}
-              </button>
-            </>
+            <button
+              onClick={confirm}
+              disabled={checking}
+              className="h-[54px] w-full rounded-btn bg-warmBg text-[16px] font-semibold text-warm disabled:opacity-60"
+            >
+              {checking ? 'Syncing first…' : 'Log out'}
+            </button>
           ) : (
-            <button onClick={() => onLogout(true)} className="h-[54px] w-full rounded-btn bg-warmBg text-[16px] font-semibold text-warm">
-              Remove anyway
+            <button onClick={onLogout} className="h-[54px] w-full rounded-btn bg-warmBg text-[16px] font-semibold text-warm">
+              Log out anyway
             </button>
           )}
           <button ref={cancelRef} onClick={onCancel} className="h-[50px] w-full rounded-btn border border-line text-[16px] font-semibold text-ink">
