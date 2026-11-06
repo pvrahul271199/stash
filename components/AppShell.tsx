@@ -129,9 +129,21 @@ export function AppShell() {
     void restoreFor(auth.uid);
   }, [ready, consented, hasCycle, auth.status, auth.uid, restoreFor]);
 
+  // No browser right-click menu (it is not a security measure: DevTools still opens from the keyboard/menu). Text fields keep
+  // theirs so paste still works.
   useEffect(() => {
-    // Hold the loader for a minimum time so it doesn't just flash on fast local boots.
-    const minShow = new Promise<void>((r) => setTimeout(r, 450));
+    const block = (e: MouseEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.closest('input, textarea') || t.isContentEditable)) return;
+      e.preventDefault();
+    };
+    document.addEventListener('contextmenu', block);
+    return () => document.removeEventListener('contextmenu', block);
+  }, []);
+
+  useEffect(() => {
+    // Hold the loader just long enough that it doesn't flicker on a fast boot (was 450 ms, which every launch paid in full).
+    const minShow = new Promise<void>((r) => setTimeout(r, 120));
     initAuth()
       .then(() => resumeSampleMode()) // a reload inside sample mode rebuilds the sandbox
       .then(() => ensureSeed())

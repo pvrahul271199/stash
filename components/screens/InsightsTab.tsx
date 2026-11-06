@@ -23,7 +23,7 @@ import {
   type InsightCycle,
 } from '@/lib/insights';
 import { compactINR } from '@/lib/history';
-import { dateOfDay, formatWithWeekday } from '@/lib/dates';
+import { dateOfDay, formatShort, formatWithWeekday } from '@/lib/dates';
 import { inr } from '@/lib/format';
 import { useCurrency } from '@/lib/currency';
 import { colors, categoryRamp } from '@/theme/tokens';
@@ -264,6 +264,12 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
           </button>
         </div>
       </div>
+
+      {months.length <= 1 || monthIdx >= months.length - 1 ? (
+        <p className="mt-2 text-right text-[12px] text-faint">
+          {months.length <= 1 ? 'Your first month. Earlier months appear here once you have them.' : `Tracking began ${formatShort(months[months.length - 1].startDate)}, so there is nothing earlier.`}
+        </p>
+      ) : null}
 
       {/* 1. Summary */}
       <section className="mt-5 rounded-[20px] border border-line bg-white p-5 shadow-sm" aria-label="Summary">

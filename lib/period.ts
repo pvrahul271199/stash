@@ -142,6 +142,38 @@ export function trackingStart(plans: PlanLike[]): string | null {
   return ordered.length ? effectiveFromOf(ordered[0]) : null;
 }
 
+/** How many months before the plans' tracking start a spend can still pull tracking back (a typo like 2019 must not invent years of months). */
+export const MAX_BACKFILL_MONTHS = 12;
+
+/**
+ * Where tracking really starts: the plans' tracking start, or earlier when there are spends dated before it, so a spend
+ * logged in an earlier month gets that month (and its Insights) instead of staying an orphan record. At most
+ * `MAX_BACKFILL_MONTHS` months back. Derived on every read, so every device agrees and nothing is stored.
+ */
+export function trackingWithSpends(plans: PlanLike[], firstSpendDate: string | null | undefined): string | null {
+  const tracking = trackingStart(plans);
+  if (!tracking || !firstSpendDate || firstSpendDate >= tracking) return tracking;
+  const startDay = startDayOf(plans);
+  let floor = periodFor(startDay, tracking).start;
+  for (let i = 0; i < MAX_BACKFILL_MONTHS; i++) floor = periodFor(startDay, addDays(floor, -1)).start;
+  return firstSpendDate > floor ? firstSpendDate : floor;
+}
+
+/**
+ * The tracking start to build ONE period with. Months before the plans' tracking start (only reachable through earlier
+ * spends) are clipped at the earliest spend; the month budgeting began in and every later one keep the plans' start, so
+ * logging an old spend never changes the current month's amount. A spend earlier in the same month budgeting began in
+ * still pulls that month's start back (the long-standing "log on an earlier day of the first month" rule).
+ */
+export function trackingForPeriod(plans: PlanLike[], firstSpendDate: string | null | undefined, period: Pick<Period, 'end'>): string | null {
+  const planStart = trackingStart(plans);
+  if (!planStart) return null;
+  const back = trackingWithSpends(plans, firstSpendDate);
+  if (!back || back >= planStart) return planStart;
+  if (back >= periodFor(startDayOf(plans), planStart).start) return back;
+  return period.end < planStart ? back : planStart;
+}
+
 /** The month start day all periods use: the newest plan's choice, else the 1st. */
 export function startDayOf(plans: PlanLike[]): number {
   const latest = orderPlans(plans).pop();
@@ -273,13 +305,14 @@ export function buildAllCycles(
   today: string,
   leftoverMoved: (id: string) => boolean = () => false,
 ): DerivedCycle[] {
-  const tracking = trackingStart(plans);
+  const firstSpend = txns.reduce<string | null>((m, t) => (t.deletedAt == null && (m == null || t.txnDate < m) ? t.txnDate : m), null);
+  const tracking = trackingWithSpends(plans, firstSpend);
   if (!tracking) return [];
   const startDay = startDayOf(plans);
   const out: DerivedCycle[] = [];
   for (const p of periodsBetween(startDay, tracking, today > tracking ? today : tracking)) {
     const plan = planInEffect(plans, p)!;
-    const c = buildCycle(p, plan, txns, today, tracking);
+    const c = buildCycle(p, plan, txns, today, trackingForPeriod(plans, firstSpend, p) ?? tracking);
     if (c) out.push({ ...c, leftoverMoved: leftoverMoved(c.id) });
   }
   return out.reverse();

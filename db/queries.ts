@@ -39,6 +39,7 @@ import {
   planInEffect,
   startDayOf,
   trackingStart,
+  trackingForPeriod,
   type DerivedCycle,
 } from '@/lib/period';
 import { resolveLabel } from '@/lib/suggestions';
@@ -124,10 +125,14 @@ const periodKey = (c: { startDate: string; totalDays: number }) => `p:${c.startD
 
 /** The derived cycle of the period that contains `date`; undefined before the first plan (or before tracking began). */
 export async function cycleFor(db: StashDB, date: string = todayISO(), today: string = todayISO()): Promise<DerivedCycle | undefined> {
-  const [plans, meta] = await Promise.all([db.plans.toArray(), db.meta.get('main')]);
-  const tracking = trackingStart(plans);
-  if (!tracking) return undefined;
+  const [plans, meta, firstSpend] = await Promise.all([
+    db.plans.toArray(),
+    db.meta.get('main'),
+    db.transactions.orderBy('txnDate').filter(alive).first(),
+  ]);
   const period = periodFor(startDayOf(plans), date);
+  const tracking = trackingForPeriod(plans, firstSpend?.txnDate, period);
+  if (!tracking) return undefined;
   const txns = await db.transactions.where('txnDate').between(period.start, period.end, true, true).toArray();
   const c = buildCycle(period, planInEffect(plans, period)!, txns, today, tracking);
   if (!c) return undefined;
@@ -419,7 +424,7 @@ const nonNeg = (n: number) => Math.max(0, Math.round(n));
 /**
  * Logging on a day of the first month that is before budgeting began (the month strip shows the whole month) pulls the
  * tracking start back to that day, so the spend counts like any other past day: in the pool, the day rows, History and
- * Insights. The days in between simply count as nothing spent. Dates in any other month stay plain records.
+ * Insights. The days in between simply count as nothing spent. Earlier months are covered too: `cycleFor`/`buildAllCycles` derive the tracking start from the earliest spend (lib/period `trackingForPeriod`).
  * Must run inside a transaction that includes `plans`.
  */
 async function extendTrackingStart(db: StashDB, date: string): Promise<void> {

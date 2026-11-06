@@ -220,11 +220,12 @@ describe('the whole month can be logged into (calendar months, start day 1)', ()
     expect((await cycleFor(getDB()))!.startDate).toBe('2026-11-10');
   });
 
-  it('a date in an earlier month never moves tracking back; it stays a plain record', async () => {
+  it('a date in an earlier month never changes THIS month; it gets its own earlier month', async () => {
     await createPlan({ ...plan, periodStartDay: 1 }, '2026-11-20');
     await addSpend(monthView((await cycleFor(getDB()))!), { amount: 90, label: 'x', category: 'Food' }, new Date(), undefined, '2026-10-15');
     expect((await cycleFor(getDB()))!.startDate).toBe('2026-11-20');
     expect(await getDB().transactions.where('txnDate').equals('2026-10-15').count()).toBe(1);
+    expect((await cycleFor(getDB(), '2026-10-20'))!.startDate).toBe('2026-10-15');
   });
 });
 

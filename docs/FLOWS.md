@@ -85,7 +85,7 @@ Triggered from `UserTab`/`PlanScreen` → `onSwitchUser`:
 ## 7. Close the day
 
 One screen, one tap.
-1. Today → "Close the day" → `CloseDay`: spent vs today's amount, tomorrow's amount and why (`closeDay(cycle, spent)`, pure), the week (today shown closed, tomorrow as today), the entries (remove, or "Paid cash or forgot something?" → log, returns here). The last day of a month shows "A new one starts tomorrow" instead of tomorrow's amount.
+1. Today → "Close the day" → `CloseDay`: spent vs today's amount, tomorrow's amount and why (`closeDay(cycle, spent)`, pure), the entries (remove, or "Paid cash or forgot something?" → log, returns here). The last day of a month shows "A new one starts tomorrow" instead of tomorrow's amount.
 2. "Close the day" → `closeToday()` (`db/queries.ts`) closes the day `todayISO()` says is on screen: writes `meta.closedThrough`, calls `setClosedThrough` (`lib/dates.ts`), shows the toast "Day closed" and returns to Today. There is no separate "Day closed" screen any more.
 3. From then `todayISO()` (no argument) returns the next day while the clock is still on the closed one, so `useToday` (subscribed via `subscribeDay`) re-renders everything on the next day immediately; `meta.closedThrough` is reloaded when a DB opens. No restriction: the user can log that next day and close it too.
 4. Not synced, nothing month-shaped stored. Closing the last day of a month starts the next month at once (`MonthEnd` summary as usual).

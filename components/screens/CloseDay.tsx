@@ -2,19 +2,16 @@
 import { BackIcon, IconButton, PrimaryButton } from '../ui/Button';
 import { removeEntry } from '@/db/queries';
 import type { Entry } from '@/db/schema';
-import { WeekRow, type WeekDay } from '../ui/WeekRow';
 import { inr, num } from '@/lib/format';
 import { closeDay, spentToday, todayAllowance, type CycleState } from '@/lib/budget';
 
 /**
  * "Close the day", the only screen of the flow: today's total against today's amount, what tomorrow will be and why,
- * the week, and the entries. One tap really closes the day (db/queries `closeToday`) and the app moves on at once.
+ * and the entries. One tap really closes the day (db/queries `closeToday`) and the app moves on at once.
  */
 export function CloseDay({
   entries,
   cycle,
-  week,
-  startDate,
   onBack,
   onAddMore,
   onClose,
@@ -22,9 +19,6 @@ export function CloseDay({
 }: {
   entries: Entry[];
   cycle: CycleState;
-  /** The 7 days around today with today shown as closed and tomorrow as today. */
-  week?: WeekDay[];
-  startDate?: string;
   onBack: () => void;
   onAddMore: () => void;
   onClose: () => void;
@@ -99,12 +93,6 @@ export function CloseDay({
               <p className="num text-[34px] leading-none text-ink">{inr(tomorrowAllowance)}</p>
             </div>
             <p className="mt-3 text-[13px] leading-snug text-soft">{note}</p>
-          </div>
-        )}
-
-        {!lastDay && week && startDate && (
-          <div className="mt-5">
-            <WeekRow days={week} startDate={startDate} />
           </div>
         )}
 

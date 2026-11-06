@@ -30,11 +30,12 @@ export const viewport: Viewport = {
   initialScale: 1,
   viewportFit: 'cover',
   themeColor: '#FFFFFF',
+  colorScheme: 'light', // the page is light only: stops a dark-mode phone painting the canvas dark before our CSS loads
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${bricolage.variable} ${figtree.variable}`}>
+    <html lang="en" className={`${bricolage.variable} ${figtree.variable}`} style={{ background: '#ffffff' }}>
       <body suppressHydrationWarning>
         <div className="app-frame">
           <div className="app-root">{children}</div>

@@ -6,7 +6,7 @@ import { useToast } from '@/store/toast';
 import { Logo } from '../ui/Logo';
 import { HugeNumber } from '../ui/HugeNumber';
 import { SyncStatusPill } from '../ui/SyncStatusPill';
-import { WeekRow, weekWindow, type WeekDay } from '../ui/WeekRow';
+import { WeekRow, type WeekDay } from '../ui/WeekRow';
 import { LogSpend } from './LogSpend';
 import { DayPeek } from './DayPeek';
 import { CloseDay } from './CloseDay';
@@ -89,16 +89,6 @@ export function TodayTab({ cycle, plan, onCreateAccount, onHome }: { cycle: Deri
   });
   const monthDay = daysBetween(cycle.monthStart, todayISO()) + 1;
   const remaining = Math.max(state.pool - spent, 0);
-
-  // The same 7 days the recap shows: today turns "closed", tomorrow becomes today.
-  const nextDay = cycle.currentDay + 1;
-  const closeWeek: WeekDay[] = weekWindow(Math.min(nextDay, cycle.totalDays), cycle.totalDays).map((day) => {
-    const row = dayRows.find((r) => r.day === day);
-    return {
-      day,
-      status: day === cycle.currentDay ? 'closed' : day === nextDay ? 'today' : row ? row.status : day < cycle.currentDay ? 'closed' : 'future',
-    };
-  });
 
   /** Really closes the day on screen: the app moves on to the next day now, not at midnight. One tap, no second screen. */
   async function close() {
@@ -216,8 +206,6 @@ export function TodayTab({ cycle, plan, onCreateAccount, onHome }: { cycle: Deri
         <CloseDay
           entries={entries}
           cycle={state}
-          week={closeWeek}
-          startDate={cycle.startDate}
           busy={busy}
           onBack={() => setView('today')}
           onClose={close}

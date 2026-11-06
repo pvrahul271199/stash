@@ -75,8 +75,6 @@ export const Design1_CalmCard = () => (
     <CloseDay
       entries={[e({ id: 'a', label: 'Lunch', amount: 240, category: 'Food' }), e({ id: 'b', label: 'Auto', amount: 90, category: 'Transport', payment: 'Cash' }), e({ id: 'c', label: 'Groceries', amount: 198, category: 'Food' }), e({ id: 'd', label: 'Chai', amount: 30, category: 'Food', payment: 'Cash' })]}
       cycle={{ currentDay: 7, totalDays: 30, pool: 17616, fromSavingsTotal: 0 }}
-      week={week}
-      startDate={START}
       onBack={() => {}}
       onAddMore={() => {}}
       onClose={() => {}}

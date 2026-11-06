@@ -6,6 +6,13 @@ import { acceptSyncConsent, flushConsentRecord } from '@/lib/consent';
 import { googleEnabled } from '@/config/google';
 import { renderGoogleButton } from '@/lib/googleSignIn';
 
+const Spinner = ({ className = '' }: { className?: string }) => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true" className={`animate-spin motion-reduce:animate-none ${className}`}>
+    <circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity="0.25" strokeWidth="3" />
+    <path d="M21 12a9 9 0 00-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+  </svg>
+);
+
 const Check = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0 text-good">
     <path d="M5 12.5l4.5 4.5L19 7.5" />
@@ -127,12 +134,14 @@ export function GoogleSignInSheet({
             />
             <div
               aria-hidden="true"
-              className={`pointer-events-none absolute inset-0 flex items-center justify-center rounded-full border border-line bg-white text-[14px] text-faint transition-opacity duration-300 ${ready ? 'opacity-0' : 'opacity-100'}`}
+              className={`pointer-events-none absolute inset-0 flex items-center justify-center gap-2 rounded-full border border-line bg-white text-[14px] text-soft transition-opacity duration-300 ${ready ? 'opacity-0' : 'opacity-100'}`}
             >
-              Continue with Google
+              <Spinner />
+              Loading Google…
             </div>
             {busy && (
-              <div role="status" className="absolute inset-0 flex items-center justify-center rounded-full bg-white/85 text-[13px] font-medium text-soft">
+              <div role="status" className="absolute inset-0 flex items-center justify-center gap-2 rounded-full bg-white/90 text-[13px] font-medium text-soft">
+                <Spinner />
                 Signing in…
               </div>
             )}
