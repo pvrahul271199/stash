@@ -52,3 +52,13 @@ Re-run `supabase/schema.sql`: it also back-fills profiles that already exist (in
 - "Error 400: origin_mismatch" from Google: the page's origin is not in Authorized JavaScript origins (step 1.3).
 - "Unacceptable audience / invalid client" from Supabase: the Client ID in Supabase differs from the one in the app.
 - Nonce errors: make sure "Skip nonce check" is off and you deployed this version of the code.
+
+## Moving a username + password account's data to a Google account (admin, one-off)
+
+`supabase/admin/move_account_data.sql` creates `public.move_account_data(username, google_email, wipe_target)`. It re-points every plan,
+spend, category, event and feature row from the password account to the Google account in one transaction, refuses if the Google
+account already has live data (unless told to replace it), and is not callable by the app or by signed-in users. Steps are in the
+file's header. Tested against an in-process Postgres by `supabase/tests/move-account-check.mjs` (15 checks).
+
+What a Google account stores in `profiles`: `email` (lower-cased), `username` (= the email), `display_name`, `avatar_url`,
+`auth_provider = 'google'`. A username + password account stores no email there.

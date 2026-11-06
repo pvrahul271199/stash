@@ -9,7 +9,7 @@ vi.mock('@/lib/supabaseClient', () => ({
       onAuthStateChange: vi.fn(),
       getSession: vi.fn(async () => ({ data: { session: null } })),
       signOut: vi.fn(async () => ({ error: null })),
-      signUp: async () => ({ data: { user: { id: 'new-uid' }, session: { access_token: 't' } }, error: null }),
+      signInWithIdToken: async () => ({ data: { user: { id: 'new-uid', app_metadata: { provider: 'google' }, email: 'a@b.c', created_at: '2026-01-01T00:00:00Z', last_sign_in_at: '2026-01-01T00:00:00Z' } }, error: null }),
     },
   }),
 }));
@@ -38,10 +38,10 @@ describe('sign-up no longer copies guest data silently', () => {
     n++;
   });
 
-  it('signUp creates the account empty and flags it as new; the guest data stays where it was', async () => {
+  it('a new Google sign-in creates the account empty and flags it as new; the guest data stays where it was', async () => {
     const { schema } = await guestWithData(3);
     const auth = await import('@/lib/auth');
-    expect(await auth.signUp('newuser', 'password1')).toEqual({ ok: true });
+    expect(await auth.signInWithGoogleToken('tok', 'nonce')).toEqual({ ok: true });
     expect(auth.getAuth()).toMatchObject({ status: 'signedIn', uid: 'new-uid', isNew: true });
     expect(schema.getActiveDBUid()).toBe('new-uid');
     expect(await schema.getDB().transactions.count()).toBe(0); // nothing came along
@@ -78,7 +78,7 @@ describe('sign-up no longer copies guest data silently', () => {
   it('"Move them": the guest data ends up in the new account, exactly once', async () => {
     const { schema } = await guestWithData(3);
     const auth = await import('@/lib/auth');
-    await auth.signUp('newuser', 'password1');
+    await auth.signInWithGoogleToken('tok', 'nonce');
     const { claimGuestData } = await import('@/db/claim');
     const r = await claimGuestData('new-uid');
     expect(r.claimed).toBe(true);
@@ -90,7 +90,7 @@ describe('sign-up no longer copies guest data silently', () => {
   it('"Start fresh": claiming is simply never called, so the account stays empty and the guest data is still on the phone', async () => {
     const { schema } = await guestWithData(2);
     const auth = await import('@/lib/auth');
-    await auth.signUp('newuser', 'password1');
+    await auth.signInWithGoogleToken('tok', 'nonce');
     const { describeGuestData } = await import('@/db/claim');
     expect(await describeGuestData()).toEqual({ spends: 2, plans: 1 }); // the question had something to ask
     expect(await schema.getDB().transactions.count()).toBe(0); // "start fresh": nothing was moved

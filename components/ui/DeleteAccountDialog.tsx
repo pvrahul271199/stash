@@ -1,11 +1,10 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { deleteAccount, useAuth } from '@/lib/auth';
+import { deleteAccount } from '@/lib/auth';
 
-/** Account erasure. Needs the password again, and says plainly that it cannot be undone. */
+/** Account erasure. Needs DELETE typed, and says plainly that it cannot be undone. */
 export function DeleteAccountDialog({ onDone, onCancel }: { onDone: () => void; onCancel: () => void }) {
-  const google = useAuth().provider === 'google';
-  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
@@ -16,13 +15,13 @@ export function DeleteAccountDialog({ onDone, onCancel }: { onDone: () => void; 
     return () => window.removeEventListener('keydown', onKey);
   }, [onCancel, busy]);
 
-  const ready = google ? password.trim().toUpperCase() === 'DELETE' : !!password;
+  const ready = confirm.trim().toUpperCase() === 'DELETE';
 
   async function submit() {
     if (busy || !ready) return;
     setBusy(true);
     setError(null);
-    const res = await deleteAccount(password);
+    const res = await deleteAccount();
     setBusy(false);
     if (res.ok) onDone();
     else setError(res.error);
@@ -36,7 +35,7 @@ export function DeleteAccountDialog({ onDone, onCancel }: { onDone: () => void; 
         </h2>
         <p id="da-body" className="mt-2 text-body text-soft">
           This permanently erases your account and everything in it from the cloud and from every device you used.
-          It cannot be undone and the username cannot be recovered. Export a CSV first if you want a copy.
+          It cannot be undone and cannot be recovered. Export a CSV first if you want a copy.
         </p>
         <form
           className="mt-4"
@@ -46,12 +45,12 @@ export function DeleteAccountDialog({ onDone, onCancel }: { onDone: () => void; 
           }}
         >
           <input
-            type={google ? 'text' : 'password'}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder={google ? 'Type DELETE to confirm' : 'Enter your password to confirm'}
-            aria-label={google ? 'Type DELETE' : 'Password'}
-            autoComplete={google ? 'off' : 'current-password'}
+            type="text"
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
+            placeholder="Type DELETE to confirm"
+            aria-label="Type DELETE"
+            autoComplete="off"
             className="h-12 w-full rounded-key border border-line bg-white px-4 text-[16px] text-ink placeholder:text-faint"
           />
           {error && (

@@ -28,20 +28,6 @@ function stubWindow(session?: object) {
   return store;
 }
 
-describe('username helpers', () => {
-  it('validates bounds, case, trim and charset', async () => {
-    const { validateUsername, usernameToEmail } = await import('@/lib/auth');
-    expect(validateUsername('ab')).not.toBeNull();
-    expect(validateUsername('a'.repeat(21))).not.toBeNull();
-    expect(validateUsername('abc')).toBeNull();
-    expect(validateUsername('a'.repeat(20))).toBeNull();
-    expect(validateUsername('  Rahul_1  ')).toBeNull();
-    expect(validateUsername('ra.hul')).not.toBeNull();
-    expect(validateUsername('ra-hul')).not.toBeNull();
-    expect(usernameToEmail('  Rahul ')).toBe('rahul@stash.app');
-  });
-});
-
 describe('session handling', () => {
   beforeEach(() => {
     vi.resetModules();

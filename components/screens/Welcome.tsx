@@ -32,7 +32,7 @@ export function Welcome({
         <PrimaryButton onClick={onStart}>Try now</PrimaryButton>
         <SecondaryButton onClick={onDemo} className="mt-2">See how it works</SecondaryButton>
         <div className="h-2" aria-hidden="true" />
-        <GhostButton onClick={onAccount}>Sign up or log in</GhostButton>
+        <GhostButton onClick={onAccount}>Sign up or log in with Google</GhostButton>
         <GhostButton onClick={onSample}>Or explore with sample data first</GhostButton>
       </div>
     </main>
