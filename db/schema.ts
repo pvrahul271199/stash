@@ -3,6 +3,7 @@ import { useSyncExternalStore } from 'react';
 import { migrateV4ToV5, migrateCatsToOverrides, migrateTxnLinks, migrateToDerivedPeriods } from './migrate';
 import { V4_STORES } from './legacy';
 import type { DefaultCategory } from '@/lib/categories';
+import { setClosedThrough } from '@/lib/dates';
 
 export interface UserRecord {
   /** Primary key: Base64-encoded username (e.g. "cmFodWw="). */
@@ -21,6 +22,8 @@ export interface Meta {
   id: 'main';
   lastUsedLabel: string | null;
   schemaVersion: number;
+  /** Last day the user closed with "Close the day" (yyyy-mm-dd, per device). The next day starts at once; see lib/dates `todayISO`. */
+  closedThrough?: string | null;
   /** Active Base64 user ID on this device. */
   activeUserId?: string | null;
   /** Event currently being logged into. Every new spend is tagged with it until it ends. */
@@ -340,6 +343,7 @@ export async function openUserDB(uid: string): Promise<StashDB> {
       const db = new StashDB(dbNameFor(uid));
       await db.open();
       active = { db, uid };
+      setClosedThrough((await db.meta.get('main').catch(() => undefined))?.closedThrough);
       old?.db.close();
       notify();
       return db;
@@ -352,6 +356,7 @@ export async function openUserDB(uid: string): Promise<StashDB> {
 export function getDB(): StashDB {
   if (!active) {
     active = { db: new StashDB(dbNameFor(GUEST_UID)), uid: GUEST_UID };
+    void active.db.meta.get('main').then((m) => setClosedThrough(m?.closedThrough)).catch(() => {});
   }
   return active.db;
 }

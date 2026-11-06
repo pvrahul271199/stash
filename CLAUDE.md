@@ -31,14 +31,14 @@ Keep these three up to date when behaviour changes. `FINDINGS.md` has a status c
 ```bash
 npm run dev        # next dev --webpack -H 0.0.0.0  (http://localhost:3000)
 npm run lint       # tsc --noEmit  (there is no ESLint)
-npm test           # vitest run   (171 tests, fake-indexeddb)
+npm test           # vitest run   (187 tests, fake-indexeddb)
 npm run build      # next build --webpack && node scripts/build-sw.mjs  → out/
 npm start          # node scripts/serve-out.mjs → http://127.0.0.1:3100
 npm run test:e2e   # Playwright; needs `npm run build` first, mobile 390x844 + desktop
 npm run icons      # regenerate PWA icons
 ```
 
-State (2026-11-06): `tsc` clean, 171/171 unit tests pass, `npm run build` passes. e2e specs are stale (they walk an older multi-step onboarding) and were not run.
+State (2026-11-06): `tsc` clean, 187/187 unit tests pass, `npm run build` passes. e2e specs are stale (they walk an older multi-step onboarding) and were not run.
 
 ## Layout
 
@@ -69,7 +69,7 @@ stash-mobile/        Expo app (separate package.json)
 - **Plans are versioned by `effectiveFrom`**: `planInEffect` = latest plan that started on or before the month's last day. `updateActivePlan` edits in place within the month the plan started, else adds a version from today, so past months keep their amounts.
 - **Sign-up never copies guest data by itself.** `signUp` / a new Google account only set `AuthState.isNew`; the shell then calls `describeGuestData()` and, if the phone has something, asks "Move them into your account?" (`claimGuestData` only on *Move them*; *Start fresh* leaves the guest DB untouched). Login never claims.
 - **Sample mode** ("explore with sample data") runs in its own throwaway Dexie DB `stash-sample` (`lib/sampleMode.ts`): two months of dummy spends are really in a DB, anything logged there is discarded (the sandbox is rebuilt on every visit/reload and dropped on exit), and `fillSample` refuses to run on any other DB. Never write sample data into a guest or account DB.
-- **"Close the day"** (`previewCloseDay`; read-only recap, nothing is closed). There is no catch-up / "rough total" screen: days nobody logged count as nothing spent, so the allowance just rises. Month-summary-seen and leftover-moved live in `meta` (per device).
+- **"Close the day"** is a real, per-device action (`closeToday` in `db/queries.ts`): it stores `meta.closedThrough = <today by the clock>` and `todayISO()` (no-arg) then returns the *next* day while the clock is still on the closed one, so the app moves on at once instead of at midnight. The day on screen can always be closed (even one the clock hasn't reached, so a user can close several in a row); `clockISO()` is the real date. It is a single screen (`CloseDay`, includes the recap and the week); there is no separate "Day closed" screen. Nothing month-shaped is stored and it is not synced. `previewCloseDay` stays the read-only recap. There is no catch-up / "rough total" screen: days nobody logged count as nothing spent, so the allowance just rises. Month-summary-seen and leftover-moved live in `meta` (per device).
 - **There are no `cycles` or `dayRows` tables** (Dexie v11 dropped them; the upgrade `migrateToDerivedPeriods` first carried the first cycle's start into the first plan's `effectiveFrom`). Transactions have no `cycleId`; a month is found by `txnDate`. On the server the `cycles` table and `transactions.cycle_id` are dropped (run the last block of `supabase/schema.sql` after deploying). Never reintroduce stored month state.
 - **`fromSavings`** entries never touch pool/allowance; they only add to `fromSavingsTotal`.
 - **`adjustsPool`** (entry flag): for past-day spends of this month, whether it rebalanced the remaining pool (false = record-only).

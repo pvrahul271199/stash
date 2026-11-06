@@ -33,9 +33,44 @@ export function toISO(date: Date): string {
   return `${y}-${m}-${d}`;
 }
 
-/** Today's local date as ISO. */
-export function todayISO(now: Date = new Date()): string {
+/**
+ * "Close the day" is a real action: the last day the user closed on this device. While the clock is still on that
+ * day, the app already treats the next one as today, so closing at 9:45 pm moves on immediately instead of at
+ * midnight. Per device; set from `meta.closedThrough` when a database opens (db/schema.ts) and by `closeToday`.
+ */
+let closedThrough: string | null = null;
+const dayListeners = new Set<() => void>();
+
+export function setClosedThrough(iso: string | null | undefined): void {
+  const next = iso ?? null;
+  if (next === closedThrough) return;
+  closedThrough = next;
+  dayListeners.forEach((l) => l());
+}
+export function getClosedThrough(): string | null {
+  return closedThrough;
+}
+/** Re-run when the effective day changes without the clock moving (a day was closed). */
+export function subscribeDay(l: () => void): () => void {
+  dayListeners.add(l);
+  return () => dayListeners.delete(l);
+}
+
+/** The calendar date on the clock, ignoring any closed day. */
+export function clockISO(now: Date = new Date()): string {
   return toISO(now);
+}
+
+/** True while a day has been closed early and the clock has not reached the next one yet. */
+export function isAheadOfClock(): boolean {
+  return todayISO() !== clockISO();
+}
+
+/** Today's local date as ISO. With no argument, a closed day is skipped (see `closedThrough`). An explicit `now` is taken literally. */
+export function todayISO(now?: Date): string {
+  if (now) return toISO(now);
+  const clock = toISO(new Date());
+  return closedThrough && clock <= closedThrough ? addDays(closedThrough, 1) : clock;
 }
 
 export function addDays(iso: string, n: number): string {

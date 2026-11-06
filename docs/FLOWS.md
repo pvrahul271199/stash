@@ -77,18 +77,22 @@ Triggered from `UserTab`/`PlanScreen` → `onSwitchUser`:
 `TodayTab` list or History → `EditSpendSheet` → `updateEntry(id, patch)` / `removeEntry(id)`; pool/day rows adjusted per ARCHITECTURE §4; `removeEntry` also `deleteRemoteEntry`. `CloseDay` has its own ✕ remove button. ⚠ F-09, F-10, F-11.
 
 > **2026-11-06 (E-4):** sections 7, 8, 9 and 18 below describe the old stored-cycle flows. Now: 7 = "Close the day"
-> (`previewCloseDay`, a read-only recap; nothing is closed and the day ends at midnight). Today's strip shows the whole
+> (`closeToday`: one screen, really closes the day, per device, see section 7). Today's strip shows the whole
 > calendar month; tapping a day before tracking began and logging there moves the tracking start back to it. 8 = removed (no catch-up screen; unlogged days count as nothing spent). 9 = no "Start next month": a new month begins on the salary day by itself; `MonthEnd` is a dismissible summary
 > of last month in the first 3 days (`meta.monthSummarySeen`). 18 = removed (a restart can no longer happen).
 > Onboarding asks for the day the **month starts on** (default 1) instead of "days until next salary".
 
 ## 7. Close the day
 
-1. Today → "Close the day" → `CloseDay` review list (can remove or "Paid cash or forgot something?" → log).
-2. Confirm → `setSheet('dayClosed')` (blocks MonthEnd), `closeCurrentDay(cycleId)`: `closeDay(cycle, spentToday(entries))`, write `DayRow`, set `currentDay+1`, `pool−=spent`.
-3. `DayClosed` shows the message ("spent X less → every day ahead gets Y more", etc.) → `view='today'` for the next day.
-4. If that was the last day → `isCycleOver` → `MonthEnd` after dismissing.
-⚠ F-13 (no calendar guard).
+One screen, one tap.
+1. Today → "Close the day" → `CloseDay`: spent vs today's amount, tomorrow's amount and why (`closeDay(cycle, spent)`, pure), the week (today shown closed, tomorrow as today), the entries (remove, or "Paid cash or forgot something?" → log, returns here). The last day of a month shows "A new one starts tomorrow" instead of tomorrow's amount.
+2. "Close the day" → `closeToday()` (`db/queries.ts`) closes the day `todayISO()` says is on screen: writes `meta.closedThrough`, calls `setClosedThrough` (`lib/dates.ts`), shows the toast "Day closed" and returns to Today. There is no separate "Day closed" screen any more.
+3. From then `todayISO()` (no argument) returns the next day while the clock is still on the closed one, so `useToday` (subscribed via `subscribeDay`) re-renders everything on the next day immediately; `meta.closedThrough` is reloaded when a DB opens. No restriction: the user can log that next day and close it too.
+4. Not synced, nothing month-shaped stored. Closing the last day of a month starts the next month at once (`MonthEnd` summary as usual).
+
+## 7b. Home from the logo
+
+Tapping the logo on Today sets `forceWelcome` (AppShell) and shows `Welcome`. Guest: the usual page (Try now resumes the data on the device, See how it works, Google sign-in, sample). Signed in (`signedIn` prop): only "Back to dashboard" and "See how it works".
 
 ## 8. Calendar catch-up (missed days)
 

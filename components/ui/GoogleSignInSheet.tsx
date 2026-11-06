@@ -97,17 +97,21 @@ export function GoogleSignInSheet({
 
         <ul className="mt-4 divide-y divide-line rounded-[16px] border border-line">
           {[
-            ['Your name', 'to greet you'],
-            ['Your email', 'so your account is yours'],
+            ['Your name', 'So we can say hello properly'],
+            ['Your email', 'So you can always get back to your data'],
           ].map(([a, b]) => (
-            <li key={a} className="flex items-center gap-3 px-4 py-3">
-              <Check />
-              <span className="text-[15px] font-medium text-ink">{a}</span>
-              <span className="text-[13px] text-faint">{b}</span>
+            <li key={a} className="flex items-start gap-3 px-4 py-3">
+              <span className="mt-0.5">
+                <Check />
+              </span>
+              <span>
+                <span className="block text-[15px] font-medium text-ink">{a}</span>
+                <span className="block text-[13px] text-soft">{b}</span>
+              </span>
             </li>
           ))}
         </ul>
-        <p className="mt-2 text-center text-[12px] text-faint">Nothing else from your Google account is read.</p>
+        <p className="mt-2 text-center text-[12px] text-faint">That&apos;s all we ask Google for.</p>
 
         {unavailable ? (
           <p role="status" className="mt-4 rounded-[14px] bg-tint px-4 py-3 text-[13px] leading-snug text-soft">
