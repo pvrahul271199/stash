@@ -22,7 +22,7 @@ Keep these three up to date when behaviour changes. `FINDINGS.md` has a status c
 - Next.js App Router, **static export** (`output: 'export'`, `trailingSlash: true`), React 19, strict TypeScript. Single page (`app/page.tsx` → `components/AppShell.tsx`); there is no server code and no API routes.
 - Tailwind with custom tokens (`tailwind.config.ts`, `theme/tokens.ts`), fonts via `next/font/google`.
 - **Dexie / IndexedDB** is the source of truth on device. Zustand holds *UI-only* state (`store/*`, plus the currency store in `lib/currency.ts`).
-- **Supabase Auth** (`@supabase/supabase-js`, auth only; username → `<username>@stash.app` email + password, no password reset) plus PostgREST over raw `fetch` with the user's access token for data. RLS is per `auth.uid()`, **and the client enforces ownership too**: every pull filters `user_id=eq.<uid>` and `applyRemote` drops rows owned by anyone else (F-38). Never remove either. Guests (`stash-default`) never sync.
+- **Supabase Auth** (`@supabase/supabase-js`, auth only; **Google sign-in only**: the username + password flow and `AuthScreen` were removed) plus PostgREST over raw `fetch` with the user's access token for data. RLS is per `auth.uid()`, **and the client enforces ownership too**: every pull filters `user_id=eq.<uid>` and `applyRemote` drops rows owned by anyone else (F-38). Never remove either. Guests (`stash-default`) never sync.
 - PWA: `app/manifest.ts`, `public/sw.js` + `scripts/build-sw.mjs` (precache + content-hash version).
 - `stash-mobile/`: separate Expo / React Native app with its own copy of the logic and an AsyncStorage JSON blob. Not synced with the web app.
 

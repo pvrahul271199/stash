@@ -7,7 +7,6 @@ import { GhostButton, PrimaryButton } from './ui/Button';
 import { TabBar, type Tab } from './ui/TabBar';
 import { Welcome } from './screens/Welcome';
 import { Demo } from './screens/Demo';
-import { AuthScreen } from './screens/AuthScreen';
 import { GoogleSignInSheet } from './ui/GoogleSignInSheet';
 import { Onboarding } from './screens/Onboarding';
 import { PlanSummary } from './screens/PlanSummary';
@@ -33,7 +32,7 @@ import {
 import { isPlanValid, type PlanInput } from '@/lib/budget';
 import { daysBetween, todayISO } from '@/lib/dates';
 import { periodFor } from '@/lib/period';
-import { requestSync, syncNow } from '@/lib/sync';
+import { SyncError, requestSync, syncNow } from '@/lib/sync';
 import { clearNewAccount, getAuth, initAuth, logOut, useAuth } from '@/lib/auth';
 import { claimGuestData, describeGuestData, type GuestData } from '@/db/claim';
 import { discardSampleAfterSignIn, enterSampleMode, exitSampleMode, isSampleFilling, resumeSampleMode, useSampleMode } from '@/lib/sampleMode';
@@ -41,21 +40,35 @@ import { useUI } from '@/store/ui';
 import { useToast } from '@/store/toast';
 import { useBusy, withLoading } from '@/store/busy';
 
-/**
- * Wait for the first pull, but never block the UI for long (offline / slow network).
- * Resolves true only when the sync really finished; false on error or timeout (the sync keeps running).
- */
-function restoreFromCloud(): Promise<boolean> {
-  return Promise.race([
-    syncNow().then(
-      () => true,
-      () => false,
-    ),
-    new Promise<boolean>((r) => setTimeout(() => r(false), 8000)),
-  ]);
+type Restore = { ok: true } | { ok: false; reason: string };
+
+/** A plain-words reason for a failed first sync, so the screen can say what actually went wrong. */
+function describeRestoreError(e: unknown): string {
+  if (e instanceof SyncError) {
+    if (e.kind === 'offline') return 'You look offline.';
+    if (e.kind === 'auth') return `Your sign-in needs a refresh (${e.message}). Log out and sign in again.`;
+    return `The server said: ${e.message}`;
+  }
+  return e instanceof Error ? e.message : 'Something unexpected went wrong.';
 }
 
-type Flow = 'welcome' | 'auth' | 'onboarding' | 'summary' | 'changePlan' | 'changeSummary';
+/**
+ * The first sync after signing in on a device with nothing yet. Waits up to 15 s (a cold-started Supabase project can take
+ * most of that to answer the first request) but never blocks the UI beyond it. On a timeout the sync keeps running, and
+ * `onLate` is called if it finishes fine afterwards, so a slow success is not left looking like a failure.
+ */
+async function restoreFromCloud(onLate: () => void): Promise<Restore> {
+  const sync: Promise<Restore> = syncNow().then(
+    () => ({ ok: true }),
+    (e) => ({ ok: false, reason: describeRestoreError(e) }),
+  );
+  const slow = new Promise<Restore>((r) => setTimeout(() => r({ ok: false, reason: 'The cloud is slow to answer right now.' }), 15000));
+  const first = await Promise.race([sync, slow]);
+  if (!first.ok && first.reason.startsWith('The cloud is slow')) void sync.then((r) => r.ok && onLate());
+  return first;
+}
+
+type Flow = 'welcome' | 'onboarding' | 'summary' | 'changePlan' | 'changeSummary';
 
 export function AppShell() {
   const snap = useSnapshot();
@@ -76,13 +89,9 @@ export function AppShell() {
   const [startDate, setStartDate] = useState(() => todayISO());
   const [askLogout, setAskLogout] = useState(false);
   const [farewell, setFarewell] = useState(false); // thank-you page after "Delete my account"
-  const [authMode, setAuthMode] = useState<'signup' | 'login'>('login');
-  // The one way in is the "Sign in with Google" sheet; the older username form (AuthScreen) is only a small link inside it.
+  // The one way in (sign up and log in alike) is the Google sheet.
   const [signInSheet, setSignInSheet] = useState(false);
-  const openSignIn = (m: 'signup' | 'login') => {
-    setAuthMode(m);
-    setSignInSheet(true);
-  };
+  const openSignIn = () => setSignInSheet(true);
   const [consented, setConsented] = useState(() => hasSyncConsent());
 
   // Guests may open the sign-in screen soon: fetch Google's script in idle time so its button appears instantly.
@@ -100,12 +109,15 @@ export function AppShell() {
   // Signed-in user whose cloud data could not be checked. While set (and no cycle is on the device) we must not
   // offer onboarding: a new plan made now would become a second cycle next to the one still in the cloud.
   const [restoreFailedFor, setRestoreFailedFor] = useState<string | null>(null);
+  const [restoreReason, setRestoreReason] = useState<string | null>(null);
   const restoreFor = useCallback(async (uid: string) => {
     setRestoring(true);
-    const ok = await restoreFromCloud();
-    setRestoreFailedFor(ok ? null : uid);
+    setRestoreReason(null);
+    const r = await restoreFromCloud(() => setRestoreFailedFor((cur) => (cur === uid ? null : cur)));
+    setRestoreFailedFor(r.ok ? null : uid);
+    setRestoreReason(r.ok ? null : r.reason);
     setRestoring(false);
-    return ok;
+    return r.ok;
   }, []);
 
   // Returning user on a fresh device/reload with nothing local yet: pull before deciding what to show.
@@ -182,13 +194,13 @@ export function AppShell() {
     });
   }
 
-  /** After any successful sign-in or sign-up (Google sheet, or the username form). */
-  async function handleAuthDone(mode: 'signup' | 'login', username: string) {
+  /** After a successful Google sign-in (new account or returning). */
+  async function handleAuthDone() {
     setForceWelcome(false);
-    const who = getAuth().displayName || username; // always greet by display name, never by email
+    const who = getAuth().displayName; // always greet by display name, never by email
     const a = getAuth();
     if (a.isNew && a.uid) {
-      // a brand-new account (email or Google): never copy this phone's guest data silently, ask first
+      // a brand-new Google account: never copy this phone's guest data silently, ask first
       const found = await describeGuestData().catch(() => null);
       if (found) setMoveOffer({ ...found, uid: a.uid });
       clearNewAccount();
@@ -197,17 +209,12 @@ export function AppShell() {
       toast(`Account created. Welcome, ${who}!`);
       return;
     }
-    if (mode === 'login') {
-      const uid = getAuth().uid ?? null;
-      restoredFor.current = uid; // this handler owns the restore
-      setFlow('welcome');
-      setTab('today');
-      if (uid) await restoreFor(uid);
-      toast(who ? `Welcome back, ${who}!` : 'Welcome back!');
-      return;
-    }
+    const uid = getAuth().uid ?? null;
+    restoredFor.current = uid; // this handler owns the restore
     setFlow('welcome');
-    toast(`Account created. Welcome, ${who}!`);
+    setTab('today');
+    if (uid) await restoreFor(uid);
+    toast(who ? `Welcome back, ${who}!` : 'Welcome back!');
   }
 
   let body: React.ReactNode = null;
@@ -217,14 +224,6 @@ export function AppShell() {
     body = <ThankYou onDone={() => setFarewell(false)} />;
   } else if (restoring) {
     body = <LoadingScreen />;
-  } else if (flow === 'auth') {
-    body = (
-      <AuthScreen
-        initialMode={authMode}
-        onBack={() => setFlow('welcome')}
-        onDone={handleAuthDone}
-      />
-    );
   } else if (flow === 'changePlan') {
     body = (
       <Onboarding
@@ -275,7 +274,7 @@ export function AppShell() {
         <>
           <div className="flex min-h-0 flex-1 flex-col">
             {tab === 'today' && <TodayTab cycle={snap.cycle} plan={snap.plan} onCreateAccount={() => {
-                openSignIn('signup');
+                openSignIn();
               }} />}
             {tab === 'history' && <HistoryTab activeCycle={snap.cycle} plan={snap.plan} />}
             {tab === 'insights' && <InsightsTab cycle={snap.cycle} plan={snap.plan} />}
@@ -298,10 +297,10 @@ export function AppShell() {
                 onSwitchUser={() => setAskLogout(true)}
                 onLeaveSample={leaveSample}
                 onLogIn={() => {
-                  openSignIn('login');
+                  openSignIn();
                 }}
                 onCreateAccount={() => {
-                  openSignIn('signup');
+                  openSignIn();
                 }}
                 onDeleted={() => {
                     setDraft(null);
@@ -330,7 +329,7 @@ export function AppShell() {
                 if (auth.status === 'signedIn') {
                   setAskLogout(true);
                 } else {
-                  openSignIn('login');
+                  openSignIn();
                 }
               }}
               onChangePlan={() => {
@@ -364,9 +363,14 @@ export function AppShell() {
         <main className="flex h-full flex-col justify-center bg-bg px-6" aria-label="Could not load your data">
           <h1 className="font-display text-[24px] font-semibold tracking-tight text-ink">We couldn’t reach your saved data</h1>
           <p className="mt-2 text-[15px] leading-relaxed text-soft">
-            Your plan and spends are safe in the cloud. Check your connection and try again, so we don’t start a
-            second month next to the one you already have.
+            If you already have a plan in your account, it is safe in the cloud. Try again, so we don’t start a second
+            month next to it.
           </p>
+          {restoreReason && (
+            <p className="mt-3 rounded-key bg-tint px-3 py-2 text-[13px] leading-snug text-soft" role="status">
+              {restoreReason}
+            </p>
+          )}
           <PrimaryButton className="mt-8" onClick={() => auth.uid && void restoreFor(auth.uid)}>
             Try again
           </PrimaryButton>
@@ -396,7 +400,7 @@ export function AppShell() {
             else setFlow('onboarding');
           }}
           onAccount={() => {
-            openSignIn('login');
+            openSignIn();
           }}
           onSample={handleSample}
           onDemo={() => setShowDemo(true)}
@@ -454,11 +458,7 @@ export function AppShell() {
           onClose={() => setSignInSheet(false)}
           onSignedIn={() => {
             setSignInSheet(false);
-            void handleAuthDone('login', '');
-          }}
-          onUseUsername={() => {
-            setSignInSheet(false);
-            setFlow('auth');
+            void handleAuthDone();
           }}
         />
       )}
