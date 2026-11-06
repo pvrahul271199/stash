@@ -29,8 +29,8 @@ export function Welcome({
         </p>
       </div>
       <div className="flex flex-col gap-1">
-        <SecondaryButton onClick={onDemo}>See how it works</SecondaryButton>
-        <PrimaryButton onClick={onStart} className="mt-2">Try now</PrimaryButton>
+        <PrimaryButton onClick={onStart}>Try now</PrimaryButton>
+        <SecondaryButton onClick={onDemo} className="mt-2">See how it works</SecondaryButton>
         <div className="h-2" aria-hidden="true" />
         <GhostButton onClick={onAccount}>Sign up or log in</GhostButton>
         <GhostButton onClick={onSample}>Or explore with sample data first</GhostButton>

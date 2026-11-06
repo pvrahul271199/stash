@@ -8,6 +8,7 @@ import { TabBar, type Tab } from './ui/TabBar';
 import { Welcome } from './screens/Welcome';
 import { Demo } from './screens/Demo';
 import { AuthScreen } from './screens/AuthScreen';
+import { GoogleSignInSheet } from './ui/GoogleSignInSheet';
 import { Onboarding } from './screens/Onboarding';
 import { PlanSummary } from './screens/PlanSummary';
 import { TodayTab } from './screens/TodayTab';
@@ -76,6 +77,12 @@ export function AppShell() {
   const [askLogout, setAskLogout] = useState(false);
   const [farewell, setFarewell] = useState(false); // thank-you page after "Delete my account"
   const [authMode, setAuthMode] = useState<'signup' | 'login'>('login');
+  // The one way in is the "Sign in with Google" sheet; the older username form (AuthScreen) is only a small link inside it.
+  const [signInSheet, setSignInSheet] = useState(false);
+  const openSignIn = (m: 'signup' | 'login') => {
+    setAuthMode(m);
+    setSignInSheet(true);
+  };
   const [consented, setConsented] = useState(() => hasSyncConsent());
 
   // Guests may open the sign-in screen soon: fetch Google's script in idle time so its button appears instantly.
@@ -175,6 +182,34 @@ export function AppShell() {
     });
   }
 
+  /** After any successful sign-in or sign-up (Google sheet, or the username form). */
+  async function handleAuthDone(mode: 'signup' | 'login', username: string) {
+    setForceWelcome(false);
+    const who = getAuth().displayName || username; // always greet by display name, never by email
+    const a = getAuth();
+    if (a.isNew && a.uid) {
+      // a brand-new account (email or Google): never copy this phone's guest data silently, ask first
+      const found = await describeGuestData().catch(() => null);
+      if (found) setMoveOffer({ ...found, uid: a.uid });
+      clearNewAccount();
+      setFlow('welcome');
+      setTab('today');
+      toast(`Account created. Welcome, ${who}!`);
+      return;
+    }
+    if (mode === 'login') {
+      const uid = getAuth().uid ?? null;
+      restoredFor.current = uid; // this handler owns the restore
+      setFlow('welcome');
+      setTab('today');
+      if (uid) await restoreFor(uid);
+      toast(who ? `Welcome back, ${who}!` : 'Welcome back!');
+      return;
+    }
+    setFlow('welcome');
+    toast(`Account created. Welcome, ${who}!`);
+  }
+
   let body: React.ReactNode = null;
   if (!ready || !snap) {
     body = <LoadingScreen />;
@@ -187,32 +222,7 @@ export function AppShell() {
       <AuthScreen
         initialMode={authMode}
         onBack={() => setFlow('welcome')}
-        onDone={async (mode, username) => {
-          setForceWelcome(false);
-          const who = getAuth().displayName || username; // always greet by display name, never by email
-          const a = getAuth();
-          if (a.isNew && a.uid) {
-            // a brand-new account (email or Google): never copy this phone's guest data silently, ask first
-            const found = await describeGuestData().catch(() => null);
-            if (found) setMoveOffer({ ...found, uid: a.uid });
-            clearNewAccount();
-            setFlow('welcome');
-            setTab('today');
-            toast(`Account created. Welcome, ${who}!`);
-            return;
-          }
-          if (mode === 'login') {
-            const uid = getAuth().uid ?? null;
-            restoredFor.current = uid; // this handler owns the restore
-            setFlow('welcome');
-            setTab('today');
-            if (uid) await restoreFor(uid);
-            toast(who ? `Welcome back, ${who}!` : 'Welcome back!');
-            return;
-          }
-          setFlow('welcome');
-          toast(`Account created. Welcome, ${who}!`);
-        }}
+        onDone={handleAuthDone}
       />
     );
   } else if (flow === 'changePlan') {
@@ -265,8 +275,7 @@ export function AppShell() {
         <>
           <div className="flex min-h-0 flex-1 flex-col">
             {tab === 'today' && <TodayTab cycle={snap.cycle} plan={snap.plan} onCreateAccount={() => {
-                setAuthMode('signup');
-                setFlow('auth');
+                openSignIn('signup');
               }} />}
             {tab === 'history' && <HistoryTab activeCycle={snap.cycle} plan={snap.plan} />}
             {tab === 'insights' && <InsightsTab cycle={snap.cycle} plan={snap.plan} />}
@@ -289,12 +298,10 @@ export function AppShell() {
                 onSwitchUser={() => setAskLogout(true)}
                 onLeaveSample={leaveSample}
                 onLogIn={() => {
-                  setAuthMode('login');
-                  setFlow('auth');
+                  openSignIn('login');
                 }}
                 onCreateAccount={() => {
-                  setAuthMode('signup');
-                  setFlow('auth');
+                  openSignIn('signup');
                 }}
                 onDeleted={() => {
                     setDraft(null);
@@ -323,8 +330,7 @@ export function AppShell() {
                 if (auth.status === 'signedIn') {
                   setAskLogout(true);
                 } else {
-                  setAuthMode('login');
-                  setFlow('auth');
+                  openSignIn('login');
                 }
               }}
               onChangePlan={() => {
@@ -390,8 +396,7 @@ export function AppShell() {
             else setFlow('onboarding');
           }}
           onAccount={() => {
-            setAuthMode('login');
-            setFlow('auth');
+            openSignIn('login');
           }}
           onSample={handleSample}
           onDemo={() => setShowDemo(true)}
@@ -444,6 +449,19 @@ export function AppShell() {
         />
       )}
       {showDemo && <Demo onClose={() => setShowDemo(false)} />}
+      {signInSheet && (
+        <GoogleSignInSheet
+          onClose={() => setSignInSheet(false)}
+          onSignedIn={() => {
+            setSignInSheet(false);
+            void handleAuthDone('login', '');
+          }}
+          onUseUsername={() => {
+            setSignInSheet(false);
+            setFlow('auth');
+          }}
+        />
+      )}
       {moveOffer && (
         <BottomPrompt
           title={
