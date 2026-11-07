@@ -30,6 +30,8 @@ export interface Meta {
   activeEvent?: string | null;
   /** Last payment mode used, so the next spend defaults to it. */
   lastPayment?: string | null;
+  /** Types the user pinned as quick chips on the log screen, as `Category::Type` keys (per device). */
+  quickTypes?: string[];
   /** Result of the v4 -> v5 data migration (old vs derived pool, counts). */
   migrationReport?: unknown;
   /** Legacy dirty cutoff (client ms). Only used for rows written before `localRev` existed. */

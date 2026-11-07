@@ -3,7 +3,7 @@ import { BackIcon, IconButton, PrimaryButton } from '../ui/Button';
 import { HugeNumber } from '../ui/HugeNumber';
 import { inr } from '@/lib/format';
 import { moneyToLiveOn, type PlanInput } from '@/lib/budget';
-import { addDays, daysBetween, formatWithWeekday, todayISO } from '@/lib/dates';
+import { daysBetween, formatWithWeekday, todayISO } from '@/lib/dates';
 import { clampStartDay, periodFor, type DerivedCycle } from '@/lib/period';
 import { colors } from '@/theme/tokens';
 
@@ -41,7 +41,6 @@ export function PlanSummary({
   const daysRemaining = Math.max(1, daysBetween(from, period.end) + 1);
   const dailyAmount = Math.max(0, Math.round(remainingPool / daysRemaining));
   const startIdx = Math.min(period.totalDays - 1, Math.max(0, daysBetween(period.start, from)));
-  const nextMonth = formatWithWeekday(addDays(period.end, 1));
 
   // Where the income goes, as shares of one bar.
   const income = Math.max(plan.income, 1);
@@ -74,15 +73,12 @@ export function PlanSummary({
           <HugeNumber value={isEditing ? remainingPool : live} size={64} className="mt-1" />
         </div>
         <div
-          className="stash-rise mt-3 inline-flex items-center gap-2 rounded-full border border-line bg-white/85 py-1.5 pl-2.5 pr-3.5 shadow-sm backdrop-blur"
+          className="stash-rise mt-3 inline-flex items-center gap-2.5 rounded-full border border-line bg-white/85 py-1.5 pl-3 pr-4 shadow-sm backdrop-blur"
           style={rise(2)}
         >
-          <span className="relative flex h-2.5 w-2.5" aria-hidden="true">
-            <span className="stash-ripple absolute inset-0 rounded-full bg-good/50" />
-            <span className="relative h-2.5 w-2.5 rounded-full bg-good" />
-          </span>
-          <span className="num text-[18px] font-semibold text-ink">{inr(dailyAmount)}</span>
-          <span className="text-[14px] text-soft">a day</span>
+          <span className="h-1.5 w-1.5 rounded-full bg-good" aria-hidden="true" />
+          <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-soft">Daily</span>
+          <span className="num text-[20px] font-semibold text-ink">{inr(dailyAmount)}</span>
         </div>
         <p className="stash-rise mt-3 text-body text-soft" style={rise(3)}>
           That is what you can spend each day for the next{' '}
@@ -104,18 +100,22 @@ export function PlanSummary({
               {daysRemaining} of {period.totalDays} days
             </p>
           </div>
-          <ul className="mt-3 flex h-8 items-end gap-[2px]" aria-hidden="true">
+          <ul className="mt-4 grid grid-cols-[repeat(15,minmax(0,1fr))] gap-x-1 gap-y-2" aria-hidden="true">
             {Array.from({ length: period.totalDays }, (_, i) => {
-              const tracked = i >= startIdx;
+              const gone = i < startIdx;
+              const first = i === startIdx;
               return (
-                <li
-                  key={i}
-                  className={`stash-grow h-full min-w-0 flex-1 rounded-full ${tracked ? 'bg-ink' : 'bg-line/70'}`}
-                  style={{
-                    animationDelay: `${420 + i * 16}ms`,
-                    ...(i === startIdx ? { boxShadow: `0 0 0 2px #fff, 0 0 0 3.5px ${colors.good}` } : null),
-                  }}
-                />
+                <li key={i} className="flex justify-center">
+                  <span
+                    className="stash-grow block aspect-square w-full max-w-[16px] rounded-full"
+                    style={{
+                      animationDelay: `${420 + i * 16}ms`,
+                      background: gone ? colors.line : first ? colors.good : colors.ink,
+                      opacity: gone ? 0.8 : 1,
+                      boxShadow: first ? `0 0 0 3px ${colors.goodBg}` : undefined,
+                    }}
+                  />
+                </li>
               );
             })}
           </ul>
@@ -129,12 +129,6 @@ export function PlanSummary({
               <span className="text-faint">Last day</span>
             </span>
           </div>
-          <p className="mt-3 flex items-center gap-2 border-t border-line pt-3 text-[13px] text-soft">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0 text-good">
-              <path d="M21 12a9 9 0 1 1-3-6.7M21 4v5h-5" />
-            </svg>
-            A fresh month, with a fresh amount, starts {nextMonth}.
-          </p>
         </section>
 
         {/* where the money goes */}

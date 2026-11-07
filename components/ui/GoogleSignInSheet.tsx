@@ -75,13 +75,13 @@ export function GoogleSignInSheet({
   }, []);
 
   return (
-    <div className="absolute inset-0 z-[55] flex items-end bg-ink/40" role="presentation" onClick={onClose}>
+    <div className="absolute inset-0 z-[55] flex items-end bg-white" role="presentation" onClick={onClose}>
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="gs-title"
         onClick={(e) => e.stopPropagation()}
-        className="max-h-[94%] w-full overflow-y-auto rounded-t-[28px] bg-white px-6 pt-3"
+        className="max-h-[94%] w-full overflow-y-auto rounded-t-[28px] border-t border-line bg-white px-6 pt-3 shadow-[0_-8px_30px_rgba(30,27,75,0.06)]"
         style={{ paddingBottom: 'calc(var(--safe-bottom) + 20px)' }}
       >
         <div className="mx-auto mb-4 h-1 w-9 rounded-full bg-line" aria-hidden="true" />

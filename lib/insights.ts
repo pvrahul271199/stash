@@ -341,7 +341,7 @@ export function fromSavingsTotal(entries: InsightEntry[], focus: string | null):
   return entries.filter((e) => e.fromSavings && (!focus || e.category === focus)).reduce((s, e) => s + e.amount, 0);
 }
 
-export function biggestSpends(entries: InsightEntry[], focus: string | null, n = 5): InsightEntry[] {
+export function biggestSpends<T extends InsightEntry>(entries: T[], focus: string | null, n = 5): T[] {
   return entries
     .filter((e) => !e.isEstimate && (!focus || e.category === focus))
     .sort((a, b) => b.amount - a.amount)

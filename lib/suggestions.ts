@@ -43,3 +43,53 @@ export function resolveLabel(
   const sub = cat.subcategories.find((s) => s.toLowerCase() === (m.subcategory ?? '').toLowerCase());
   return { category: cat.name, subcategory: sub ?? null };
 }
+
+export interface QuickChip {
+  label: string;
+  category: string;
+  subcategory: string;
+  pinned: boolean;
+}
+
+export const MAX_QUICK_CHIPS = 6;
+
+/**
+ * Log-screen chips drawn from the types the user keeps in Categories (never a fixed list).
+ * Pinned types come first, then the most used ones, then the time-of-day suggestions that exist
+ * as types for this user. Types that were removed from Categories are skipped.
+ */
+export function quickChips(
+  cats: Pick<Category, 'name' | 'subcategories'>[],
+  pinnedKeys: string[],
+  used: Record<string, { name: string; count: number }[]>,
+  hour: number,
+  max = MAX_QUICK_CHIPS,
+): QuickChip[] {
+  const out: QuickChip[] = [];
+  const seen = new Set<string>();
+  const add = (category: string, subcategory: string, pinned: boolean) => {
+    const cat = cats.find((c) => c.name.toLowerCase() === category.toLowerCase());
+    const sub = cat?.subcategories.find((s) => s.toLowerCase() === subcategory.toLowerCase());
+    if (!cat || !sub) return;
+    const k = `${cat.name}::${sub}`.toLowerCase();
+    if (seen.has(k) || out.length >= max) return;
+    seen.add(k);
+    out.push({ label: sub, category: cat.name, subcategory: sub, pinned });
+  };
+  for (const k of pinnedKeys) {
+    const i = k.indexOf('::');
+    if (i > 0) add(k.slice(0, i), k.slice(i + 2), true);
+  }
+  const ranked = Object.entries(used).flatMap(([cat, ts]) => ts.map((t) => ({ cat, ...t })));
+  ranked.sort((a, b) => b.count - a.count);
+  for (const r of ranked) {
+    if (out.length >= Math.min(max, 5)) break;
+    add(r.cat, r.name, false);
+  }
+  for (const label of suggestionsForHour(hour)) {
+    if (out.length >= Math.min(max, 4)) break;
+    const m = LABEL_MAP[label.toLowerCase()];
+    if (m?.subcategory) add(m.category, m.subcategory, false);
+  }
+  return out;
+}

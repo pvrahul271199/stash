@@ -1,10 +1,18 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { BackIcon, IconButton } from '../ui/Button';
-import { addCategory, addSubcategory, useCategories } from '@/db/queries';
+import { addCategory, addSubcategory, adoptUsedTypes, toggleQuickType, typeKey, useCategories, useQuickTypes } from '@/db/queries';
 import { num } from '@/lib/format';
 import { useCurrency } from '@/lib/currency';
 import { MAX_NAME } from '@/lib/categories';
+
+export function PinIcon({ filled }: { filled: boolean }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill={filled ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 17v5M9 3h6l-1 6 3 3v2H7v-2l3-3z" />
+    </svg>
+  );
+}
 
 function InlineAdd({
   label,
@@ -59,6 +67,10 @@ export function CategoryPicker({
   onPick: (category: string, subcategory: string | null) => void;
 }) {
   const cats = useCategories() ?? [];
+  const pinned = useQuickTypes();
+  useEffect(() => {
+    void adoptUsedTypes();
+  }, []);
   const { currency } = useCurrency();
   const [selId, setSelId] = useState<string | null>(null);
   const sel = cats.find((c) => c.id === selId) ?? null;
@@ -119,16 +131,26 @@ export function CategoryPicker({
               >
                 Just {sel.name}
               </button>
-              {sel.subcategories.map((s) => (
-                <button
-                  key={s}
-                  onClick={() => onPick(sel.name, s)}
-                  className="flex min-h-[56px] items-center rounded-key border border-line px-4 text-left text-[15px] font-medium text-ink"
-                >
-                  {s}
-                </button>
-              ))}
+              {sel.subcategories.map((s) => {
+                const on = pinned.includes(typeKey(sel.name, s));
+                return (
+                  <div key={s} className="flex min-h-[56px] items-center rounded-key border border-line">
+                    <button onClick={() => onPick(sel.name, s)} className="min-h-[56px] min-w-0 flex-1 truncate pl-4 text-left text-[15px] font-medium text-ink">
+                      {s}
+                    </button>
+                    <button
+                      aria-label={on ? `Remove ${s} from quick chips` : `Keep ${s} as a quick chip`}
+                      aria-pressed={on}
+                      onClick={() => void toggleQuickType(sel.name, s)}
+                      className={`flex h-11 w-11 shrink-0 items-center justify-center ${on ? 'text-ink' : 'text-faint'}`}
+                    >
+                      <PinIcon filled={on} />
+                    </button>
+                  </div>
+                );
+              })}
             </div>
+            <p className="mt-2 text-[12px] text-faint">Tap the pin to keep a type as a quick chip on the log screen.</p>
             <InlineAdd
               label={`Add a type to ${sel.name}`}
               placeholder="e.g. Snacks"

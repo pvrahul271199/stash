@@ -5,7 +5,8 @@ import { CategoryList, Donut } from '../charts/Donut';
 import { TimeOfDayChart, WeekdayChart } from '../charts/WeekdayTime';
 import { Note } from '../ui/Chip';
 import { dayRowsOf, useAllCycles, useCategories, useCycleEntries, useEvents } from '@/db/queries';
-import type { Plan } from '@/db/schema';
+import type { Entry, Plan } from '@/db/schema';
+import { EditSpendSheet } from './EditSpendSheet';
 import { monthLabel, type DerivedCycle } from '@/lib/period';
 import {
   MIN_CLOSED_DAYS,
@@ -113,6 +114,7 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
   const [focusType, setFocusType] = useState<string | null>(null);
   const [focusEvent, setFocusEvent] = useState<string | null>(null);
   const [mode, setMode] = useState<ChartMode>('each');
+  const [editing, setEditing] = useState<Entry | null>(null);
   const entries = useCycleEntries(cycle?.id);
   const rows = useMemo(() => (cycle ? dayRowsOf(cycle) : undefined), [cycle]);
   const cats = useCategories();
@@ -184,6 +186,9 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
       payments: paymentTotals(scopedEntries, activeFocus),
       savings: fromSavingsTotal(scopedEntries, activeFocus),
       biggest: biggestSpends(scopedEntries, activeFocus),
+      listed: scopedEntries
+        .filter((e) => !activeFocus || e.category === activeFocus)
+        .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt),
     };
   }, [cycle, entries, rows, cats, events, focus, focusType, focusEvent]);
 
@@ -218,6 +223,7 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
     savings,
     biggest,
     names,
+    listed,
   } = data;
   const focusColor = activeFocus ? colorOf[activeFocus] : colors.ink;
   const barColor = activeFocus ? focusColor : colors.ink;
@@ -533,6 +539,39 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
         )}
       </Section>
 
+      {/* 4a. Every spend behind the numbers: same for any month, tap to edit */}
+      {(activeFocus || activeEvent) && (
+        <Section
+          title={`Spends${activeFocus ? ` in ${activeFocus}` : ''}${activeType ? ` · ${activeType}` : ''}${activeEvent ? ` · ${activeEvent}` : ''}`}
+          hint="Tap a spend to see or change it."
+        >
+          {listed.length === 0 ? (
+            <p className="text-body text-soft">No spends here this month.</p>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {listed.map((e) => (
+                <li key={e.id}>
+                  <button
+                    type="button"
+                    onClick={() => setEditing(e)}
+                    className="flex w-full items-center gap-3 rounded-note border border-line bg-white p-3 text-left"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[15px] font-medium text-ink">{e.label}</p>
+                      <p className="truncate text-[12px] text-faint">
+                        {formatWithWeekday(e.date)} · {e.subcategory ?? e.category}
+                        {e.payment ? ` · ${e.payment}` : ''}
+                      </p>
+                    </div>
+                    <p className="num text-[16px] font-semibold text-ink">{inr(e.amount)}</p>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Section>
+      )}
+
       {/* 4b. By event (with sub-categories breakdown) */}
       <Section title="By event" hint="Trips, parties, anything you tagged.">
         {evList.length === 0 ? (
@@ -684,7 +723,8 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
         ) : (
           <ol className="flex flex-col gap-2.5">
             {biggest.map((e, i) => (
-              <li key={i} className="flex items-center gap-3 rounded-note border border-line bg-white p-3.5">
+              <li key={e.id ?? i}>
+              <button type="button" onClick={() => setEditing(e)} className="flex w-full items-center gap-3 rounded-note border border-line bg-white p-3.5 text-left">
                 <span
                   className={`num flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[13px] font-semibold ${
                     i === 0 ? 'bg-ink text-white' : 'bg-tint text-soft'
@@ -707,11 +747,13 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
                   {e.note && <p className="mt-0.5 truncate text-[12px] text-soft">{e.note}</p>}
                 </div>
                 <p className="num text-[18px] font-semibold text-ink">{inr(e.amount)}</p>
+              </button>
               </li>
             ))}
           </ol>
         )}
       </Section>
+      {editing && <EditSpendSheet entry={editing} onClose={() => setEditing(null)} />}
     </div>
   );
 }

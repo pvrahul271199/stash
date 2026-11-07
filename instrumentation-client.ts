@@ -9,10 +9,9 @@ const missingConfigurationVariable = !projectToken
     : undefined;
 
 if (missingConfigurationVariable) {
+  // Warn instead of throwing: a missing analytics key must never stop the app from starting.
   if (process.env.NODE_ENV !== 'production') {
-    throw new Error(
-      `${missingConfigurationVariable} variable required by PostHog is missing or un-configured, this causes events to be silently missed. This error stops appearing once ${missingConfigurationVariable} is configured`,
-    );
+    console.warn(`${missingConfigurationVariable} is not set, so PostHog analytics are off. Add it to .env.local to enable them.`);
   }
 } else if (projectToken && apiHost) {
   posthog.init(projectToken, {

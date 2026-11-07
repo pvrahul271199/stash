@@ -13,14 +13,16 @@ import {
   useActiveEvent,
   useEvents,
   useLastPayment,
-  useLastUsedLabel,
+  useCategories,
+  useQuickTypes,
+  useUsedTypes,
 } from '@/db/queries';
 import { PAYMENT_MODES, type Plan } from '@/db/schema';
 import type { DerivedCycle } from '@/lib/period';
 import { daysLeft, isBigSpend, todayAllowance } from '@/lib/budget';
 import { MAX_NAME } from '@/lib/categories';
 import { dateOfDay, daysBetween, formatShort, formatWithWeekday, todayISO } from '@/lib/dates';
-import { chipLabels } from '@/lib/suggestions';
+import { quickChips } from '@/lib/suggestions';
 import { inr, num } from '@/lib/format';
 import { useCurrency } from '@/lib/currency';
 import { useToast } from '@/store/toast';
@@ -75,7 +77,6 @@ export function LogSpend({
   const [pending, setPending] = useState<Pending | null>(null);
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
-  const lastUsed = useLastUsedLabel();
   const lastPayment = useLastPayment();
   const [paymentOverride, setPaymentOverride] = useState<string | null>(null);
   const payment = paymentOverride ?? lastPayment;
@@ -83,7 +84,10 @@ export function LogSpend({
   const events = useEvents() ?? [];
   const toast = useToast((s) => s.show);
   const { currency } = useCurrency();
-  const labels = chipLabels(new Date().getHours(), lastUsed);
+  const cats = useCategories() ?? [];
+  const pinned = useQuickTypes();
+  const used = useUsedTypes();
+  const chips = quickChips(cats, pinned, used, new Date().getHours());
   const amount = digits === '' ? 0 : Number(digits);
 
   const press = useCallback((k: string) => {
@@ -657,13 +661,14 @@ export function LogSpend({
           </div>
 
           <div className="mb-2 flex flex-wrap justify-center gap-1">
-            {labels.map((l) => (
+            {chips.map((c) => (
               <Chip
-                key={l}
-                onClick={() => commit({ label: l })}
+                key={`${c.category}::${c.subcategory}`}
+                onClick={() => commit({ label: c.subcategory, category: c.category, subcategory: c.subcategory })}
                 className="h-7 min-h-0 px-2.5 text-[11px]"
+                title={c.category}
               >
-                {l}
+                {c.label}
               </Chip>
             ))}
             <Chip

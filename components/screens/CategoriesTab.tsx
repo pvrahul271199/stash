@@ -1,19 +1,25 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import {
   addCategory,
   addSubcategory,
+  adoptUsedTypes,
   removeCategory,
   removeEvent,
   removeSubcategory,
+  toggleQuickType,
+  typeKey,
   useCategories,
   useCategoryCounts,
   useEventCounts,
   useEvents,
+  useQuickTypes,
+  useUsedTypes,
 } from '@/db/queries';
 import type { Category, StashEvent } from '@/db/schema';
 import { MAX_NAME } from '@/lib/categories';
+import { PinIcon } from './CategoryPicker';
 
 function AddInput({
   label,
@@ -63,13 +69,20 @@ function Row({
   count,
   onToggle,
   onAskRemove,
+  used,
+  pinned,
 }: {
   cat: Category;
+  used: { name: string; count: number }[];
+  pinned: string[];
   open: boolean;
   count: number;
   onToggle: () => void;
   onAskRemove: () => void;
 }) {
+  const have = new Set(cat.subcategories.map((t) => t.toLowerCase()));
+  // types that spends carry but the category list no longer has
+  const orphans = used.filter((u) => !have.has(u.name.toLowerCase()));
   return (
     <li className="border-b border-line">
       <button
@@ -80,6 +93,7 @@ function Row({
         <span className="text-[16px] font-semibold text-ink">{cat.name}</span>
         <span className="flex items-center gap-3 text-[13px] text-faint">
           {cat.subcategories.length === 0 ? 'No types' : `${cat.subcategories.length} types`}
+          {orphans.length > 0 && <span className="rounded-full bg-warm/10 px-2 py-0.5 text-[11px] text-warm">+{orphans.length} used</span>}
           <svg
             width="14"
             height="14"
@@ -107,6 +121,14 @@ function Row({
                 >
                   {s}
                   <button
+                    aria-label={pinned.includes(typeKey(cat.name, s)) ? `Remove ${s} from quick chips` : `Keep ${s} as a quick chip on the log screen`}
+                    aria-pressed={pinned.includes(typeKey(cat.name, s))}
+                    onClick={() => void toggleQuickType(cat.name, s)}
+                    className={`flex h-9 w-9 items-center justify-center rounded-full ${pinned.includes(typeKey(cat.name, s)) ? 'text-ink' : 'text-faint'}`}
+                  >
+                    <PinIcon filled={pinned.includes(typeKey(cat.name, s))} />
+                  </button>
+                  <button
                     aria-label={`Remove ${s} from ${cat.name}`}
                     onClick={() => removeSubcategory(cat.id!, s)}
                     className="flex h-9 w-9 items-center justify-center rounded-full text-faint"
@@ -118,6 +140,25 @@ function Row({
                 </li>
               ))}
             </ul>
+          )}
+          {orphans.length > 0 && (
+            <div className="mb-3">
+              <p className="mb-2 text-[13px] text-soft">Used in your spends but not in this list. Tap to keep one.</p>
+              <ul className="flex flex-wrap gap-2">
+                {orphans.map((o) => (
+                  <li key={o.name}>
+                    <button
+                      onClick={() => void addSubcategory(cat.id!, o.name)}
+                      aria-label={`Add ${o.name} to ${cat.name}`}
+                      className="flex min-h-[44px] items-center gap-2 rounded-full border border-dashed border-faint px-4 text-[14px] font-medium text-ink"
+                    >
+                      + {o.name}
+                      <span className="num text-[12px] text-faint">{o.count}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
           <AddInput label={`Add a type to ${cat.name}`} placeholder="Add a type" onAdd={(n) => addSubcategory(cat.id!, n)} />
           {!cat.isSystem && (
@@ -155,6 +196,11 @@ export function CategoriesTab() {
   const events = useEvents() ?? [];
   const counts = useCategoryCounts();
   const eventCounts = useEventCounts();
+  const usedTypes = useUsedTypes();
+  useEffect(() => {
+    void adoptUsedTypes();
+  }, []);
+  const pinned = useQuickTypes();
   const [openId, setOpenId] = useState<string | null>(null);
   const [removing, setRemoving] = useState<Category | null>(null);
   const [removingEvent, setRemovingEvent] = useState<StashEvent | null>(null);
@@ -171,6 +217,8 @@ export function CategoriesTab() {
             cat={c}
             open={openId === c.id}
             count={counts[c.name] ?? 0}
+            used={usedTypes[c.name] ?? []}
+            pinned={pinned}
             onToggle={() => setOpenId(openId === c.id ? null : c.id!)}
             onAskRemove={() => setRemoving(c)}
           />

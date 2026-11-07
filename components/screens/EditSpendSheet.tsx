@@ -256,7 +256,6 @@ export function EditSpendSheet({
             onChange={(e) => setFromSavings(e.target.checked)}
             className="h-4 w-4 min-h-0 rounded border-line"
           />
-          <span>Taken from savings (don&apos;t deduct from daily budget)</span>
         </label>
 
         <div className="mt-5 flex flex-col gap-2">

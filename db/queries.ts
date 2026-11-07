@@ -262,6 +262,77 @@ export function useLastUsedLabel(): string | null {
   return useLiveQuery(async () => (await getDB().meta.get('main'))?.lastUsedLabel ?? null, [], null) ?? null;
 }
 
+/** A type is identified by its category and name; used for the log screen's quick chips. */
+export const typeKey = (category: string, type: string) => `${category}::${type}`;
+
+/** Types the user pinned to the log screen (per device). */
+export function useQuickTypes(): string[] {
+  return useLiveQuery(async () => (await getDB().meta.get('main'))?.quickTypes ?? [], [], []) ?? [];
+}
+
+/** Pin or unpin a type on the log screen. Returns true when it is now pinned. */
+export async function toggleQuickType(category: string, type: string): Promise<boolean> {
+  const db = getDB();
+  const key = typeKey(category, type);
+  let pinned = false;
+  await db.transaction('rw', db.meta, async () => {
+    const cur = (await db.meta.get('main'))?.quickTypes ?? [];
+    pinned = !cur.includes(key);
+    await db.meta.update('main', { quickTypes: pinned ? [...cur, key] : cur.filter((k) => k !== key) });
+  });
+  return pinned;
+}
+
+/**
+ * Types that spends actually carry, per category name, with how many spends use each.
+ * Category types are a separate list the user edits; a spend keeps its own type, so the two can
+ * differ (a type removed later, or logged on another device). Read straight from transactions.
+ */
+export function useUsedTypes(): Record<string, { name: string; count: number }[]> {
+  return (
+    useLiveQuery(async () => {
+      const db = getDB();
+      const names = await loadLinkNames(db);
+      const by = new Map<string, Map<string, number>>();
+      await db.transactions.each((t) => {
+        if (t.deletedAt != null || !t.subtype) return;
+        const cat = catNameOf(t, names);
+        const m = by.get(cat) ?? new Map<string, number>();
+        m.set(t.subtype, (m.get(t.subtype) ?? 0) + 1);
+        by.set(cat, m);
+      });
+      const out: Record<string, { name: string; count: number }[]> = {};
+      for (const [cat, m] of by) out[cat] = [...m].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count);
+      return out;
+    }, []) ?? {}
+  );
+}
+
+/**
+ * Heals the category list from the spends themselves. Categories are not tied to months: they are one list.
+ * Removing a type clears it from its spends, so a type that spends still carry but the list lacks came from
+ * older data, another device or an import. Add those to their category so every spend's type is in the list.
+ * Returns how many were added. Names the list refuses (too long) stay visible as "used" chips.
+ */
+export async function adoptUsedTypes(): Promise<number> {
+  const db = getDB();
+  const [cats, names] = await Promise.all([loadCategories(db), loadLinkNames(db)]);
+  const missing = new Map<string, Set<string>>();
+  await db.transactions.each((t) => {
+    if (t.deletedAt != null || !t.subtype) return;
+    const c = cats.find((x) => x.name.toLowerCase() === catNameOf(t, names).toLowerCase());
+    if (!c || c.subcategories.some((s) => s.toLowerCase() === t.subtype!.toLowerCase())) return;
+    const set = missing.get(c.id) ?? new Set<string>();
+    set.add(t.subtype);
+    missing.set(c.id, set);
+  });
+  let added = 0;
+  for (const [id, set] of missing) {
+    for (const name of set) if ((await addSubcategory(id, name)) === null) added++;
+  }
+  return added;
+}
+
 /** Last payment mode used (defaults to UPI). */
 export function useLastPayment(): string {
   return useLiveQuery(async () => (await getDB().meta.get('main'))?.lastPayment ?? 'UPI', [], 'UPI') ?? 'UPI';

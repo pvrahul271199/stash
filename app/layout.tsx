@@ -16,7 +16,7 @@ const figtree = Figtree({
 });
 
 export const metadata: Metadata = {
-  title: 'Chelav: what can I spend today',
+  title: 'Chelav - What can I spend today?',
   description: 'A calm expense tracker built around one question: how much can I spend today?',
   appleWebApp: { capable: true, title: 'Chelav', statusBarStyle: 'default' },
   icons: {
