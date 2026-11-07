@@ -705,3 +705,46 @@ drop table if exists
   public.legacy_stash_feature_data
 cascade;
 drop function if exists public.stash_set_updated_at() cascade;
+
+-- ============================================================================
+-- Feedback / bug reports (User tab -> "Send feedback or report a bug"). Idempotent.
+-- Anyone (guests included) can submit through submit_feedback(); nobody can read or change rows from the app.
+-- Read them in the Supabase dashboard (Table editor) or with the service role.
+-- ============================================================================
+create table if not exists public.feedback (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid,                       -- auth.uid() when signed in, else null (no foreign key: survives account deletion)
+  kind text not null check (kind in ('feedback', 'bug')),
+  message text not null check (char_length(message) between 1 and 1000),
+  contact text check (contact is null or char_length(contact) <= 200),
+  user_agent text check (user_agent is null or char_length(user_agent) <= 300),
+  app_version text check (app_version is null or char_length(app_version) <= 40),
+  status text not null default 'new' check (status in ('new', 'seen', 'done')),
+  created_at timestamptz not null default now()
+);
+create index if not exists feedback_created_idx on public.feedback (created_at desc);
+alter table public.feedback enable row level security;
+revoke all on public.feedback from anon, authenticated;
+
+create or replace function public.submit_feedback(p_kind text, p_message text, p_contact text default null, p_user_agent text default null, p_app_version text default null)
+returns void language plpgsql security definer set search_path = public as $$
+declare v_uid uuid := auth.uid();
+begin
+  if p_kind not in ('feedback', 'bug') then
+    raise exception 'bad kind' using errcode = '22023';
+  end if;
+  if p_message is null or char_length(btrim(p_message)) = 0 or char_length(p_message) > 1000 then
+    raise exception 'bad message' using errcode = '22023';
+  end if;
+  -- light abuse guard: 10 per user per hour, 200 per hour overall
+  if v_uid is not null and (select count(*) from public.feedback where user_id = v_uid and created_at > now() - interval '1 hour') >= 10 then
+    raise exception 'too many submissions' using errcode = '54000';
+  end if;
+  if (select count(*) from public.feedback where created_at > now() - interval '1 hour') >= 200 then
+    raise exception 'too many submissions' using errcode = '54000';
+  end if;
+  insert into public.feedback (user_id, kind, message, contact, user_agent, app_version)
+  values (v_uid, p_kind, btrim(p_message), nullif(btrim(left(p_contact, 200)), ''), left(p_user_agent, 300), left(p_app_version, 40));
+end $$;
+revoke all on function public.submit_feedback(text, text, text, text, text) from public;
+grant execute on function public.submit_feedback(text, text, text, text, text) to anon, authenticated;

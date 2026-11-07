@@ -1,4 +1,5 @@
 'use client';
+import { initAnalytics, track } from '@/lib/analytics';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Toast } from './ui/Toast';
 import { SampleNote } from './ui/SampleNote';
@@ -94,6 +95,7 @@ export function AppShell() {
   const [signInSheet, setSignInSheet] = useState(false);
   const openSignIn = () => setSignInSheet(true);
   const [consented, setConsented] = useState(() => hasSyncConsent());
+  useEffect(() => initAnalytics(), []);
 
   // Guests may open the sign-in screen soon: fetch Google's script in idle time so its button appears instantly.
   useEffect(() => {
@@ -296,6 +298,7 @@ export function AppShell() {
             await updateActivePlan(draft);
           } else {
             await createPlan(draft);
+            track('onboarding_completed');
           }
           posthog.capture('budget_plan_updated');
           posthog.logger.info('budget plan updated', {
