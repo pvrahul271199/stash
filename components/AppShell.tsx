@@ -40,6 +40,7 @@ import { discardSampleAfterSignIn, enterSampleMode, exitSampleMode, isSampleFill
 import { useUI } from '@/store/ui';
 import { useToast } from '@/store/toast';
 import { useBusy, withLoading } from '@/store/busy';
+import posthog from 'posthog-js';
 
 type Restore = { ok: true } | { ok: false; reason: string };
 
@@ -102,7 +103,32 @@ export function AppShell() {
   }, [ready]);
 
   const auth = useAuth();
+  const identifiedUid = useRef<string | null>(null);
   const inSample = useSampleMode();
+  useEffect(() => {
+    if (auth.status === 'signedIn' && auth.uid) {
+      if (identifiedUid.current && identifiedUid.current !== auth.uid) {
+        posthog.reset();
+      }
+
+      if (identifiedUid.current !== auth.uid) {
+        posthog.identify(auth.uid, {
+          ...(auth.email ? { email: auth.email } : {}),
+          ...(auth.displayName ? { name: auth.displayName } : {}),
+          ...(auth.username ? { username: auth.username } : {}),
+          ...(auth.provider ? { auth_provider: auth.provider } : {}),
+        });
+        identifiedUid.current = auth.uid;
+      }
+      return;
+    }
+
+    if (auth.status === 'guest' && identifiedUid.current) {
+      posthog.reset();
+      identifiedUid.current = null;
+    }
+  }, [auth]);
+
   // Just signed up with data from before on this phone: ask whether to move it into the new account.
   const [moveOffer, setMoveOffer] = useState<(GuestData & { uid: string }) | null>(null);
   const [sampleIntro, setSampleIntro] = useState(false); // the 3-second "you're exploring sample data" note
@@ -183,7 +209,8 @@ export function AppShell() {
     const earliest = periodFor(1, todayISO()).start;
     const date = startDate > todayISO() ? todayISO() : startDate < earliest ? earliest : startDate;
     await createPlan(draft, date);
-    track('onboarding_completed');
+    posthog.capture('budget_plan_created');
+    posthog.logger.info('budget plan created', { flow: 'onboarding' });
     setForceWelcome(false); // a plan now exists: leave the post-logout / post-delete Welcome page
     setStartDate(todayISO());
     setBusy(false);
@@ -194,6 +221,8 @@ export function AppShell() {
   async function handleSample() {
     setForceWelcome(false);
     await withLoading('Loading two sample months…', () => enterSampleMode());
+    posthog.capture('sample_mode_started');
+    posthog.logger.info('sample mode started', { data_source: 'sample' });
     setSheet('none');
     setTab('today');
     setSampleIntro(true);
@@ -214,6 +243,7 @@ export function AppShell() {
     setForceWelcome(false);
     const who = getAuth().displayName; // always greet by display name, never by email
     const a = getAuth();
+    posthog.capture('account_authenticated', { is_new_account: a.isNew });
     if (a.isNew && a.uid) {
       // a brand-new Google account: never copy this phone's guest data silently, ask first
       const found = await describeGuestData().catch(() => null);
@@ -270,6 +300,10 @@ export function AppShell() {
             await createPlan(draft);
             track('onboarding_completed');
           }
+          posthog.capture('budget_plan_updated');
+          posthog.logger.info('budget plan updated', {
+            plan_state: snap.cycle ? 'existing' : 'new',
+          });
           setForceWelcome(false);
           setBusy(false);
           setFlow('welcome');

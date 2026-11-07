@@ -48,7 +48,15 @@ function fromUser(u: AuthUser): AuthState {
     const displayName = (m.full_name ?? m.name ?? '').trim() || email.split('@')[0];
     return { status: 'signedIn', uid: u.id, username: email, displayName, email, provider: 'google' };
   }
-  return { status: 'signedIn', uid: u.id, username: m.username, displayName: m.username, provider: 'email' };
+  const email = (u.email ?? '').trim().toLowerCase();
+  return {
+    status: 'signedIn',
+    uid: u.id,
+    username: m.username,
+    displayName: m.username,
+    provider: 'email',
+    ...(email ? { email } : {}),
+  };
 }
 
 /** A Google sign-in that created the account just now (as opposed to logging into an existing one). */

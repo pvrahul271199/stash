@@ -6,6 +6,7 @@ import { PAYMENT_MODES, type Entry } from '@/db/schema';
 import { num } from '@/lib/format';
 import { useCurrency } from '@/lib/currency';
 import { useToast } from '@/store/toast';
+import posthog from 'posthog-js';
 
 export function EditSpendSheet({
   entry,
@@ -50,6 +51,10 @@ export function EditSpendSheet({
         event,
         fromSavings,
       });
+      posthog.capture('spend_updated', {
+        payment_method: payment,
+        from_savings: fromSavings,
+      });
       toast('Spend updated');
       onClose();
     } finally {
@@ -62,6 +67,7 @@ export function EditSpendSheet({
     setBusy(true);
     try {
       await removeEntry(entry.id);
+      posthog.capture('spend_deleted');
       toast('Spend removed');
       onClose();
     } finally {
