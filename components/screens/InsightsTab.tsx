@@ -713,6 +713,11 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
           ) : (
             <p className="text-body text-soft">Patterns show up once you have a few repeat spends.</p>
           )}
+          {leftovers.byMonth.some((l) => l.monthId === cycle.id) && (
+            <Note tone="good">
+              <span className="font-semibold">{inr(leftovers.byMonth.find((l) => l.monthId === cycle.id)!.amount)}</span> left over this month was moved to savings.
+            </Note>
+          )}
           {leftovers.total > 0 && (
             <Note tone="good">
               <span className="font-semibold">{inr(leftovers.total)}</span> saved from leftovers

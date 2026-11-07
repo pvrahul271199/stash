@@ -104,11 +104,11 @@ describe('derived months (E-4)', () => {
     expect(vetToday(first.next, '2026-10-06', t0 + 60_000)).toMatchObject({ use: true, next: { date: '2026-10-06' } });
   });
 
-  it('backup prompt: guests only, from the 4th spend, and not while snoozed', () => {
+  it('backup prompt: guests only, from the 3rd day of logging, and not while snoozed', () => {
     const D = 24 * 60 * 60 * 1000;
     const t = 100 * D;
-    expect(shouldNudge(true, 3, 0, t)).toBe(false);
-    expect(shouldNudge(true, 4, 0, t)).toBe(true);
+    expect(shouldNudge(true, 2, 0, t)).toBe(false);
+    expect(shouldNudge(true, 3, 0, t)).toBe(true);
     expect(shouldNudge(true, 9, t + D, t)).toBe(false);
     expect(shouldNudge(true, 9, t - 1, t)).toBe(true);
     expect(shouldNudge(false, 9, 0, t)).toBe(false);

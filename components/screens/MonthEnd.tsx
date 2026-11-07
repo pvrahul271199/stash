@@ -85,6 +85,7 @@ export function MonthEnd({
             onClick={async () => {
               await moveLeftoverToSavings(cycle.id!, m.leftOver);
               toast(`Moved ${inr(m.leftOver)} to savings`);
+              onDone(); // straight on to the new month
             }}
           >
             {cycle.leftoverMoved ? 'Moved to savings' : `Move ${inr(m.leftOver)} to savings`}

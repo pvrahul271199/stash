@@ -314,9 +314,8 @@ export function AppShell() {
       />
     );
   } else if (snap.cycle && snap.plan && flow !== 'onboarding' && flow !== 'summary' && !forceWelcome) {
-    // A new month started in the last few days and last month's summary wasn't seen on this device yet.
-    const dayOfMonthNow = daysBetween(snap.cycle.monthStart, todayISO()) + 1;
-    const lastMonth = snap.previous && !snap.previousSeen && dayOfMonthNow <= 3 ? snap.previous : null;
+    // Every finished month that has not been looked back on yet on this device, oldest first. Sample data has no real months to wrap up.
+    const lastMonth = !inSample ? (snap.pending[0] ?? null) : null;
     if (lastMonth) {
       body = <MonthEnd cycle={lastMonth} plan={snap.plan} onDone={() => void dismissMonthSummary(lastMonth.id)} onCreateAccount={() => openSignIn()} />;
     } else {

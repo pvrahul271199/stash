@@ -210,6 +210,8 @@ export interface Snapshot {
   previous: DerivedCycle | undefined;
   /** Whether the month-end summary of `previous` was already seen on this device. */
   previousSeen: boolean;
+  /** Every finished, budgeted month whose summary was not seen on this device yet, oldest first. */
+  pending: DerivedCycle[];
 }
 
 /** Everything the shell needs about "now": the plan, this month and last month's summary. */
@@ -220,7 +222,22 @@ export async function loadSnapshot(db: StashDB, today: string): Promise<Snapshot
   const earlier = cycle ? await cycleFor(db, addDays(cycle.monthStart, -1), today) : undefined;
   const previous = earlier && (earlier.fromSavingsTotal > 0 || earlier.days.some((d) => d.spent > 0)) ? earlier : undefined;
   const previousSeen = !previous || (meta?.monthSummarySeen ?? []).includes(previous.id);
-  return { plan, cycle, previous, previousSeen };
+  // Every finished month nobody has looked back on yet (not just the latest one, and not only in the first days of the next month).
+  const seen = new Set(meta?.monthSummarySeen ?? []);
+  const plans = (await db.plans.toArray()).filter(alive);
+  const firstBudget = plans.reduce<string | null>((m, p) => (p.effectiveFrom && (m == null || p.effectiveFrom < m) ? p.effectiveFrom : m), null);
+  const pending = cycle
+    ? (await allCycles(db, today))
+        .filter(
+          (c) =>
+            c.monthEnd < today &&
+            !seen.has(c.id) &&
+            // a budgeted month always; an earlier month only reconstructed from backdated spends only when it has spends
+            (firstBudget == null || c.monthEnd >= firstBudget || c.fromSavingsTotal > 0 || c.days.some((d) => d.spent > 0)),
+        )
+        .reverse()
+    : [];
+  return { plan, cycle, previous, previousSeen, pending };
 }
 
 /** `undefined` while loading, then always an object (maybe with empty fields). */
@@ -559,6 +576,15 @@ export async function updateActivePlan(p: PlanInput): Promise<void> {
 }
 
 /** Real (not rough-total) spends logged so far; drives the "back up your month" prompt. */
+/** On how many different days the person has logged a (real) spend. */
+export function useLoggedDays(): number {
+  return useLiveQuery(
+    async () => new Set((await getDB().transactions.toArray()).filter((t) => alive(t) && !t.isEstimate).map((t) => t.txnDate)).size,
+    [],
+    0,
+  );
+}
+
 export function useSpendCount(): number {
   return useLiveQuery(async () => (await getDB().transactions.toArray()).filter((t) => alive(t) && !t.isEstimate).length, [], 0);
 }
@@ -768,22 +794,26 @@ export async function moveLeftoverToSavings(cycleId: string, amount: number): Pr
   requestSync();
 }
 
-/** One amount per month: if two devices both moved the same month, the newest row wins. */
-export function leftoverTotals(rows: { monthId: string; amount: number; updatedAt: number; deletedAt?: number | null }[]): { total: number; months: number } {
-  const by = new Map<string, { amount: number; updatedAt: number }>();
+/** One amount per month: if two devices both moved the same month, the newest row wins. `byMonth` is newest month first. */
+export function leftoverTotals(rows: { monthId: string; amount: number; updatedAt: number; deletedAt?: number | null }[]): {
+  total: number;
+  months: number;
+  byMonth: { monthId: string; amount: number }[];
+} {
+  const by = new Map<string, { monthId: string; amount: number; updatedAt: number }>();
   for (const r of rows) {
     if (r.deletedAt != null || r.amount <= 0) continue;
     const cur = by.get(r.monthId);
     if (!cur || r.updatedAt > cur.updatedAt) by.set(r.monthId, r);
   }
-  return { total: [...by.values()].reduce((s, r) => s + r.amount, 0), months: by.size };
+  const byMonth = [...by.values()].map(({ monthId, amount }) => ({ monthId, amount })).sort((a, b) => b.monthId.localeCompare(a.monthId));
+  return { total: byMonth.reduce((s, r) => s + r.amount, 0), months: byMonth.length, byMonth };
 }
 
 /** Running total of leftovers moved to savings, and how many months contributed. */
-export function useSavedFromLeftovers(): { total: number; months: number } {
-  return (
-    useLiveQuery(async () => leftoverTotals(await getDB().leftovers.toArray()), [], { total: 0, months: 0 }) ?? { total: 0, months: 0 }
-  );
+const NO_LEFTOVERS = { total: 0, months: 0, byMonth: [] as { monthId: string; amount: number }[] };
+export function useSavedFromLeftovers() {
+  return useLiveQuery(async () => leftoverTotals(await getDB().leftovers.toArray()), [], NO_LEFTOVERS) ?? NO_LEFTOVERS;
 }
 
 /** Hides the month-end summary of a finished month on this device. */

@@ -1,21 +1,21 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/lib/auth';
-import { useSpendCount } from '@/db/queries';
+import { useLoggedDays } from '@/db/queries';
 import { useSampleMode } from '@/lib/sampleMode';
 
 const KEY = 'stash:backup-nudge-until';
 const DAY = 24 * 60 * 60 * 1000;
-/** Shown once the guest has logged this many spends (i.e. right after the 4th); "Maybe later" asks again after SNOOZE. */
-export const NUDGE_AFTER_SPENDS = 4;
+/** Shown once the guest has logged spends on this many different days (the 3rd day of logging); "Maybe later" asks again after SNOOZE. */
+export const NUDGE_AFTER_DAYS = 3;
 const SNOOZE_MS = 3 * DAY;
 /** Let the Today screen settle first, so the sheet slides up rather than greeting the user. */
 const SHOW_DELAY_MS = 1200;
 /** At most once per app session, even if it is dismissed by tapping outside. */
 let shownThisSession = false;
 
-export function shouldNudge(isGuest: boolean, spends: number, snoozedUntil: number, now: number): boolean {
-  return isGuest && spends >= NUDGE_AFTER_SPENDS && now >= snoozedUntil;
+export function shouldNudge(isGuest: boolean, loggedDays: number, snoozedUntil: number, now: number): boolean {
+  return isGuest && loggedDays >= NUDGE_AFTER_DAYS && now >= snoozedUntil;
 }
 
 function readSnooze(): number {
@@ -38,10 +38,10 @@ function snooze() {
 export function BackupPrompt({ onCreate }: { onCreate: () => void }) {
   const auth = useAuth();
   const inSample = useSampleMode();
-  const spends = useSpendCount();
+  const loggedDays = useLoggedDays();
   const [open, setOpen] = useState(false);
   // sample data is not the visitor's month, so there is nothing to back up
-  const eligible = !inSample && shouldNudge(auth.status === 'guest', spends, readSnooze(), Date.now());
+  const eligible = !inSample && shouldNudge(auth.status === 'guest', loggedDays, readSnooze(), Date.now());
 
   useEffect(() => {
     if (!eligible || shownThisSession) return;

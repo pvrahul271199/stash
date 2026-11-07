@@ -16,6 +16,7 @@ import {
   removeCategory,
   removeEvent,
   removeSubcategory,
+  useSavedFromLeftovers,
   useCategories,
   useCategoryCounts,
   useEventCounts,
@@ -25,8 +26,8 @@ import type { Category, Plan, StashEvent } from '@/db/schema';
 import type { DerivedCycle } from '@/lib/period';
 import { moneyToLiveOn } from '@/lib/budget';
 import { MAX_NAME } from '@/lib/categories';
-import { cycleEndDate, formatWithWeekday } from '@/lib/dates';
-import { ordinal } from '@/lib/period';
+import { cycleEndDate, formatMonthYear, formatWithWeekday } from '@/lib/dates';
+import { decodePeriodId, ordinal } from '@/lib/period';
 import { inr } from '@/lib/format';
 import { useCurrency } from '@/lib/currency';
 import { useAuth } from '@/lib/auth';
@@ -72,6 +73,8 @@ export function UserTab({
   const setPWA = usePWA((s) => s.set);
   const { currency, setCurrency, currencies } = useCurrency();
   const cats = useCategories() ?? [];
+  const leftovers = useSavedFromLeftovers();
+  const [leftoversOpen, setLeftoversOpen] = useState(false);
   const catCounts = useCategoryCounts();
   const events = useEvents() ?? [];
   const eventCounts = useEventCounts();
@@ -295,6 +298,51 @@ export function UserTab({
           </button>
         </div>
       </section>
+
+      {/* Leftovers moved to savings from finished months */}
+      {leftovers.total > 0 && (
+        <section className="mt-6 rounded-note border border-line px-4" aria-label="Saved from leftovers">
+          <button
+            type="button"
+            onClick={() => setLeftoversOpen((v) => !v)}
+            aria-expanded={leftoversOpen}
+            className="flex min-h-[56px] w-full items-center justify-between gap-3 text-left"
+          >
+            <span className="text-[16px] font-semibold text-ink">Saved from leftovers</span>
+            <span className="flex items-center gap-2.5">
+              <span className="num text-[18px] font-semibold text-good">{inr(leftovers.total)}</span>
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+                className={`text-faint transition-transform ${leftoversOpen ? 'rotate-180' : ''}`}
+              >
+                <path d="M6 9l6 6 6-6" />
+              </svg>
+            </span>
+          </button>
+          {leftoversOpen && (
+            <ul className="divide-y divide-line border-t border-line pb-1">
+              {leftovers.byMonth.map((l) => {
+                const r = decodePeriodId(l.monthId);
+                const [y, m] = r ? r.startDate.split('-').map(Number) : [0, 1];
+                return (
+                  <li key={l.monthId} className="flex items-center justify-between py-2.5">
+                    <span className="text-[14px] text-soft">{r ? formatMonthYear(y, m) : l.monthId}</span>
+                    <span className="num text-[15px] font-medium text-ink">{inr(l.amount)}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+      )}
 
       {/* Categories & Spending Types (Collapsible inside User Tab) */}
       <section className="mt-6 rounded-note border border-line p-4" aria-label="Categories and types">

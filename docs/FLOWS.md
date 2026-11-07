@@ -103,7 +103,7 @@ Tapping the logo on Today sets `forceWelcome` (AppShell) and shows `Welcome`. Gu
 
 ## 9. Month end / next month
 
-1. `MonthEnd` when `currentDay > totalDays`: spent on daily life, saved first, taken from savings, left over.
+1. `MonthEnd` for every finished, budgeted month with spends that this device has not looked back on yet (`snap.pending`, oldest first, any day of a later month; not in sample mode). It is shown until you tap Continue (`dismissMonthSummary`). Guests also get a "Keep your months safe / Create account" card. Shows: spent on daily life, saved first, taken from savings, left over.
 2. "Move X to savings" → `moveLeftoverToSavings(cycleId, amount)` sets `meta.leftoverMoved` (per device flag) and adds one synced row to `leftovers` (server table `leftover_savings`: `monthId`, `amount`; once per month, newest wins if two devices both moved it). The running total (`useSavedFromLeftovers`) shows on this screen and in Insights → Patterns. No real money moves. ⚠ F-17.
 3. "Start next month" → `startNextMonth`: new cycle **starting today** with the same plan, then push.
 
