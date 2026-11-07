@@ -32,6 +32,7 @@ import { useSampleMode } from '@/lib/sampleMode';
 import { withLoading } from '@/store/busy';
 import { useToast } from '@/store/toast';
 import { usePWA } from '@/store/pwa';
+import posthog from 'posthog-js';
 
 const AVATAR_STYLE = {
   bg: '#EEF2FF',
@@ -113,6 +114,7 @@ export function UserTab({
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+    posthog.capture('spends_exported');
     toast('Exported to CSV');
   }
 

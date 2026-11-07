@@ -23,6 +23,7 @@ import { chipLabels } from '@/lib/suggestions';
 import { inr, num } from '@/lib/format';
 import { useCurrency } from '@/lib/currency';
 import { useToast } from '@/store/toast';
+import posthog from 'posthog-js';
 
 const MAX_DIGITS = 7;
 
@@ -142,6 +143,12 @@ export function LogSpend({
         targetDate,
       );
       navigator.vibrate?.(10);
+      posthog.capture('spend_logged', {
+        payment_method: payment,
+        entry_timing: isOutsideActiveCycle ? 'historical' : isOtherDay ? (isFutureDay ? 'future' : 'past') : 'current_day',
+        from_savings: fromSavings,
+        adjusts_daily_budget: !isOutsideActiveCycle && adjustPool,
+      });
       const suffix = isOutsideActiveCycle
         ? ` on ${targetDateLabel}`
         : (effectiveDay != null && effectiveDay !== cycle.currentDay
