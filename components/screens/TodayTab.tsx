@@ -1,4 +1,5 @@
 'use client';
+import { track } from '@/lib/analytics';
 import { useEffect, useRef, useState } from 'react';
 import { PrimaryButton, SecondaryButton } from '../ui/Button';
 import { Note } from '../ui/Chip';
@@ -96,7 +97,10 @@ export function TodayTab({ cycle, plan, onCreateAccount, onHome }: { cycle: Deri
     const r = await closeToday();
     setBusy(false);
     setView('today');
-    if (r) toast('Day closed');
+    if (r) {
+      toast('Day closed');
+      track('day_closed');
+    }
   }
 
   return (

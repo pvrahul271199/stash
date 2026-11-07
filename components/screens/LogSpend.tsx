@@ -1,4 +1,5 @@
 'use client';
+import { track, trackOnce } from '@/lib/analytics';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { BackIcon, IconButton, PrimaryButton } from '../ui/Button';
 import { Chip } from '../ui/Chip';
@@ -142,6 +143,8 @@ export function LogSpend({
         targetDate,
       );
       navigator.vibrate?.(10);
+      trackOnce('first_spend_logged');
+      track('spend_logged');
       const suffix = isOutsideActiveCycle
         ? ` on ${targetDateLabel}`
         : (effectiveDay != null && effectiveDay !== cycle.currentDay

@@ -1,4 +1,5 @@
 'use client';
+import { initAnalytics, track } from '@/lib/analytics';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Toast } from './ui/Toast';
 import { SampleNote } from './ui/SampleNote';
@@ -93,6 +94,7 @@ export function AppShell() {
   const [signInSheet, setSignInSheet] = useState(false);
   const openSignIn = () => setSignInSheet(true);
   const [consented, setConsented] = useState(() => hasSyncConsent());
+  useEffect(() => initAnalytics(), []);
 
   // Guests may open the sign-in screen soon: fetch Google's script in idle time so its button appears instantly.
   useEffect(() => {
@@ -181,6 +183,7 @@ export function AppShell() {
     const earliest = periodFor(1, todayISO()).start;
     const date = startDate > todayISO() ? todayISO() : startDate < earliest ? earliest : startDate;
     await createPlan(draft, date);
+    track('onboarding_completed');
     setForceWelcome(false); // a plan now exists: leave the post-logout / post-delete Welcome page
     setStartDate(todayISO());
     setBusy(false);
@@ -265,6 +268,7 @@ export function AppShell() {
             await updateActivePlan(draft);
           } else {
             await createPlan(draft);
+            track('onboarding_completed');
           }
           setForceWelcome(false);
           setBusy(false);

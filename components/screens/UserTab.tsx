@@ -1,8 +1,10 @@
 'use client';
 import { useState } from 'react';
-import { PrimaryButton, SecondaryButton } from '../ui/Button';
+import { GhostButton, PrimaryButton, SecondaryButton } from '../ui/Button';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { DeleteAccountDialog } from '../ui/DeleteAccountDialog';
+import { track } from '@/lib/analytics';
+import { FeedbackSheet } from '../ui/FeedbackSheet';
 import { LegalLinks } from '../legal/LegalLinks';
 import { SyncStatusPill } from '../ui/SyncStatusPill';
 import {
@@ -79,6 +81,7 @@ export function UserTab({
   const shownName = auth.displayName || username;
 
   // Collapsible categories state
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [categoriesOpen, setCategoriesOpen] = useState(false);
   const [openCatId, setOpenCatId] = useState<string | null>(null);
   const [newCatName, setNewCatName] = useState('');
@@ -105,6 +108,7 @@ export function UserTab({
 
   async function doExport() {
     const csv = await withLoading('Syncing your data…', exportCSV);
+    track('csv_exported');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
     const a = document.createElement('a');
     a.href = url;
@@ -121,6 +125,7 @@ export function UserTab({
     await installEvent.prompt();
     await installEvent.userChoice;
     setPWA({ installEvent: null });
+    track('pwa_installed');
   }
 
   return (
@@ -589,8 +594,14 @@ export function UserTab({
             Delete my account
           </button>
         )}
+        <GhostButton onClick={() => {
+            setFeedbackOpen(true);
+            track('feedback_opened');
+          }}>Send feedback or report a bug</GhostButton>
         <LegalLinks className="mt-3" />
       </section>
+
+      {feedbackOpen && <FeedbackSheet onClose={() => setFeedbackOpen(false)} />}
 
       {removingCat && (
         <ConfirmDialog
