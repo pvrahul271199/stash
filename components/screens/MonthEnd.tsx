@@ -1,16 +1,33 @@
 'use client';
 import { PrimaryButton, SecondaryButton } from '../ui/Button';
 import { Note } from '../ui/Chip';
-import { moveLeftoverToSavings } from '@/db/queries';
+import { moveLeftoverToSavings, useSavedFromLeftovers } from '@/db/queries';
 import type { Plan } from '@/db/schema';
 import type { DerivedCycle } from '@/lib/period';
 import { monthEnd } from '@/lib/budget';
 import { inr } from '@/lib/format';
 import { useToast } from '@/store/toast';
+import { useAuth } from '@/lib/auth';
+import { useSampleMode } from '@/lib/sampleMode';
 
 /** Summary of the month that just ended. Your new month has already started; this only looks back. */
-export function MonthEnd({ cycle, plan, onDone }: { cycle: DerivedCycle; plan: Plan; onDone: () => void }) {
+export function MonthEnd({
+  cycle,
+  plan,
+  onDone,
+  onCreateAccount,
+}: {
+  cycle: DerivedCycle;
+  plan: Plan;
+  onDone: () => void;
+  /** Opens sign-in. Guests see a backup card; without it the card is hidden. */
+  onCreateAccount?: () => void;
+}) {
+  const auth = useAuth();
+  const inSample = useSampleMode();
+  const showBackup = !!onCreateAccount && auth.status === 'guest' && !inSample;
   const toast = useToast((s) => s.show);
+  const saved = useSavedFromLeftovers();
   const m = monthEnd(plan, cycle.planAmount, cycle);
   const rows: [string, number, boolean][] = [
     ['Spent on daily life', m.spentOnDaily, true],
@@ -42,7 +59,23 @@ export function MonthEnd({ cycle, plan, onDone }: { cycle: DerivedCycle; plan: P
         {m.leftOver > 0 && cycle.leftoverMoved && (
           <Note tone="good" className="mt-6">
             {inr(m.leftOver)} moved to savings.
+            {saved.months > 1 && <> You have saved {inr(saved.total)} from leftovers across {saved.months} months.</>}
           </Note>
+        )}
+        {showBackup && (
+          <section className="mt-6 rounded-[20px] border border-line bg-tint p-4" aria-label="Back up your months">
+            <p className="text-[15px] font-semibold text-ink">Keep your months safe</p>
+            <p className="mt-1 text-[14px] leading-relaxed text-soft">
+              A whole month of spends lives only on this phone. It can be lost if you clear data or lose the phone. A free account backs it up.
+            </p>
+            <button
+              type="button"
+              onClick={onCreateAccount}
+              className="mt-3 h-[44px] min-h-0 rounded-btn bg-ink px-5 text-[15px] font-semibold text-white active:scale-[0.99]"
+            >
+              Create account
+            </button>
+          </section>
         )}
       </div>
       <div className="flex flex-col gap-2">
@@ -50,7 +83,7 @@ export function MonthEnd({ cycle, plan, onDone }: { cycle: DerivedCycle; plan: P
           <SecondaryButton
             disabled={cycle.leftoverMoved}
             onClick={async () => {
-              await moveLeftoverToSavings(cycle.id!);
+              await moveLeftoverToSavings(cycle.id!, m.leftOver);
               toast(`Moved ${inr(m.leftOver)} to savings`);
             }}
           >

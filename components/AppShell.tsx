@@ -318,7 +318,7 @@ export function AppShell() {
     const dayOfMonthNow = daysBetween(snap.cycle.monthStart, todayISO()) + 1;
     const lastMonth = snap.previous && !snap.previousSeen && dayOfMonthNow <= 3 ? snap.previous : null;
     if (lastMonth) {
-      body = <MonthEnd cycle={lastMonth} plan={snap.plan} onDone={() => void dismissMonthSummary(lastMonth.id)} />;
+      body = <MonthEnd cycle={lastMonth} plan={snap.plan} onDone={() => void dismissMonthSummary(lastMonth.id)} onCreateAccount={() => openSignIn()} />;
     } else {
       body = (
         <>

@@ -4,7 +4,7 @@ import { DayChart, type ChartMode } from '../charts/DayChart';
 import { CategoryList, Donut } from '../charts/Donut';
 import { TimeOfDayChart, WeekdayChart } from '../charts/WeekdayTime';
 import { Note } from '../ui/Chip';
-import { dayRowsOf, useAllCycles, useCategories, useCycleEntries, useEvents } from '@/db/queries';
+import { dayRowsOf, useSavedFromLeftovers, useAllCycles, useCategories, useCycleEntries, useEvents } from '@/db/queries';
 import type { Entry, Plan } from '@/db/schema';
 import { EditSpendSheet } from './EditSpendSheet';
 import { monthLabel, type DerivedCycle } from '@/lib/period';
@@ -118,6 +118,7 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
   const entries = useCycleEntries(cycle?.id);
   const rows = useMemo(() => (cycle ? dayRowsOf(cycle) : undefined), [cycle]);
   const cats = useCategories();
+  const leftovers = useSavedFromLeftovers();
   const events = useEvents();
 
   // Clear sub-type selection whenever the parent category changes
@@ -711,6 +712,12 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
             </Note>
           ) : (
             <p className="text-body text-soft">Patterns show up once you have a few repeat spends.</p>
+          )}
+          {leftovers.total > 0 && (
+            <Note tone="good">
+              <span className="font-semibold">{inr(leftovers.total)}</span> saved from leftovers
+              {leftovers.months > 1 ? ` across ${leftovers.months} months` : ''}.
+            </Note>
           )}
           {savings > 0 && <Note tone="adjust">{inr(savings)} taken from savings this month.</Note>}
         </div>

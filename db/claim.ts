@@ -20,24 +20,26 @@ export async function claimGuestData(uid: string): Promise<{ claimed: boolean; c
     if (targetHasData) return { claimed: false, counts: {} };
     const gMeta = await guest.meta.get('main');
     if (gMeta?.sampleLoaded) return { claimed: false, counts: {} };
-    const [plans, txns, evts, cats] = await Promise.all([
+    const [plans, txns, evts, cats, leftovers] = await Promise.all([
       guest.plans.toArray(),
       guest.transactions.toArray(),
       guest.evts.toArray(),
       guest.cats.toArray(),
+      guest.leftovers.toArray(),
     ]);
     if (plans.length + txns.length === 0) return { claimed: false, counts: {} };
     const now = Date.now();
     const touch = <T extends { updatedAt: number }>(r: T[]): T[] => r.map((x) => ({ ...x, updatedAt: Math.max(x.updatedAt, now) }));
     await target.transaction(
       'rw',
-      [target.plans, target.transactions, target.cats, target.evts, target.meta],
+      [target.plans, target.transactions, target.cats, target.evts, target.leftovers, target.meta],
       async () => {
         await target.cats.clear();
         await target.plans.bulkPut(touch(plans));
         await target.transactions.bulkPut(touch(txns));
         await target.cats.bulkPut(touch(cats));
         await target.evts.bulkPut(touch(evts));
+        await target.leftovers.bulkPut(touch(leftovers));
         await target.meta.put({
           id: 'main',
           lastUsedLabel: gMeta?.lastUsedLabel ?? null,

@@ -151,6 +151,13 @@ export interface Category {
   baseId: string | null;
 }
 
+/** A finished month's leftover the user moved to savings. `monthId` is the derived period id (`p:<start>:<days>`). */
+export interface LeftoverSaving extends Syncable {
+  monthId: string;
+  amount: number;
+  createdAt: number;
+}
+
 export interface StashEvent extends Syncable {
   name: string;
   note: string | null;
@@ -181,7 +188,7 @@ export interface Entry {
 export const PAYMENT_MODES = ['UPI', 'Card', 'Cash'] as const;
 export type PaymentMode = (typeof PAYMENT_MODES)[number];
 
-export const SCHEMA_VERSION = 11;
+export const SCHEMA_VERSION = 12;
 
 /* ---------- local revisions ----------
  * "What still needs pushing" must not depend on the phone's clock: a clock that moves backwards would
@@ -198,7 +205,7 @@ export function seedRev(n: number): void {
 }
 
 /** Tables whose rows sync; each gets `localRev` stamped by Dexie hooks. */
-export const SYNCED_TABLES = ['plans', 'transactions', 'cats', 'evts'] as const;
+export const SYNCED_TABLES = ['plans', 'transactions', 'cats', 'evts', 'leftovers'] as const;
 /** Fields that are local caches (written by recompute): changing only these is not a user edit. */
 const CACHE_FIELDS = new Set(['localRev']);
 let stampingOff = false;
@@ -220,6 +227,7 @@ export class StashDB extends Dexie {
   transactions!: Table<Txn, string>;
   cats!: Table<CategoryRow, string>;
   evts!: Table<StashEvent, string>;
+  leftovers!: Table<LeftoverSaving, string>;
   syncBase!: Table<SyncBase, string>;
 
   constructor(name = dbNameFor(GUEST_UID)) {
@@ -275,6 +283,8 @@ export class StashDB extends Dexie {
         transactions: 'id, txnDate, type, event, categoryId, eventId, updatedAt, localRev',
       })
       .upgrade((tx) => migrateToDerivedPeriods(tx));
+    // v12: leftovers moved to savings sync like everything else (one row per month).
+    this.version(12).stores({ leftovers: 'id, monthId, updatedAt, localRev' });
 
     for (const name of SYNCED_TABLES) {
       const t = this.table(name) as Table<Record<string, unknown>, string>;

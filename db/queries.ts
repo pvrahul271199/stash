@@ -749,11 +749,41 @@ export async function closeToday(): Promise<CloseResult | null> {
   return r;
 }
 
-/** Marks last month's leftover as moved to savings (a note on the summary; money itself is never moved by the app). */
-export async function moveLeftoverToSavings(cycleId: string): Promise<void> {
+/**
+ * Moves a finished month's leftover to savings: stores the amount (a synced row, one per month) so a running
+ * "saved from leftovers" total can be shown. Idempotent per month. (The app tracks the money; it never moves real money.)
+ */
+export async function moveLeftoverToSavings(cycleId: string, amount: number): Promise<void> {
   const db = getDB();
-  const moved = (await db.meta.get('main'))?.leftoverMoved ?? [];
-  if (!moved.includes(cycleId)) await db.meta.update('main', { leftoverMoved: [...moved, cycleId] });
+  await db.transaction('rw', [db.leftovers, db.meta], async () => {
+    const m = await db.meta.get('main');
+    if (!m) return;
+    const moved = m.leftoverMoved ?? [];
+    if (!moved.includes(cycleId)) await db.meta.update('main', { leftoverMoved: [...moved, cycleId] });
+    const has = (await db.leftovers.where('monthId').equals(cycleId).toArray()).some(alive);
+    if (has) return;
+    const now = Date.now();
+    await db.leftovers.add({ id: txnId(), monthId: cycleId, amount: Math.max(0, Math.round(amount)), createdAt: now, updatedAt: now });
+  });
+  requestSync();
+}
+
+/** One amount per month: if two devices both moved the same month, the newest row wins. */
+export function leftoverTotals(rows: { monthId: string; amount: number; updatedAt: number; deletedAt?: number | null }[]): { total: number; months: number } {
+  const by = new Map<string, { amount: number; updatedAt: number }>();
+  for (const r of rows) {
+    if (r.deletedAt != null || r.amount <= 0) continue;
+    const cur = by.get(r.monthId);
+    if (!cur || r.updatedAt > cur.updatedAt) by.set(r.monthId, r);
+  }
+  return { total: [...by.values()].reduce((s, r) => s + r.amount, 0), months: by.size };
+}
+
+/** Running total of leftovers moved to savings, and how many months contributed. */
+export function useSavedFromLeftovers(): { total: number; months: number } {
+  return (
+    useLiveQuery(async () => leftoverTotals(await getDB().leftovers.toArray()), [], { total: 0, months: 0 }) ?? { total: 0, months: 0 }
+  );
 }
 
 /** Hides the month-end summary of a finished month on this device. */
@@ -1185,9 +1215,10 @@ export async function deleteAllData(): Promise<void> {
   const now = Date.now();
   await db.transaction(
     'rw',
-    [db.plans, db.transactions, db.cats, db.evts, db.meta],
+    [db.plans, db.transactions, db.cats, db.evts, db.leftovers, db.meta],
     async () => {
       const tombstone = { deletedAt: now, updatedAt: now };
+      await db.leftovers.toCollection().modify(tombstone);
       await db.transactions.toCollection().modify(tombstone);
       await db.plans.toCollection().modify(tombstone);
       await db.cats.toCollection().modify(tombstone);

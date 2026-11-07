@@ -75,13 +75,13 @@ export function GoogleSignInSheet({
   }, []);
 
   return (
-    <div className="absolute inset-0 z-[55] flex items-end bg-white" role="presentation" onClick={onClose}>
+    <div className="absolute inset-0 z-[55] flex items-end bg-ink/40" role="presentation" onClick={onClose}>
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="gs-title"
         onClick={(e) => e.stopPropagation()}
-        className="max-h-[94%] w-full overflow-y-auto rounded-t-[28px] border-t border-line bg-white px-6 pt-3 shadow-[0_-8px_30px_rgba(30,27,75,0.06)]"
+        className="max-h-[94%] w-full overflow-y-auto rounded-t-[28px] bg-white px-6 pt-3"
         style={{ paddingBottom: 'calc(var(--safe-bottom) + 20px)' }}
       >
         <div className="mx-auto mb-4 h-1 w-9 rounded-full bg-line" aria-hidden="true" />
@@ -125,7 +125,7 @@ export function GoogleSignInSheet({
             Google sign-in isn&apos;t available right now. Check your connection and try again in a moment.
           </p>
         ) : (
-          <div className="relative mt-4 min-h-[44px] w-full">
+          <div className="relative mt-4 min-h-[44px] w-full rounded-full bg-white">
             {/* the button fades in once Google has drawn it, and the placeholder fades out: nothing pops or blinks */}
             <div
               ref={host}
@@ -140,7 +140,7 @@ export function GoogleSignInSheet({
               Loading Google…
             </div>
             {busy && (
-              <div role="status" className="absolute inset-0 flex items-center justify-center gap-2 rounded-full bg-white/90 text-[13px] font-medium text-soft">
+              <div role="status" className="absolute inset-0 flex items-center justify-center gap-2 rounded-full bg-white text-[13px] font-medium text-soft">
                 <Spinner />
                 Signing in…
               </div>

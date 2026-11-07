@@ -1,5 +1,5 @@
 import Dexie from 'dexie';
-import { getDB, getActiveDBUid, dbNameFor, GUEST_UID, nextRev, withoutRevStamp, type CategoryRow, type Plan, type StashDB, type StashEvent, type SyncBase, type SyncFailure, type Txn } from '@/db/schema';
+import { getDB, getActiveDBUid, dbNameFor, GUEST_UID, nextRev, withoutRevStamp, type CategoryRow, type LeftoverSaving, type Plan, type StashDB, type StashEvent, type SyncBase, type SyncFailure, type Txn } from '@/db/schema';
 import { getAuth, getAccessToken } from './auth';
 import { getSupabase, supabaseEnv } from './supabaseClient';
 import { decodeBase64Username, encodeUsernameToBase64 } from './user';
@@ -180,6 +180,23 @@ export const MAPPERS = {
       createdAt: r.created_at as number,
     }),
   },
+  leftover_savings: {
+    local: 'leftovers' as const,
+    toRemote: (l: LeftoverSaving) => ({
+      ...common(l),
+      month_id: l.monthId,
+      amount: l.amount,
+      created_at: l.createdAt,
+    }),
+    toLocal: (r: Remote): LeftoverSaving => ({
+      id: r.id,
+      updatedAt: r.client_updated_at,
+      deletedAt: ms(r.deleted_at),
+      monthId: r.month_id as string,
+      amount: Number(r.amount),
+      createdAt: Number(r.created_at),
+    }),
+  },
 };
 
 type TableName = keyof typeof MAPPERS;
@@ -187,7 +204,7 @@ type TableName = keyof typeof MAPPERS;
  * Parents first: transactions reference categories and events (events.id is a real FK remotely).
  * `cycles` is not synced any more: months are derived from plans + transactions (lib/period.ts, E-4).
  */
-export const TABLE_ORDER: TableName[] = ['plans', 'categories', 'events', 'transactions'];
+export const TABLE_ORDER: TableName[] = ['plans', 'categories', 'events', 'transactions', 'leftover_savings'];
 
 export type RemoteRows = Partial<Record<TableName, Remote[]>>;
 
@@ -490,7 +507,7 @@ async function scanDirty(db: StashDB, cutoff: number): Promise<{ refs: Ref[]; ma
   const seen = new Set<string>();
   // One read transaction over every table: a write that already took its rev has either committed
   // (and is seen) or is still running (and this read waits for it), so no lower rev can appear later.
-  await db.transaction('r', [db.plans, db.cats, db.evts, db.transactions], async () => {
+  await db.transaction('r', [db.plans, db.cats, db.evts, db.transactions, db.leftovers], async () => {
     for (const name of TABLE_ORDER) {
       const table = db[MAPPERS[name].local] as unknown as Dexie.Table<{ id: string; updatedAt: number; localRev?: number }, string>;
       const dirty = await table.where('localRev').above(sinceRev).toArray();
@@ -543,6 +560,9 @@ export async function pushDirty(db: StashDB): Promise<number> {
 
 type Cursor = { ts: string; id: string };
 
+/** Tables the app can live without while the server schema catches up. */
+const OPTIONAL_TABLES = new Set<string>(['leftover_savings']);
+
 async function pullTable(
   db: StashDB,
   owner: string,
@@ -555,7 +575,15 @@ async function pullTable(
   // first page: plain `updated_at > cursor - overlap`; later pages: the exact (updated_at, id) keyset
   let filter = cursor ? `&updated_at=gt.${encodeURIComponent(new Date(Date.parse(cursor.ts) - PULL_OVERLAP_MS).toISOString())}` : '';
   for (;;) {
-    const res = await authed(`${name}?select=*${mine}&order=updated_at.asc,id.asc&limit=${PAGE}${filter}`, { method: 'GET' });
+    let res: Response;
+    try {
+      res = await authed(`${name}?select=*${mine}&order=updated_at.asc,id.asc&limit=${PAGE}${filter}`, { method: 'GET' });
+    } catch (e) {
+      // A table added later (leftover_savings) may not exist on a server whose SQL has not been re-run yet.
+      // That must never block the plan and spends from coming down: skip it until the table exists.
+      if (OPTIONAL_TABLES.has(name) && e instanceof SyncError && e.status === 404) return { cursor: cur };
+      throw e;
+    }
     const rows = (await res.json()) as Remote[];
     if (rows.length) {
       await applyRemote(db, { [name]: rows }, owner);
@@ -598,7 +626,7 @@ export async function applyRemote(db: StashDB, rows: RemoteRows, owner: string |
   const { dedupeCategories, migrateToPeriods } = await import('@/db/queries');
   await db.transaction(
     'rw',
-    [db.plans, db.transactions, db.cats, db.evts, db.meta, db.syncBase],
+    [db.plans, db.transactions, db.cats, db.evts, db.leftovers, db.meta, db.syncBase],
     async () => {
       for (const name of TABLE_ORDER) {
         const list = rows[name];

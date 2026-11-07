@@ -235,6 +235,38 @@ drop trigger if exists trg_events_touch on public.events;
 create trigger trg_events_touch before insert or update on public.events
   for each row execute function public.stash_touch();
 
+-- ---------- leftover_savings ----------
+-- A finished month's leftover that the user moved to savings (one row per user per month; a second device that moves the
+-- same month simply adds a row and the client keeps the newest). month_id is the derived period id, e.g. p:2026-10-01:31.
+create table if not exists public.leftover_savings (
+  id uuid primary key,
+  user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  client_updated_at bigint not null,
+  updated_at timestamptz not null default now(),
+  deleted_at timestamptz,
+  month_id text not null,
+  amount bigint not null check (amount >= 0),
+  created_at bigint not null
+);
+create index if not exists idx_leftover_savings_user_updated on public.leftover_savings (user_id, updated_at);
+alter table public.leftover_savings add column if not exists version bigint not null default 1;
+drop trigger if exists trg_leftover_savings_lww on public.leftover_savings;
+create trigger trg_leftover_savings_lww before update on public.leftover_savings
+  for each row execute function public.stash_lww_guard();
+drop trigger if exists trg_leftover_savings_touch on public.leftover_savings;
+create trigger trg_leftover_savings_touch before insert or update on public.leftover_savings
+  for each row execute function public.stash_touch();
+alter table public.leftover_savings enable row level security;
+revoke all on public.leftover_savings from anon;
+drop policy if exists leftover_savings_own on public.leftover_savings;
+create policy leftover_savings_own on public.leftover_savings for all
+  using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'leftover_savings_size_check') then
+    alter table public.leftover_savings add constraint leftover_savings_size_check check (length(month_id) <= 64) not valid;
+  end if;
+end $$;
+
 -- ---------- feature_data ----------
 create table if not exists public.feature_data (
   id uuid primary key,
@@ -384,7 +416,7 @@ create or replace function public.push_changes(p_mutation_id uuid, p_changes jso
 returns jsonb language plpgsql as $$
 declare
   v_uid uuid := auth.uid();
-  v_tables constant text[] := array['plans', 'categories', 'events', 'transactions'];
+  v_tables constant text[] := array['plans', 'categories', 'events', 'transactions', 'leftover_savings'];
   t text;
   r jsonb;
   v_cur jsonb;
@@ -522,7 +554,7 @@ create or replace function public.purge_deleted_data(p_older_than interval defau
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare
   v_cut timestamptz := now() - p_older_than;
-  v_tx bigint; v_ev bigint; v_cat bigint; v_pl bigint; v_mut bigint;
+  v_tx bigint; v_ev bigint; v_cat bigint; v_pl bigint; v_mut bigint; v_lo bigint;
 begin
   delete from public.transactions where deleted_at is not null and deleted_at < v_cut;
   get diagnostics v_tx = row_count;
@@ -532,9 +564,11 @@ begin
   get diagnostics v_cat = row_count;
   delete from public.plans where deleted_at is not null and deleted_at < v_cut;
   get diagnostics v_pl = row_count;
+  delete from public.leftover_savings where deleted_at is not null and deleted_at < v_cut;
+  get diagnostics v_lo = row_count;
   delete from public.push_mutations where created_at < now() - interval '14 days';
   get diagnostics v_mut = row_count;
-  return jsonb_build_object('transactions', v_tx, 'events', v_ev, 'categories', v_cat, 'plans', v_pl, 'push_mutations', v_mut);
+  return jsonb_build_object('leftover_savings', v_lo, 'transactions', v_tx, 'events', v_ev, 'categories', v_cat, 'plans', v_pl, 'push_mutations', v_mut);
 end $$;
 revoke all on function public.purge_deleted_data(interval) from public, anon, authenticated;
 

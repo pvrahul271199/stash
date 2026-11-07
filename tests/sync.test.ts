@@ -31,6 +31,8 @@ let unauthorizedOnce = false;
 const rejectIds = new Set<string>();
 let patchCount = 0;
 let pushRequests = 0;
+/** Tables the fake server answers 404 / PGRST205 for (schema not updated yet). */
+const missingTables = new Set<string>();
 
 function fakeFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   return (async () => {
@@ -41,6 +43,7 @@ function fakeFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Respon
       const u = new URL(String(input));
       const table = u.pathname.split('/').pop()!;
       const method = init?.method ?? 'GET';
+      if (missingTables.has(table)) return new Response('{"code":"PGRST205","message":"Could not find the table"}', { status: 404 });
       if (unauthorizedOnce) {
         unauthorizedOnce = false;
         return new Response('', { status: 401 });
@@ -162,7 +165,15 @@ describe('sync engine', () => {
     uniqueNames = false;
     loseResponseOnce = false;
     ignoreUserFilter = false;
+    missingTables.clear();
     await freshUser();
+  });
+
+  it('a server without the leftover_savings table does not block the sync', async () => {
+    missingTables.add('leftover_savings');
+    await createPlan(plan, '2026-10-01');
+    await expect(syncNow()).resolves.toMatchObject({ ok: true });
+    expect(calls.some((c) => c.table === 'plans')).toBe(true);
   });
 
   it('pushes only dirty rows, parents first, then nothing on a second sync', async () => {
