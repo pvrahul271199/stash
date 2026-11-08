@@ -7,6 +7,7 @@ import { sumItems, type PlanInput, type PlanItem } from '@/lib/budget';
 import { periodFor } from '@/lib/period';
 import { daysBetween, formatLong, todayISO } from '@/lib/dates';
 import { DatePicker } from '../ui/DatePicker';
+import posthog from 'posthog-js';
 
 const BILL_SUGGESTIONS = ['Rent', 'Health EMI', 'Loan EMI', 'Phone & Wi-Fi', 'Electricity'];
 const SAVING_SUGGESTIONS = ['SIP', 'Emergency fund', 'RD / FD', 'Health insurance'];
@@ -275,6 +276,7 @@ export function Onboarding({
     if (bills >= inc) return setError(`Bills need to be less than your income (${inr(inc)}).`);
     if (bills + savings >= inc)
       return setError(`Bills and savings together need to be less than your income. You have ${inr(inc - bills)} after bills.`);
+    posthog.capture('onboarding_plan_submitted', { has_bill_items: billItems.length > 0, has_savings_items: savingsItems.length > 0, backdated: from < todayISO() });
     onDone({ income: inc, bills, savings, monthLength, periodStartDay: monthStartDay, billItems, savingsItems });
   }
 

@@ -40,7 +40,22 @@ without this.
 The hash is SHA-256 (hex) of the sections joined as `"<title> <body>"` with `\n` (see `noticeText()`); the optional
 contact line (`NEXT_PUBLIC_PRIVACY_CONTACT`) is not part of the hash.
 
-## Version 1 (hash `654bcdc4d7cf124645017ba8a14e0ea45fb34031bad40d5ad2afe30c13e2b79f`)
+## Version 2 (hash `6f3edf89a31e4c618615c6ce00ea5779693794edbca0e565409f73c5d07c695b`) — current
+
+Added 2026-11-08: PostHog usage analytics (screens opened, actions taken, never amounts/notes/categories), linked to the
+account when signed in via `posthog.identify`. Everyone is asked again (`CONSENT_VERSION` = 2).
+
+**What we store.** Your username (or, with Google, your Google email, name and picture), your plan (income, bills, savings), every spend you log (amount, date, category, label, note, payment type) and your categories, events and currency.
+
+**Why.** Only to back up your month and show it on your other devices, and to understand how the app is used. We do not sell it or show ads, and we share it with no one except the providers named here.
+
+**Usage analytics.** We record which screens you open and which actions you take (for example “logged a spend”, never the amount, category or note) to fix and improve the app. This is sent to our analytics provider (PostHog). When you are signed in it is linked to your account (your Google email and name); without an account it is tied only to a random id.
+
+**Where.** In your account on our cloud database provider (Supabase). Without an account, everything stays on this phone.
+
+**Your choices.** Export a CSV any time. Log out to stop syncing. “Delete my account” in Settings permanently erases your account and everything in it from the cloud. Items you delete are removed from the cloud within 30 days.
+
+## Version 1 (superseded; hash `654bcdc4d7cf124645017ba8a14e0ea45fb34031bad40d5ad2afe30c13e2b79f`)
 
 **What we store.** Your username (or, with Google, your Google email, name and picture), your plan (income, bills, savings), every spend you log (amount, date, category, label, note, payment type) and your categories, events and currency.
 

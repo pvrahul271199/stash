@@ -45,11 +45,19 @@ self.addEventListener('activate', (event) => {
 
 async function pageFirst(request) {
   const cache = await caches.open(CACHE);
-  const hit = (await cache.match(request, { ignoreSearch: true })) || (await cache.match('/'));
+  const hit = await cache.match(request, { ignoreSearch: true });
   if (hit) return hit;
-  const fresh = await fetch(request);
-  if (fresh.ok) cache.put(request, fresh.clone());
-  return fresh;
+  // Not precached by this worker (e.g. /privacy/ or /terms/ on a device still running an older worker): ask the network
+  // rather than answering with the app shell, which would show the app instead of the page that was tapped.
+  try {
+    const fresh = await fetch(request);
+    if (fresh.ok) cache.put(request, fresh.clone());
+    return fresh;
+  } catch (err) {
+    const shell = await cache.match('/'); // offline: the app is the best we have
+    if (shell) return shell;
+    throw err;
+  }
 }
 
 async function cacheFirst(request) {

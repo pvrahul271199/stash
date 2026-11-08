@@ -29,6 +29,7 @@ import { inr } from '@/lib/format';
 import { useCurrency } from '@/lib/currency';
 import { colors, categoryRamp } from '@/theme/tokens';
 import { useUI } from '@/store/ui';
+import posthog from 'posthog-js';
 import { SwipeRow } from '../ui/SwipeRow';
 
 function Section({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
@@ -394,7 +395,7 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
           ] as const).map(([id, label]) => (
             <button
               key={id}
-              onClick={() => setMode(id)}
+              onClick={() => { posthog.capture('insights_mode_changed', { mode: id }); setMode(id); }}
               aria-pressed={mode === id}
               className={`min-h-[40px] rounded-[10px] px-4 text-[14px] font-medium transition-all ${
                 mode === id ? 'bg-white text-ink shadow-sm' : 'text-soft'

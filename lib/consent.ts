@@ -9,7 +9,7 @@ export { PRIVACY_CONTACT } from './privacyNotice';
  * `record_consent()` (supabase/schema.sql, table `consents`: user, notice version, notice hash, server time, how).
  * Bump CONSENT_VERSION when the notice changes materially to ask again, and archive the text in docs/PRIVACY_NOTICES.md.
  */
-export const CONSENT_VERSION = 1;
+export const CONSENT_VERSION = 2;
 const CONSENT_KEY = 'stash:consent';
 
 /** How the user agreed: tapped Create account / Log in, or Google, with the notice line above. ('gate' is an old method, still allowed by the database.) */

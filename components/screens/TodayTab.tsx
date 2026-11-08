@@ -1,5 +1,6 @@
 'use client';
 import { track } from '@/lib/analytics';
+import posthog from 'posthog-js';
 import { useEffect, useRef, useState } from 'react';
 import { PrimaryButton, SecondaryButton } from '../ui/Button';
 import { Note } from '../ui/Chip';
@@ -35,6 +36,9 @@ type View = 'today' | 'log' | 'close';
 
 export function TodayTab({ cycle, plan, onCreateAccount, onHome }: { cycle: DerivedCycle; plan: Plan; onCreateAccount: () => void; onHome: () => void }) {
   const [view, setView] = useState<View>('today');
+  useEffect(() => {
+    if (view !== 'today') posthog.capture('screen_viewed', { screen: `today_${view}`, from: 'tab_today' });
+  }, [view]);
   const [logReturn, setLogReturn] = useState<View>('today');
   const [logDay, setLogDay] = useState<number | undefined>(undefined);
   const [peekDay, setPeekDay] = useState<number | null>(null);

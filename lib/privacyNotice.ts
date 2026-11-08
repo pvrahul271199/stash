@@ -12,7 +12,11 @@ export const NOTICE_SECTIONS: readonly { title: string; body: string }[] = [
   },
   {
     title: 'Why.',
-    body: 'Only to back up your month and show it on your other devices. We do not sell it, show ads, or share it with anyone else.',
+    body: 'Only to back up your month and show it on your other devices, and to understand how the app is used. We do not sell it or show ads, and we share it with no one except the providers named here.',
+  },
+  {
+    title: 'Usage analytics.',
+    body: 'We record which screens you open and which actions you take (for example “logged a spend”, never the amount, category or note) to fix and improve the app. This is sent to our analytics provider (PostHog). When you are signed in it is linked to your account (your Google email and name); without an account it is tied only to a random id.',
   },
   {
     title: 'Where.',

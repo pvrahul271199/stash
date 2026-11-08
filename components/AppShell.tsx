@@ -229,6 +229,7 @@ export function AppShell() {
   }
 
   function leaveSample() {
+    posthog.capture('sample_mode_left');
     setSampleIntro(false);
     void withLoading('Leaving the sample…', exitSampleMode).then(() => {
       setDraft(null);
@@ -261,6 +262,29 @@ export function AppShell() {
     if (uid) await restoreFor(uid);
     toast(who ? `Welcome back, ${who}!` : 'Welcome back!');
   }
+
+  // One event per screen the user lands on, so a person's path through the app reads as a timeline in PostHog.
+  const screen = !ready || !snap ? null
+    : farewell ? 'thank_you'
+    : restoring ? 'restoring'
+    : flow === 'changePlan' ? 'change_plan'
+    : flow === 'changeSummary' ? 'change_plan_summary'
+    : snap.cycle && snap.plan && flow !== 'onboarding' && flow !== 'summary' && !forceWelcome
+      ? (!inSample && snap.pending[0] ? 'month_end' : sheet === 'plan' ? 'settings_sheet' : `tab_${tab}`)
+    : flow === 'welcome'
+      ? (auth.status === 'signedIn' && !snap.cycle ? (restoreFailedFor === auth.uid ? 'restore_failed' : 'onboarding') : 'welcome')
+    : flow === 'onboarding' ? 'onboarding'
+    : flow === 'summary' ? 'plan_summary'
+    : null;
+  const lastScreen = useRef<string | null>(null);
+  useEffect(() => {
+    if (!screen || screen === lastScreen.current) return;
+    posthog.capture('screen_viewed', { screen, from: lastScreen.current ?? 'none', in_sample: inSample, signed_in: auth.status === 'signedIn' });
+    lastScreen.current = screen;
+  }, [screen, inSample, auth.status]);
+  useEffect(() => { if (showDemo) posthog.capture('demo_opened'); }, [showDemo]);
+  useEffect(() => { if (signInSheet) posthog.capture('sign_in_sheet_opened'); }, [signInSheet]);
+  useEffect(() => { if (moveOffer) posthog.capture('guest_data_offer_shown', { spends: moveOffer.spends }); }, [moveOffer]);
 
   let body: React.ReactNode = null;
   if (!ready || !snap) {
@@ -492,6 +516,7 @@ export function AppShell() {
         <LogoutDialog
           onCancel={() => setAskLogout(false)}
           onLogout={() => {
+            posthog.capture('logged_out');
             setAskLogout(false);
             void withLoading('Signing out…', () => logOut()).then(() => {
               setDraft(null);
@@ -522,6 +547,7 @@ export function AppShell() {
           body="It was saved here before you signed up. Move it to keep it with your account on every device, or start fresh and leave it out. Starting fresh deletes nothing: it just stays on this phone."
           actionLabel="Move them"
           onAction={() => {
+            posthog.capture('guest_data_moved');
             const offer = moveOffer;
             setMoveOffer(null);
             void withLoading('Moving your data…', async () => {
@@ -530,7 +556,7 @@ export function AppShell() {
             }).then(() => toast('Moved into your account'));
           }}
           secondaryLabel="Start fresh"
-          onSecondary={() => setMoveOffer(null)}
+          onSecondary={() => { posthog.capture('guest_data_start_fresh'); setMoveOffer(null); }}
           onClose={() => {} /* a real question: tapping outside or pressing Escape must not answer it */}
         />
       )}

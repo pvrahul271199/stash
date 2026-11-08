@@ -20,6 +20,7 @@ import {
 import type { Category, StashEvent } from '@/db/schema';
 import { MAX_NAME } from '@/lib/categories';
 import { PinIcon } from './CategoryPicker';
+import posthog from 'posthog-js';
 
 function AddInput({
   label,
@@ -227,7 +228,7 @@ export function CategoriesTab() {
 
       <h2 className="mt-8 text-section font-semibold text-ink">New category</h2>
       <div className="mt-2">
-        <AddInput label="New category" placeholder="e.g. Pets" onAdd={addCategory} />
+        <AddInput label="New category" placeholder="e.g. Pets" onAdd={async (n) => { const e = await addCategory(n); if (!e) posthog.capture('category_added'); return e; }} />
       </div>
 
       <section className="mt-10 border-t border-line pt-8" aria-label="Events">
@@ -264,6 +265,7 @@ export function CategoriesTab() {
           onCancel={() => setRemoving(null)}
           onConfirm={async () => {
             await removeCategory(removing.id!);
+            posthog.capture('category_removed');
             setRemoving(null);
             setOpenId(null);
           }}

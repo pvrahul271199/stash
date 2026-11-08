@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { CloseIcon, IconButton, PrimaryButton } from '../ui/Button';
 import { endEvent, startEvent, useActiveEvent, useEventCounts, useEvents } from '@/db/queries';
 import { MAX_NAME } from '@/lib/categories';
+import posthog from 'posthog-js';
 
 /** Start, switch or end the event that new spends get logged into. */
 export function EventSheet({ onClose }: { onClose: () => void }) {
@@ -16,7 +17,10 @@ export function EventSheet({ onClose }: { onClose: () => void }) {
   async function start(n: string, t?: string) {
     const e = await startEvent(n, t);
     if (e) setErr(e);
-    else onClose();
+    else {
+      posthog.capture('event_started', { from_existing: !!t === false && events.some((x) => x.name === n) });
+      onClose();
+    }
   }
 
   return (
@@ -48,7 +52,7 @@ export function EventSheet({ onClose }: { onClose: () => void }) {
           <div className="mt-4 flex flex-col gap-2" role="group" aria-label="Choose active event">
             <button
               type="button"
-              onClick={() => endEvent().then(onClose)}
+              onClick={() => { posthog.capture('event_ended'); void endEvent().then(onClose); }}
               aria-pressed={!active}
               className={`flex min-h-[48px] w-full items-center justify-between rounded-key border px-4 py-2.5 text-left transition-colors ${
                 !active ? 'border-ink bg-ink text-white' : 'border-line bg-white text-ink'

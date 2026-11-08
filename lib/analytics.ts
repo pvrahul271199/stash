@@ -1,9 +1,11 @@
 'use client';
 
 /**
- * Anonymous product analytics (PostHog). Only event names and coarse properties are sent: never amounts, categories,
- * events, notes, usernames or emails, and identify() is never called, so events carry only a random id.
- * No cookies (localStorage persistence), no autocapture, no session replay, IP not stored.
+ * Product analytics (PostHog). Events carry only names and coarse properties: never amounts, categories, event
+ * names, notes or passwords. Guests (no account) are anonymous: events carry only a random id. Once signed in,
+ * AppShell calls posthog.identify(uid, { email, name, ... }) so a person's journey can be followed; posthog.reset()
+ * on log-out. That is disclosed in the privacy notice ("Usage analytics", v2): keep the two in step.
+ * No cookies (localStorage persistence), no autocapture, no session replay.
  * Without NEXT_PUBLIC_POSTHOG_KEY this whole module is inert.
  */
 const KEY = (process.env.NEXT_PUBLIC_POSTHOG_KEY ?? '').trim();

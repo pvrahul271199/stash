@@ -12,9 +12,9 @@ import {
   noticeHash,
 } from '@/lib/consent';
 
-/** Hash of the version-1 notice, also listed in docs/PRIVACY_NOTICES.md. If this fails you changed the notice text:
+/** Hash of the current (version-2) notice, also listed in docs/PRIVACY_NOTICES.md. If this fails you changed the notice text:
  *  bump CONSENT_VERSION, archive the new text in the docs, and add the new hash here. */
-const V1_HASH = '654bcdc4d7cf124645017ba8a14e0ea45fb34031bad40d5ad2afe30c13e2b79f';
+const V1_HASH = '6f3edf89a31e4c618615c6ce00ea5779693794edbca0e565409f73c5d07c695b'; // name kept; this is the current version's hash
 
 const store = new Map<string, string>();
 
@@ -32,7 +32,7 @@ describe('privacy consent record', () => {
   });
 
   it('the notice text matches the archived version', async () => {
-    expect(CONSENT_VERSION).toBe(1);
+    expect(CONSENT_VERSION).toBe(2);
     expect(await noticeHash()).toBe(V1_HASH);
   });
 
@@ -42,7 +42,7 @@ describe('privacy consent record', () => {
     acceptSyncConsent('signup');
     expect(hasSyncConsent()).toBe(true);
     expect(await flushConsentRecord()).toBe(true);
-    expect(rpc).toHaveBeenCalledWith('record_consent', { p_version: 1, p_hash: V1_HASH, p_method: 'signup' });
+    expect(rpc).toHaveBeenCalledWith('record_consent', { p_version: 2, p_hash: V1_HASH, p_method: 'signup' });
     expect(await flushConsentRecord()).toBe(false); // already recorded: nothing more to send
     expect(rpc).toHaveBeenCalledTimes(1);
   });
@@ -54,7 +54,7 @@ describe('privacy consent record', () => {
     rpc.mockResolvedValueOnce({ error: null });
     expect(await flushConsentRecord()).toBe(true);
     expect(rpc).toHaveBeenCalledTimes(2);
-    expect(rpc).toHaveBeenLastCalledWith('record_consent', { p_version: 1, p_hash: V1_HASH, p_method: 'google' });
+    expect(rpc).toHaveBeenLastCalledWith('record_consent', { p_version: 2, p_hash: V1_HASH, p_method: 'google' });
   });
 
   it('does nothing without a local acceptance, and an old notice version asks again', async () => {
