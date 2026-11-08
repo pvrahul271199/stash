@@ -27,6 +27,7 @@ import { inr, num } from '@/lib/format';
 import { useCurrency } from '@/lib/currency';
 import { useToast } from '@/store/toast';
 import posthog from 'posthog-js';
+import { EventHint } from '../ui/EventHint';
 
 const MAX_DIGITS = 7;
 
@@ -74,6 +75,27 @@ export function LogSpend({
       return !v;
     });
   }
+  // First time only: an arrow pointing at the event pill ("you can create an event"). Remembered per device.
+  const [showEventHint, setShowEventHint] = useState(false);
+  useEffect(() => {
+    let seen = true;
+    try {
+      seen = localStorage.getItem('stash:hint:event') === '1';
+    } catch {
+      /* no storage: skip the hint rather than nag */
+    }
+    if (seen) return;
+    const t = setTimeout(() => setShowEventHint(true), 600);
+    return () => clearTimeout(t);
+  }, []);
+  const endEventHint = () => {
+    setShowEventHint(false);
+    try {
+      localStorage.setItem('stash:hint:event', '1');
+    } catch {
+      /* ignore */
+    }
+  };
   const [pending, setPending] = useState<Pending | null>(null);
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
@@ -310,10 +332,14 @@ export function LogSpend({
               </svg>
             </IconButton>
 
-            <div className="flex min-w-0 items-center gap-1">
+            <div className="relative flex min-w-0 items-center gap-1">
+              {showEventHint && view === 'keypad' && !eventMenuOpen && !activeEvent && events.length === 0 && (
+                <EventHint onDone={endEventHint} />
+              )}
               <button
                 type="button"
                 onClick={() => {
+                  endEventHint();
                   setEventMenuOpen((v) => !v);
                   setEventErr(null);
                 }}
