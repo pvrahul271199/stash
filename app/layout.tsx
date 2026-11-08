@@ -42,6 +42,8 @@ export const metadata: Metadata = {
     // Stable, un-hashed URLs; sizes are multiples of 48px so Google Search accepts them.
     icon: [
       { url: '/favicon.ico', sizes: '48x48' },
+      { url: '/icons/icon-48.png', sizes: '48x48', type: 'image/png' },
+      { url: '/icons/icon-96.png', sizes: '96x96', type: 'image/png' },
       { url: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
     ],
     apple: [{ url: '/icons/apple-touch-icon.png', sizes: '180x180', type: 'image/png' }],
