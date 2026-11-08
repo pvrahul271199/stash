@@ -5,7 +5,7 @@ import { colors } from '@/theme/tokens';
 import { fonts } from '@/theme/fonts';
 import { WORDMARK_PATH } from './logoPath';
 
-/** Stash logo: ink tile with the "Stash" wordmark drawn as a path (no font dependency). */
+/** Chelav logo: ink tile with the "Chelav" wordmark drawn as a path (no font dependency). */
 export function Logo({ size = 56 }: { size?: number }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 100 100">
@@ -21,7 +21,7 @@ const RING = 96;
  * Calm full-screen loader shown while the app resolves fonts, local data and the calendar.
  * Pulsing halo + spinning teal arc around the logo, with a gently breathing message.
  */
-export function LoadingScreen({ message = 'Opening your stash…' }: { message?: string }) {
+export function LoadingScreen({ message = 'Opening Chelav…' }: { message?: string }) {
   const spin = useRef(new Animated.Value(0)).current;
   const pulse = useRef(new Animated.Value(0)).current;
   const breathe = useRef(new Animated.Value(0)).current;

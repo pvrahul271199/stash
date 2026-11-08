@@ -1,4 +1,4 @@
-# Stash
+# Chelav
 
 A calm expense tracker built around one question: **"How much can I spend today?"**
 
@@ -98,7 +98,7 @@ Then visit [http://127.0.0.1:3100](http://127.0.0.1:3100).
 
 ### Android (Chrome)
 1. Open the deployed HTTPS URL in Chrome.
-2. Tap the **Install Stash** prompt (or open **Plan** inside the app and tap **Install Stash**, or use Chrome's menu → **Add to Home screen / Install app**).
+2. Tap the **Install Chelav** prompt (or open **Plan** inside the app and tap **Install Chelav**, or use Chrome's menu → **Add to Home screen / Install app**).
 3. Launch **Stash** from your home screen. It opens full-screen without browser chrome and works offline.
 
 ### iPhone (Safari, iOS 16.4+)

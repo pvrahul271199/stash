@@ -116,7 +116,7 @@ export function UserTab({
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
     const a = document.createElement('a');
     a.href = url;
-    a.download = `stash-spends-${cleanUser.replace(/[^a-z0-9_.-]+/g, '-') || 'user'}.csv`;
+    a.download = `chelav-spends-${cleanUser.replace(/[^a-z0-9_.-]+/g, '-') || 'user'}.csv`;
     document.body.appendChild(a);
     a.click();
     a.remove();

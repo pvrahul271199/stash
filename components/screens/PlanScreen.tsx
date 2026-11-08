@@ -47,7 +47,7 @@ export function PlanScreen({
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'stash-spends.csv';
+    a.download = 'chelav-spends.csv';
     document.body.appendChild(a);
     a.click();
     a.remove();

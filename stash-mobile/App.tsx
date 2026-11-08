@@ -49,7 +49,7 @@ function Shell() {
   const sheet = useUI((s) => s.sheet);
   const setSheet = useUI((s) => s.setSheet);
   const [ready, setReady] = useState(false);
-  const [loadMsg, setLoadMsg] = useState('Opening your stash…');
+  const [loadMsg, setLoadMsg] = useState('Opening Chelav…');
   const [flow, setFlow] = useState<Flow>('welcome');
   const [draft, setDraft] = useState<PlanInput | null>(null);
   const [tab, setTab] = useState<Tab>('today');

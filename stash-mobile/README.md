@@ -1,6 +1,6 @@
-# Stash Mobile (React Native / Expo SDK 58)
+# Chelav Mobile (React Native / Expo SDK 58)
 
-Native iOS & Android app for **Stash** — *"How much can I spend today?"*
+Native iOS & Android app for **Chelav** — *"How much can I spend today?"*
 
 ## How to Run on Your iPhone (Easiest Way)
 

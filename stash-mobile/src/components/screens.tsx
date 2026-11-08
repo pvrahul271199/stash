@@ -107,10 +107,10 @@ export function Welcome({ onStart, onSample }: { onStart: () => void; onSample: 
   return (
     <View style={[styles.screen, { justifyContent: 'space-between', paddingTop: 48 }]}>
       <View>
-        <Text style={styles.brandTag}>Stash</Text>
+        <Text style={styles.brandTag}>Chelav</Text>
         <Text style={styles.heroTitle}>Know what you can spend today.</Text>
         <Text style={[styles.bodyText, { marginTop: 16 }]}>
-          Tell Stash what comes in and what goes out once. Every day you get one number: what you can
+          Tell Chelav what comes in and what goes out once. Every day you get one number: what you can
           still spend. No guilt, no points. Just clarity.
         </Text>
       </View>
@@ -876,7 +876,7 @@ export function PlanModal({
   async function doExport() {
     const csv = await exportCSV();
     try {
-      await Share.share({ message: csv, title: 'stash-spends.csv' });
+      await Share.share({ message: csv, title: 'chelav-spends.csv' });
       toast('Exported to CSV');
     } catch {
       /* cancelled */

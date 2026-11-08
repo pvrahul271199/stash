@@ -1,4 +1,4 @@
-/* Stash service worker.
+/* Chelav service worker.
  * `scripts/build-sw.mjs` replaces __VERSION__ and the precache list after `next build`.
  * - Precaches the whole static export (HTML, JS, CSS, self-hosted fonts, icons).
  * - Navigations: cache-first. The precached page always matches the precached JS of this version, and it

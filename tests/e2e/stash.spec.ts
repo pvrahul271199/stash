@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-test.describe('Stash E2E flows', () => {
+test.describe('Chelav E2E flows', () => {
   test('setup -> log 3 spends (chip, Save, More with a type) -> close day -> check tomorrow amount', async ({ page }) => {
     await page.clock.install({ time: new Date(2026, 9, 27, 10, 0, 0) });
     await page.goto('/');

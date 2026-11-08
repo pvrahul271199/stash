@@ -1,5 +1,5 @@
 -- ============================================================================
--- Stash — Supabase schema (auth-based, RLS, soft delete). Idempotent.
+-- Chelav — Supabase schema (auth-based, RLS, soft delete). Idempotent.
 -- Paste into Supabase Dashboard -> SQL Editor -> Run.
 -- Dashboard settings (manual): Auth -> Providers -> Email: "Confirm email" OFF,
 -- min password length 8, anonymous sign-ins OFF, rate limits ON.

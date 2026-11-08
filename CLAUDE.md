@@ -1,4 +1,4 @@
-# CLAUDE.md — Stash
+# CLAUDE.md — Chelav
 
 Calm expense tracker built around one question: **"How much can I spend today?"**
 `monthly money to live on = income − bills − savings`, divided by the days left in the cycle. Under-spend and every future day gets more; over-spend and the extra is spread across the remaining days.
