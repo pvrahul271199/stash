@@ -43,9 +43,6 @@ export function Welcome({
           <div className="h-2" aria-hidden="true" />
           <GhostButton onClick={onAccount}>Sign up or log in with Google</GhostButton>
           <GhostButton onClick={onSample}>Or explore with sample data first</GhostButton>
-          <a href="/about/" className="mx-auto mt-1 inline-flex min-h-[40px] items-center text-[13px] text-faint underline">
-            About Chelav
-          </a>
         </div>
       )}
     </main>
