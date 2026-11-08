@@ -10,6 +10,7 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "icons": "node scripts/gen-icons.mjs",
+    "og": "node scripts/gen-og.mjs",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build"
   },

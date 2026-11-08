@@ -16,8 +16,25 @@ const figtree = Figtree({
 });
 
 export const metadata: Metadata = {
-  title: 'Chelav - What can I spend today?',
-  description: 'A calm expense tracker built around one question: how much can I spend today?',
+  title: 'Chelav: Daily Spending Limit & Expense Tracker',
+  description:
+    'Know how much you can spend today. Chelav turns your income, bills and savings into one daily spending limit, and adjusts it as you spend. Free, private, works offline.',
+  applicationName: 'Chelav',
+  keywords: ['daily spending limit', 'expense tracker', 'daily budget app', 'how much can I spend today', 'budget tracker'],
+  openGraph: {
+    type: 'website',
+    siteName: 'Chelav',
+    url: '/',
+    title: 'Chelav: know what you can spend today',
+    description: 'One calm number a day: what you can still spend. No bank linking, works offline.',
+    images: [{ url: '/og.png', width: 1200, height: 630, alt: 'Chelav: know what you can spend today' }],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Chelav: know what you can spend today',
+    description: 'One calm number a day: what you can still spend. No bank linking, works offline.',
+    images: ['/og.png'],
+  },
   appleWebApp: { capable: true, title: 'Chelav', statusBarStyle: 'default' },
   metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || 'https://www.chelav.app'),
   alternates: { canonical: '/' },

@@ -23,9 +23,9 @@ export function Welcome({
           <Logo size={44} />
           <span className="font-display text-[22px] font-semibold tracking-tight text-[#1E1B4B]">Chelav</span>
         </div>
-        <h1 className="font-display text-[40px] font-semibold leading-[1.1] tracking-tight text-ink">
+        <h2 className="font-display text-[40px] font-semibold leading-[1.1] tracking-tight text-ink">
           Know what you can spend today.
-        </h1>
+        </h2>
         <p className="mt-4 text-body text-soft">
           Tell Chelav what comes in and what goes out once. Every day you get one number: what you can
           still spend. No guilt, no points. Just clarity.
@@ -43,6 +43,9 @@ export function Welcome({
           <div className="h-2" aria-hidden="true" />
           <GhostButton onClick={onAccount}>Sign up or log in with Google</GhostButton>
           <GhostButton onClick={onSample}>Or explore with sample data first</GhostButton>
+          <a href="/about/" className="mx-auto mt-1 inline-flex min-h-[40px] items-center text-[13px] text-faint underline">
+            About Chelav
+          </a>
         </div>
       )}
     </main>
