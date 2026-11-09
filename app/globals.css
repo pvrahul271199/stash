@@ -139,6 +139,22 @@ select:focus {
   height: 0;
 }
 
+/* Hairline vertical scrollbar */
+.thin-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(120, 120, 120, 0.35) transparent;
+}
+.thin-scrollbar::-webkit-scrollbar {
+  width: 2px;
+}
+.thin-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.thin-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(120, 120, 120, 0.35);
+  border-radius: 1px;
+}
+
 @keyframes demo-fade {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: none; }

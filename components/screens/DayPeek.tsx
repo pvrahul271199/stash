@@ -1,4 +1,5 @@
 'use client';
+import type { Entry } from '@/db/schema';
 import { PrimaryButton } from '../ui/Button';
 import { useDayEntries } from '@/db/queries';
 import type { DerivedCycle } from '@/lib/period';
@@ -10,12 +11,15 @@ export function DayPeek({
   cycle,
   day,
   onLog,
+  onEdit,
   onClose,
 }: {
   /** The cycle seen over its whole month (`monthView`): `day` counts from the month's first day. */
   cycle: DerivedCycle;
   day: number;
   onLog: () => void;
+  /** Open the edit sheet for one transaction. */
+  onEdit: (entry: Entry) => void;
   onClose: () => void;
 }) {
   const entries = useDayEntries(cycle.id, day) ?? [];
@@ -28,7 +32,7 @@ export function DayPeek({
         aria-modal="true"
         aria-label={`Day ${day}`}
         onClick={(e) => e.stopPropagation()}
-        className="max-h-[70%] w-full overflow-y-auto rounded-t-[24px] bg-white px-6 pt-3"
+        className="flex max-h-[80%] w-full flex-col rounded-t-[24px] bg-white px-6 pt-3"
         style={{ paddingBottom: 'calc(var(--safe-bottom) + 20px)' }}
       >
         <div className="mx-auto mb-3 h-1 w-9 rounded-full bg-line" aria-hidden="true" />
@@ -45,18 +49,38 @@ export function DayPeek({
             {day > cycle.currentDay ? 'Nothing planned for this day yet.' : 'Nothing logged on this day.'}
           </p>
         ) : (
-          <ul className="mt-3 divide-y divide-line">
-            {entries.slice(0, 6).map((e) => (
-              <li key={e.id} className="flex items-center justify-between py-2.5">
-                <span className="min-w-0 truncate text-[14px] text-ink">{e.label}</span>
-                <span className="num ml-3 text-[14px] text-ink">{inr(e.amount)}</span>
-              </li>
-            ))}
-            {entries.length > 6 && <li className="py-2 text-[12px] text-faint">+ {entries.length - 6} more</li>}
-          </ul>
+          <>
+            <p className="mt-3 text-[12px] text-faint">Tap a spend to edit it</p>
+            <ul className="mt-1 min-h-0 flex-1 divide-y divide-line thin-scrollbar overflow-y-auto overscroll-contain">
+              {entries.map((e) => (
+                <li key={e.id}>
+                  <button
+                    type="button"
+                    onClick={() => onEdit(e)}
+                    aria-label={`Edit ${e.label}, ${inr(e.amount)}`}
+                    className="flex w-full items-center gap-3 py-2.5 text-left active:bg-line/40"
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[14px] text-ink">{e.label}</span>
+                      <span className="block truncate text-[12px] text-faint">
+                        {e.subcategory ?? e.category}
+                        {e.payment ? ` · ${e.payment}` : ''}
+                        {e.fromSavings ? ' · from savings' : ''}
+                      </span>
+                    </span>
+                    <span className="num text-[14px] text-ink">{inr(e.amount)}</span>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-faint" aria-hidden="true">
+                      <path d="M12 20h9" />
+                      <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                    </svg>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </>
         )}
 
-        <div className="mt-5">
+        <div className="mt-4 shrink-0">
           <PrimaryButton onClick={onLog}>Log a spend on this day</PrimaryButton>
         </div>
       </div>

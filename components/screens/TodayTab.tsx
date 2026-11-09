@@ -230,6 +230,7 @@ export function TodayTab({ cycle, plan, onCreateAccount, onHome }: { cycle: Deri
           cycle={month}
           day={peekDay}
           onClose={() => setPeekDay(null)}
+          onEdit={setEditing}
           onLog={() => {
             setLogDay(peekDay === month.currentDay ? undefined : peekDay);
             setLogReturn('today');
