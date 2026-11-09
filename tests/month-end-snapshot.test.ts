@@ -41,6 +41,8 @@ describe('month-end summary for a guest who logged the whole month', () => {
     await addSpend(sep, { amount: 500, label: 'a', category: 'Food' }, new Date(2026, 8, 5, 12), undefined, '2026-09-05');
     const oct = (await cycleFor(getDB(), '2026-10-15', '2026-10-15'))!;
     await addSpend(oct, { amount: 700, label: 'b', category: 'Food' }, new Date(2026, 9, 6, 12), undefined, '2026-10-06');
+    expect((await loadSnapshot(getDB(), '2026-11-20')).pending).toEqual([]); // nobody closed a last day yet (e.g. a fresh login)
+    await getDB().meta.update('main', { closedThrough: '2026-10-31' });
     const snap = await loadSnapshot(getDB(), '2026-11-20'); // well past day 3
     expect(snap.pending.map((c) => c.monthStart)).toEqual(['2026-09-01', '2026-10-01']);
     await dismissMonthSummary(snap.pending[0].id);
@@ -53,6 +55,7 @@ describe('month-end summary for a guest who logged the whole month', () => {
     await createPlan({ income: 60000, bills: 0, savings: 0, monthLength: 30 }, '2026-11-03');
     const nov = (await cycleFor(getDB(), '2026-11-10', '2026-11-10'))!;
     await addSpend(nov, { amount: 900, label: 'old', category: 'Food' }, new Date(2026, 9, 20, 12), undefined, '2026-10-20');
+    await getDB().meta.update('main', { closedThrough: '2026-11-09' });
     const snap = await loadSnapshot(getDB(), '2026-11-10');
     expect(snap.pending.map((c) => c.monthStart)).toEqual(['2026-10-01']);
   });

@@ -224,6 +224,7 @@ export async function loadSnapshot(db: StashDB, today: string): Promise<Snapshot
   const previousSeen = !previous || (meta?.monthSummarySeen ?? []).includes(previous.id);
   // Every finished month nobody has looked back on yet (not just the latest one, and not only in the first days of the next month).
   const seen = new Set(meta?.monthSummarySeen ?? []);
+  const closedThrough = meta?.closedThrough ?? null;
   const plans = (await db.plans.toArray()).filter(alive);
   const firstBudget = plans.reduce<string | null>((m, p) => (p.effectiveFrom && (m == null || p.effectiveFrom < m) ? p.effectiveFrom : m), null);
   const pending = cycle
@@ -231,6 +232,9 @@ export async function loadSnapshot(db: StashDB, today: string): Promise<Snapshot
         .filter(
           (c) =>
             c.monthEnd < today &&
+            // only once the user has closed the month's last day on this device (a login or new device never triggers it)
+            closedThrough != null &&
+            closedThrough >= c.monthEnd &&
             !seen.has(c.id) &&
             // a budgeted month always; an earlier month only reconstructed from backdated spends only when it has spends
             (firstBudget == null || c.monthEnd >= firstBudget || c.fromSavingsTotal > 0 || c.days.some((d) => d.spent > 0)),
