@@ -18,6 +18,7 @@ export function PWAManager() {
     window.addEventListener('appinstalled', onInstalled);
 
     let cancelled = false;
+    let updateTimer: ReturnType<typeof setInterval> | undefined;
     if ('serviceWorker' in navigator && process.env.NODE_ENV === 'production') {
       const hadController = !!navigator.serviceWorker.controller;
       navigator.serviceWorker
@@ -35,6 +36,8 @@ export function PWAManager() {
           document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'visible') reg.update().catch(() => {});
           });
+          // ...and every 30 minutes while the app stays open.
+          updateTimer = setInterval(() => reg.update().catch(() => {}), 30 * 60_000);
         })
         .catch(() => {});
       let reloading = false;
@@ -46,6 +49,7 @@ export function PWAManager() {
     }
     return () => {
       cancelled = true;
+      if (updateTimer) clearInterval(updateTimer);
       window.removeEventListener('beforeinstallprompt', onPrompt);
       window.removeEventListener('appinstalled', onInstalled);
     };
