@@ -36,8 +36,11 @@ export function PWAManager() {
           document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'visible') reg.update().catch(() => {});
           });
-          // ...and every 30 minutes while the app stays open.
-          updateTimer = setInterval(() => reg.update().catch(() => {}), 30 * 60_000);
+          // ...and every 5 minutes while the app stays open and visible. This only re-fetches the tiny sw.js
+          // (served no-cache); nothing else downloads unless its hash changed, and then the "Reload" toast appears.
+          updateTimer = setInterval(() => {
+            if (document.visibilityState === 'visible' && navigator.onLine) reg.update().catch(() => {});
+          }, 5 * 60_000);
         })
         .catch(() => {});
       let reloading = false;
