@@ -525,13 +525,14 @@ export function LogSpend({
               aria-hidden={calc.op === null}
             >
               {calc.op !== null && calc.acc !== null && (
-                <>
-                  <span className="calc-pop text-faint">{calc.acc.toLocaleString('en-IN')}</span>
-                  <span key={calc.op} className="calc-pop text-soft">
-                    {OP_SYMBOL[calc.op]} {calc.digits ? Number(calc.digits).toLocaleString('en-IN') : ''}
+                <div className="flex min-w-[44px] flex-col items-stretch">
+                  <span className="calc-pop text-right text-faint">{calc.acc.toLocaleString('en-IN')}</span>
+                  <span key={calc.op} className="calc-pop flex justify-between gap-1.5 text-soft">
+                    <span>{OP_SYMBOL[calc.op]}</span>
+                    <span>{calc.digits ? Number(calc.digits).toLocaleString('en-IN') : ''}</span>
                   </span>
-                  <span className="mt-0.5 h-px w-14 bg-line" />
-                </>
+                  <span className="mt-0.5 h-px w-full bg-line" />
+                </div>
               )}
             </div>
             <div className="num flex items-baseline justify-center" style={{ fontSize: size, lineHeight: 1.05 }}>
@@ -726,7 +727,7 @@ export function LogSpend({
             </Chip>
           </div>
 
-          <Keypad onKey={press} pendingOp={calc.op} calc />
+          <Keypad onKey={press} pendingOp={calc.op} opSelected={calc.digits === ''} calc />
           <PrimaryButton
             disabled={saving}
             className="mt-2 h-[46px] min-h-0 text-[15px]"

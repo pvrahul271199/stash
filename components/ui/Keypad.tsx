@@ -29,10 +29,13 @@ const CompactDeleteIcon = () => (
 export function Keypad({
   onKey,
   pendingOp = null,
+  opSelected = true,
   calc = false,
 }: {
   onKey: (k: string) => void;
   pendingOp?: Op | null;
+  /** Highlight the pending operator (true until the next number is typed). */
+  opSelected?: boolean;
   /** Show the + − × ÷ column. Off = the plain 3-column digit pad (onboarding, stories). */
   calc?: boolean;
 }) {
@@ -42,7 +45,7 @@ export function Keypad({
         const isOpKey = key in GLYPH;
         // While an operation is pending the spare "00" key becomes "=".
         const k = key === '00' && pendingOp ? '=' : key;
-        const active = isOpKey && pendingOp === key;
+        const active = isOpKey && opSelected && pendingOp === key;
         return (
           <button
             key={key}
