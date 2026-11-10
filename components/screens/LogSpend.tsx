@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { BackIcon, IconButton, PrimaryButton } from '../ui/Button';
 import { Chip } from '../ui/Chip';
 import { Keypad } from '../ui/Keypad';
+import { CALC_INIT, OP_SYMBOL, calcPress, calcResult, isOp, type CalcState } from '../../lib/calc';
 import { CategoryPicker } from './CategoryPicker';
 import { BigSpend } from './BigSpend';
 import {
@@ -29,7 +30,6 @@ import { useToast } from '@/store/toast';
 import posthog from 'posthog-js';
 import { EventHint } from '../ui/EventHint';
 
-const MAX_DIGITS = 7;
 
 interface Pending {
   label: string;
@@ -52,7 +52,8 @@ export function LogSpend({
   targetDate?: string;
   onClose: () => void;
 }) {
-  const [digits, setDigits] = useState('');
+  const [calc, setCalc] = useState<CalcState>(CALC_INIT);
+  const digits = calc.digits;
   const [note, setNote] = useState('');
   const [noteOpen, setNoteOpen] = useState(false);
   const [eventMenuOpen, setEventMenuOpen] = useState(false);
@@ -110,15 +111,9 @@ export function LogSpend({
   const pinned = useQuickTypes();
   const used = useUsedTypes();
   const chips = quickChips(cats, pinned, used, new Date().getHours());
-  const amount = digits === '' ? 0 : Number(digits);
+  const amount = calcResult(calc);
 
-  const press = useCallback((k: string) => {
-    setDigits((d) => {
-      if (k === 'del') return d.slice(0, -1);
-      const nd = (d + k).replace(/^0+/, '');
-      return nd.length > MAX_DIGITS ? d : nd;
-    });
-  }, []);
+  const press = useCallback((k: string) => setCalc((c) => calcPress(c, k)), []);
 
   async function handleQuickCreateEvent() {
     const err = await startEvent(newEventName);
@@ -221,20 +216,28 @@ export function LogSpend({
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
       if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA') return;
+      const opKey = e.key === 'x' || e.key === 'X' ? '*' : e.key;
       if (/^\d$/.test(e.key)) press(e.key);
+      else if (isOp(opKey)) press(opKey);
+      else if (e.key === '=' ) press('=');
       else if (e.key === 'Backspace') press('del');
       else if (e.key === 'Escape') onClose();
       else if (e.key === 'Enter' && t.tagName !== 'BUTTON') {
         e.preventDefault();
+        if (calc.op !== null) {
+          press('=');
+          return;
+        }
         void commit({ label: 'Sort later' });
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [press, onClose, amount, view]);
+  }, [press, onClose, amount, view, calc.op]);
 
-  const size = digits.length <= 5 ? 72 : digits.length === 6 ? 60 : 52;
+  const shown = String(amount).length;
+  const size = shown <= 5 ? 72 : shown === 6 ? 60 : 52;
 
   return (
     <div
@@ -517,6 +520,20 @@ export function LogSpend({
                 Day {effectiveDay} · {targetDateLabel}
               </span>
             ) : null}
+            <div
+              className="num mb-1.5 flex h-[42px] flex-col items-center justify-end gap-px text-[14px] leading-[18px]"
+              aria-hidden={calc.op === null}
+            >
+              {calc.op !== null && calc.acc !== null && (
+                <>
+                  <span className="calc-pop text-faint">{calc.acc.toLocaleString('en-IN')}</span>
+                  <span key={calc.op} className="calc-pop text-soft">
+                    {OP_SYMBOL[calc.op]} {calc.digits ? Number(calc.digits).toLocaleString('en-IN') : ''}
+                  </span>
+                  <span className="mt-0.5 h-px w-14 bg-line" />
+                </>
+              )}
+            </div>
             <div className="num flex items-baseline justify-center" style={{ fontSize: size, lineHeight: 1.05 }}>
               <span className="mr-1 text-faint" aria-hidden="true">{currency.symbol}</span>
               <span className={amount === 0 ? 'text-faint' : 'text-ink'} aria-label={`Amount ${amount} ${currency.code}`}>
@@ -709,7 +726,7 @@ export function LogSpend({
             </Chip>
           </div>
 
-          <Keypad onKey={press} />
+          <Keypad onKey={press} pendingOp={calc.op} calc />
           <PrimaryButton
             disabled={saving}
             className="mt-2 h-[46px] min-h-0 text-[15px]"

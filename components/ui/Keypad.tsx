@@ -1,7 +1,13 @@
 'use client';
 import { BackIcon } from './Button';
 
-const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '00', '0', 'del'] as const;
+import type { Op } from '../../lib/calc';
+
+// 4 columns: digits on the left, operators down the right edge.
+const KEYS = ['1', '2', '3', '/', '4', '5', '6', '*', '7', '8', '9', '-', '00', '0', 'del', '+'] as const;
+const PLAIN_KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '00', '0', 'del'] as const;
+const GLYPH: Record<string, string> = { '/': '÷', '*': '×', '-': '−', '+': '+' };
+const LABEL: Record<string, string> = { '/': 'Divide', '*': 'Multiply', '-': 'Subtract', '+': 'Add', '=': 'Equals', del: 'Delete' };
 
 const CompactDeleteIcon = () => (
   <svg
@@ -20,20 +26,44 @@ const CompactDeleteIcon = () => (
   </svg>
 );
 
-export function Keypad({ onKey }: { onKey: (k: string) => void }) {
+export function Keypad({
+  onKey,
+  pendingOp = null,
+  calc = false,
+}: {
+  onKey: (k: string) => void;
+  pendingOp?: Op | null;
+  /** Show the + − × ÷ column. Off = the plain 3-column digit pad (onboarding, stories). */
+  calc?: boolean;
+}) {
   return (
-    <div className="grid grid-cols-3 gap-1.5" role="group" aria-label="Amount keypad">
-      {KEYS.map((k) => (
-        <button
-          key={k}
-          type="button"
-          aria-label={k === 'del' ? 'Delete' : k}
-          onClick={() => onKey(k)}
-          className="num flex h-[44px] min-h-0 items-center justify-center rounded-key bg-tint text-[22px] text-ink active:opacity-70"
-        >
-          {k === 'del' ? <CompactDeleteIcon /> : k}
-        </button>
-      ))}
+    <div className={`grid ${calc ? 'grid-cols-4' : 'grid-cols-3'} gap-1.5`} role="group" aria-label="Amount keypad">
+      {(calc ? KEYS : PLAIN_KEYS).map((key) => {
+        const isOpKey = key in GLYPH;
+        // While an operation is pending the spare "00" key becomes "=".
+        const k = key === '00' && pendingOp ? '=' : key;
+        const active = isOpKey && pendingOp === key;
+        return (
+          <button
+            key={key}
+            type="button"
+            aria-label={LABEL[k] ?? k}
+            aria-pressed={isOpKey ? active : undefined}
+            onClick={() => onKey(k)}
+            className={`num flex h-[44px] min-h-0 items-center justify-center rounded-key text-[22px] transition-colors duration-150 active:opacity-70 ${
+              active
+                ? 'bg-ink text-white'
+                : k === '='
+                  ? 'bg-ink/10 text-ink'
+                  : isOpKey
+                    ? 'bg-ink/[0.06] text-soft'
+                    : 'bg-tint text-ink'
+            }`}
+          >
+            {k === 'del' ? <CompactDeleteIcon /> : (GLYPH[k] ?? k)}
+          </button>
+        );
+      })}
     </div>
   );
 }
