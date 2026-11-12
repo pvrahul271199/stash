@@ -35,6 +35,7 @@ import { useSampleMode } from '@/lib/sampleMode';
 import { withLoading } from '@/store/busy';
 import { useToast } from '@/store/toast';
 import { usePWA } from '@/store/pwa';
+import { UpdateButton } from '@/components/pwa/UpdateButton';
 import posthog from 'posthog-js';
 
 const AVATAR_STYLE = {
@@ -628,6 +629,7 @@ export function UserTab({
           </SecondaryButton>
         )}
         {installEvent && <SecondaryButton onClick={install}>Install Chelav as PWA</SecondaryButton>}
+        <UpdateButton />
         <button
           type="button"
           onClick={() => setConfirm('delete')}
