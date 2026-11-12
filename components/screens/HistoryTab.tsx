@@ -44,6 +44,7 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: DerivedCycle; p
   const [viewMonth, setViewMonth] = useState<number>(() => Number(today.slice(5, 7))); // 1-12
   const [selectedIso, setSelectedIso] = useState<string>(() => today);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
 
   const [editing, setEditing] = useState<Entry | null>(null);
   const [addingForDate, setAddingForDate] = useState<string | null>(null);
@@ -388,7 +389,10 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: DerivedCycle; p
                         key={cell.iso}
                         type="button"
                         role="cell"
-                        onClick={() => setSelectedIso(cell.iso)}
+                        onClick={() => {
+                          setSelectedIso(cell.iso);
+                          setSheetOpen(true);
+                        }}
                         aria-pressed={isSelected}
                         aria-label={ariaLabel}
                         className={`flex h-[66px] min-h-0 flex-col items-center justify-between rounded-[10px] px-0.5 py-1 text-center transition-colors ${
@@ -438,8 +442,18 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: DerivedCycle; p
             </div>
           </div>
 
-          {/* Selected Date Detail Card */}
-          <section className="mt-6 rounded-note border border-line p-4" aria-label="Selected day details">
+          {/* Selected date detail: bottom sheet, same as the Today day peek */}
+          {sheetOpen && (
+          <div className="absolute inset-0 z-[45] flex items-end bg-ink/40" role="presentation" onClick={() => setSheetOpen(false)}>
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-label="Selected day details"
+            onClick={(ev) => ev.stopPropagation()}
+            className="thin-scrollbar max-h-[80%] w-full overflow-y-auto overscroll-contain rounded-t-[24px] bg-white px-6 pt-3"
+            style={{ paddingBottom: 'calc(var(--safe-bottom) + 20px)' }}
+          >
+            <div className="mx-auto mb-3 h-1 w-9 rounded-full bg-line" aria-hidden="true" />
             <div className="flex items-baseline justify-between border-b border-line pb-3">
               <div>
                 <h2 className="text-[16px] font-semibold text-ink">
@@ -521,7 +535,10 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: DerivedCycle; p
             <div className="mt-2 border-t border-line pt-3">
               <button
                 type="button"
-                onClick={() => setAddingForDate(selectedIso)}
+                onClick={() => {
+                  setSheetOpen(false);
+                  setAddingForDate(selectedIso);
+                }}
                 aria-label={`Log for this date (${formatShort(selectedIso)})`}
                 className="flex h-10 min-h-0 w-full items-center justify-center gap-1.5 rounded-key border border-line bg-white text-[13px] font-medium text-ink transition-colors active:scale-[0.99]"
               >
@@ -541,6 +558,8 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: DerivedCycle; p
               </button>
             </div>
           </section>
+          </div>
+          )}
         </>
       )}
 

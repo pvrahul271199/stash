@@ -50,6 +50,17 @@ export function PWAManager() {
         window.location.reload();
       });
     }
+    // Dev: a service worker left over from a production run on this origin serves stale JS, which makes React
+    // hydrate against an older bundle than the server HTML. Remove it and its caches.
+    if ('serviceWorker' in navigator && process.env.NODE_ENV !== 'production') {
+      navigator.serviceWorker
+        .getRegistrations()
+        .then((regs) => {
+          regs.forEach((r) => void r.unregister());
+          if (regs.length && 'caches' in window) caches.keys().then((ks) => ks.forEach((k) => void caches.delete(k)));
+        })
+        .catch(() => {});
+    }
     return () => {
       cancelled = true;
       if (updateTimer) clearInterval(updateTimer);
