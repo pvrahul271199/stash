@@ -46,7 +46,7 @@ export function UpdateButton() {
   };
 
   const label =
-    phase === 'checking' ? 'Checking…' : phase === 'updating' ? 'Updating…' : phase === 'latest' ? "You're on the latest version ✓" : waiting ? 'New version ready · Update now' : 'Check for updates';
+    phase === 'checking' ? 'Checking…' : phase === 'updating' ? 'Updating…' : phase === 'latest' ? "You're on the latest version" : waiting ? 'New version ready · Update now' : 'Check for updates';
 
   return (
     <button
