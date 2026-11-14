@@ -237,7 +237,7 @@ export function LogSpend({
   }, [press, onClose, amount, view, calc.op]);
 
   const shown = String(amount).length;
-  const size = shown <= 5 ? 72 : shown === 6 ? 60 : 52;
+  const size = shown <= 5 ? 54 : shown === 6 ? 46 : 40;
 
   return (
     <div
@@ -521,7 +521,7 @@ export function LogSpend({
               </span>
             ) : null}
             <div
-              className="num mb-1.5 flex h-[42px] flex-col items-center justify-end gap-px text-[14px] leading-[18px]"
+              className="num mb-1 flex h-[32px] flex-col items-center justify-end gap-px text-[14px] leading-[18px]"
               aria-hidden={calc.op === null}
             >
               {calc.op !== null && calc.acc !== null && (
@@ -704,12 +704,12 @@ export function LogSpend({
             )}
           </div>
 
-          <div className="mb-2 flex flex-wrap justify-center gap-1">
+          <div className="mb-1.5 flex flex-wrap justify-center gap-1">
             {chips.map((c) => (
               <Chip
                 key={`${c.category}::${c.subcategory}`}
                 onClick={() => commit({ label: c.subcategory, category: c.category, subcategory: c.subcategory })}
-                className="h-7 min-h-0 px-2.5 text-[11px]"
+                className="h-6 min-h-0 px-2 text-[10.5px]"
                 title={c.category}
               >
                 {c.label}
@@ -721,7 +721,7 @@ export function LogSpend({
                 if (amount <= 0) toast('Enter an amount first', 'warm');
                 else setView('picker');
               }}
-              className="h-7 min-h-0 px-2.5 text-[11px]"
+              className="h-6 min-h-0 px-2 text-[10.5px]"
             >
               More
             </Chip>
@@ -730,7 +730,7 @@ export function LogSpend({
           <Keypad onKey={press} pendingOp={calc.op} opSelected={calc.digits === ''} calc />
           <PrimaryButton
             disabled={saving}
-            className="mt-2 h-[46px] min-h-0 text-[15px]"
+            className="mt-1.5 h-[40px] min-h-0 text-[14px]"
             onClick={() => commit({ label: 'Sort later' })}
           >
             {saving ? 'Saving…' : 'Save'}

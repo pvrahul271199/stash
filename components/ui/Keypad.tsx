@@ -11,8 +11,8 @@ const LABEL: Record<string, string> = { '/': 'Divide', '*': 'Multiply', '-': 'Su
 
 const CompactDeleteIcon = () => (
   <svg
-    width="20"
-    height="20"
+    width="17"
+    height="17"
     viewBox="0 0 24 24"
     fill="none"
     stroke="currentColor"
@@ -40,7 +40,7 @@ export function Keypad({
   calc?: boolean;
 }) {
   return (
-    <div className={`grid ${calc ? 'grid-cols-4' : 'grid-cols-3'} gap-1.5`} role="group" aria-label="Amount keypad">
+    <div className={`grid ${calc ? 'grid-cols-4' : 'grid-cols-3'} gap-1`} role="group" aria-label="Amount keypad">
       {(calc ? KEYS : PLAIN_KEYS).map((key) => {
         const isOpKey = key in GLYPH;
         // While an operation is pending the spare "00" key becomes "=".
@@ -53,7 +53,7 @@ export function Keypad({
             aria-label={LABEL[k] ?? k}
             aria-pressed={isOpKey ? active : undefined}
             onClick={() => onKey(k)}
-            className={`num flex h-[44px] min-h-0 items-center justify-center rounded-key text-[22px] transition-colors duration-150 active:opacity-70 ${
+            className={`num flex h-[36px] min-h-0 items-center justify-center rounded-key text-[18px] transition-colors duration-150 active:opacity-70 ${
               active
                 ? 'bg-ink text-white'
                 : k === '='
