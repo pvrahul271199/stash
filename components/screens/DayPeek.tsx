@@ -1,4 +1,5 @@
 'use client';
+import { entryLines } from '@/lib/entryDisplay';
 import type { Entry } from '@/db/schema';
 import { PrimaryButton } from '../ui/Button';
 import { useDayEntries } from '@/db/queries';
@@ -57,15 +58,14 @@ export function DayPeek({
                   <button
                     type="button"
                     onClick={() => onEdit(e)}
-                    aria-label={`Edit ${e.label}, ${inr(e.amount)}`}
+                    aria-label={`Edit ${entryLines(e).title}, ${inr(e.amount)}`}
                     className="flex w-full items-center gap-3 py-2.5 text-left active:bg-line/40"
                   >
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[14px] text-ink">{e.label}</span>
+                      <span className="block truncate text-[14px] font-medium text-ink">{entryLines(e).title}</span>
+                      {entryLines(e).detail && <span className="block truncate text-[13px] text-soft">{entryLines(e).detail}</span>}
                       <span className="block truncate text-[12px] text-faint">
-                        {e.subcategory ?? e.category}
-                        {e.payment ? ` · ${e.payment}` : ''}
-                        {e.fromSavings ? ' · from savings' : ''}
+                        {[entryLines(e).meta, e.fromSavings ? 'from savings' : ''].filter(Boolean).join(' · ')}
                       </span>
                     </span>
                     <span className="num text-[14px] text-ink">{inr(e.amount)}</span>

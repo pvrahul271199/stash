@@ -19,7 +19,7 @@ export function HugeNumber({
   const wrap = useRef<HTMLDivElement>(null);
   const inner = useRef<HTMLSpanElement>(null);
   const [scale, setScale] = useState(1);
-  const text = num(value);
+  const text = num(value).replace('-', '−'); // a real minus sign for negatives
   const space = currency.symbol.length > 1 ? ' ' : '';
 
   useLayoutEffect(() => {

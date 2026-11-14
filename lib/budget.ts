@@ -87,17 +87,19 @@ export function leftToday(allowance: number, spent: number): number {
   return allowance - spent;
 }
 
+/** What the Today screen shows: can go negative when you've spent more than today's amount. */
 export function displayLeft(allowance: number, spent: number): number {
-  return Math.max(leftToday(allowance, spent), 0);
+  return leftToday(allowance, spent);
 }
 
-/** "₹X over today. It spreads across the next N days, about ₹Y each." */
+/** "₹X over today of ₹A. It spreads across the next N days, about ₹Y each." */
 export function overMessage(allowance: number, spent: number, s: CycleState): string | null {
   const over = spent - allowance;
   if (over <= 0) return null;
   const next = daysLeft(s) - 1;
-  if (next <= 0) return `${inr(over)} over today.`;
-  return `${inr(over)} over today. It spreads across the next ${next} ${next === 1 ? 'day' : 'days'}, about ${inr(over / next)} each.`;
+  const head = `${inr(over)} over today of ${inr(allowance)}.`;
+  if (next <= 0) return head;
+  return `${head} It spreads across the next ${next} ${next === 1 ? 'day' : 'days'}, about ${inr(over / next)} each.`;
 }
 
 export const POOL_USED_UP_MESSAGE =

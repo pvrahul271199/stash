@@ -1,4 +1,5 @@
 'use client';
+import { entryLines } from '@/lib/entryDisplay';
 import { track } from '@/lib/analytics';
 import posthog from 'posthog-js';
 import { useEffect, useRef, useState } from 'react';
@@ -140,7 +141,7 @@ export function TodayTab({ cycle, plan, onCreateAccount, onHome }: { cycle: Deri
           {used ? (
             <Note tone="adjust">{POOL_USED_UP_MESSAGE}</Note>
           ) : over ? (
-            <Note tone="adjust">{over}</Note>
+            <p className="text-[13px] font-medium leading-snug tracking-[0.01em] text-warm">{over}</p>
           ) : (
             <p className="text-[15px] text-good">
               {spent > 0 ? `${inr(spent)} spent so far. You're on plan.` : `That's your amount for today is ${inr(allowance)}.`}
@@ -178,15 +179,11 @@ export function TodayTab({ cycle, plan, onCreateAccount, onHome }: { cycle: Deri
                       className="min-w-0 flex-1 text-left"
                     >
                       <p className="text-[15px] font-medium text-ink">
-                        {e.label}
+                        {entryLines(e).title}
                         {e.fromSavings && <span className="ml-2 text-[12px] text-warm">from savings</span>}
                       </p>
-                      <p className="text-[13px] text-faint">
-                        {e.subcategory ?? e.category}
-                        {e.payment ? ` · ${e.payment}` : ''}
-                        {e.event ? ` · ${e.event}` : ''}
-                      </p>
-                      {e.note && <p className="mt-0.5 truncate text-[12px] text-soft">{e.note}</p>}
+                      {entryLines(e).detail && <p className="truncate text-[13px] text-soft">{entryLines(e).detail}</p>}
+                      {entryLines(e).meta && <p className="text-[12px] text-faint">{entryLines(e).meta}</p>}
                     </button>
                     <p className="num text-[20px] text-ink">{inr(e.amount)}</p>
                   </li>

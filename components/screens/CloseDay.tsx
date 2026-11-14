@@ -1,4 +1,5 @@
 'use client';
+import { entryLines } from '@/lib/entryDisplay';
 import { BackIcon, IconButton, PrimaryButton } from '../ui/Button';
 import { removeEntry } from '@/db/queries';
 import type { Entry } from '@/db/schema';
@@ -104,13 +105,11 @@ export function CloseDay({
               <li key={e.id} className="flex items-center gap-2 py-2.5">
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[15px] font-medium text-ink">
-                    {e.label}
+                    {entryLines(e).title}
                     {e.fromSavings && <span className="ml-2 text-[12px] font-normal text-warm">from savings</span>}
                   </p>
-                  <p className="truncate text-[12.5px] text-faint">
-                    {[e.subcategory ?? e.category, e.payment, e.event].filter(Boolean).join(' · ')}
-                  </p>
-                  {e.note && <p className="mt-0.5 truncate text-[12px] text-soft">{e.note}</p>}
+                  {entryLines(e).detail && <p className="truncate text-[13px] text-soft">{entryLines(e).detail}</p>}
+                  {entryLines(e).meta && <p className="truncate text-[12px] text-faint">{entryLines(e).meta}</p>}
                 </div>
                 <p className="num text-[17px] text-ink">{inr(e.amount)}</p>
                 <button

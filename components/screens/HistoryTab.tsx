@@ -1,4 +1,5 @@
 'use client';
+import { entryLines } from '@/lib/entryDisplay';
 import { useMemo, useState } from 'react';
 import {
   removeEntry,
@@ -35,6 +36,7 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: DerivedCycle; p
   const { currency } = useCurrency();
   const allCycles = useAllCycles() ?? [activeCycle];
   const [query, setQuery] = useState('');
+  const [searchFocused, setSearchFocused] = useState(false);
   const isSearching = query.trim().length > 0;
   const allEntries = useAllEntries(true) ?? [];
   const dayRows = useMemo(() => dayRowsOf(activeCycle), [activeCycle]);
@@ -91,6 +93,19 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: DerivedCycle; p
     [allEntries, allCycles, query],
   );
 
+  // Prompts for the empty search box: the user's own most-used categories and types.
+  const prompts = useMemo(() => {
+    const top = (count: Map<string, number>) => [...count.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k]) => k);
+    const cats = new Map<string, number>();
+    const types = new Map<string, number>();
+    for (const e of allEntries) {
+      cats.set(e.category, (cats.get(e.category) ?? 0) + 1);
+      if (e.subcategory) types.set(e.subcategory, (types.get(e.subcategory) ?? 0) + 1);
+    }
+    return { cats: top(cats), types: top(types) };
+  }, [allEntries]);
+  const showPrompts = searchFocused && !isSearching && (prompts.cats.length > 0 || prompts.types.length > 0);
+
   // Spent in the calendar month being viewed (the calendar below picks the month; no separate month chips).
   const monthPrefix = `${viewYear}-${String(viewMonth).padStart(2, '0')}`;
   const monthSpent = useMemo(() => {
@@ -112,6 +127,8 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: DerivedCycle; p
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
+          onFocus={() => setSearchFocused(true)}
+          onBlur={() => setSearchFocused(false)}
           placeholder={`Search spends, category, UPI, Card, event, or ${currency.symbol}…`}
           aria-label="Search spends"
           className="h-11 w-full rounded-key border border-line bg-white pl-3.5 pr-9 text-[14px] text-ink placeholder:text-faint"
@@ -128,8 +145,37 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: DerivedCycle; p
         )}
       </div>
 
+      {showPrompts && (
+        <div className="mt-4 flex flex-col gap-4" aria-label="Search suggestions">
+            <div>
+              <p className="text-[12px] font-semibold uppercase tracking-wide text-soft">By category</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {prompts.cats.map((c) => (
+                  <button key={c} type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => setQuery(c)} className="min-h-0 rounded-full border border-line bg-white px-3 py-1.5 text-[13px] text-ink active:bg-tint">
+                    {c}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <p className="text-[12px] font-semibold uppercase tracking-wide text-soft">By type</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {prompts.types.map((c) => (
+                  <button key={c} type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => setQuery(c)} className="min-h-0 rounded-full border border-line bg-white px-3 py-1.5 text-[13px] text-ink active:bg-tint">
+                    {c}
+                  </button>
+                ))}
+              </div>
+            </div>
+          <div>
+            <p className="text-[12px] font-semibold uppercase tracking-wide text-soft">By amount</p>
+            <p className="mt-2 text-[13px] text-faint">Type a number, like 450</p>
+          </div>
+        </div>
+      )}
+
       {/* Search results mode */}
-      {query.trim() ? (
+      {showPrompts ? null : query.trim() ? (
         <section className="mt-5" aria-label="Search results">
           <p className="text-[13px] text-soft">
             {searchResults.length === 0
@@ -154,15 +200,11 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: DerivedCycle; p
                         className="min-w-0 flex-1 text-left"
                       >
                         <p className="truncate text-[15px] font-medium text-ink">
-                          {e.label}
+                          {entryLines(e).title}
                           {e.fromSavings && <span className="ml-2 text-[12px] text-warm">from savings</span>}
                         </p>
-                        <p className="text-[12px] text-faint">
-                          {e.subcategory ?? e.category}
-                          {e.payment ? ` · ${e.payment}` : ''}
-                          {e.event ? ` · ${e.event}` : ''}
-                        </p>
-                        {e.note && <p className="mt-0.5 truncate text-[12px] text-soft">{e.note}</p>}
+                        {entryLines(e).detail && <p className="truncate text-[13px] text-soft">{entryLines(e).detail}</p>}
+                        {entryLines(e).meta && <p className="text-[12px] text-faint">{entryLines(e).meta}</p>}
                       </button>
                       <span className="num text-[17px] text-ink">{inr(e.amount)}</span>
                       <button
@@ -486,16 +528,12 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: DerivedCycle; p
                       className="min-w-0 flex-1 text-left"
                     >
                       <p className="truncate text-[15px] font-medium text-ink">
-                        {e.label}
+                        {entryLines(e).title}
                         {e.fromSavings && <span className="ml-2 text-[12px] text-warm">from savings</span>}
                         {e.isEstimate && <span className="ml-2 text-[12px] text-faint">estimate</span>}
                       </p>
-                      <p className="text-[12px] text-faint">
-                        {e.subcategory ?? e.category}
-                        {e.payment ? ` · ${e.payment}` : ''}
-                        {e.event ? ` · ${e.event}` : ''}
-                      </p>
-                      {e.note && <p className="mt-0.5 truncate text-[12px] text-soft">{e.note}</p>}
+                      {entryLines(e).detail && <p className="truncate text-[13px] text-soft">{entryLines(e).detail}</p>}
+                      {entryLines(e).meta && <p className="text-[12px] text-faint">{entryLines(e).meta}</p>}
                     </button>
                     <p className="num text-[18px] text-ink">{inr(e.amount)}</p>
                     <button

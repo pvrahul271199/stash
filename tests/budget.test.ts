@@ -37,13 +37,13 @@ describe('allowance', () => {
   it('is 0 when the pool is empty or negative', () => {
     expect(todayAllowance({ ...fresh(), pool: -50 })).toBe(0);
   });
-  it('excludes fromSavings from spentToday and clamps display', () => {
+  it('excludes fromSavings from spentToday and shows a negative when over', () => {
     const e = [
       { amount: 100, fromSavings: false },
       { amount: 2400, fromSavings: true },
     ];
     expect(spentToday(e)).toBe(100);
-    expect(displayLeft(300, 500)).toBe(0);
+    expect(displayLeft(300, 500)).toBe(-200);
   });
 });
 
@@ -74,7 +74,7 @@ describe('spreading', () => {
   it('shows the over message with the next-days spread', () => {
     const s = { ...fresh(), currentDay: 19, pool: 12 * 500 + 1 };
     const msg = overMessage(500, 620, { ...s, pool: 6000, currentDay: 19, totalDays: 30 });
-    expect(msg).toContain('₹120 over today');
+    expect(msg).toContain('₹120 over today of ₹500');
     expect(msg).toContain('next 11 days');
     expect(overMessage(500, 400, s)).toBeNull();
   });
