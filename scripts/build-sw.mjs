@@ -35,6 +35,10 @@ const urls = files.map((f) => {
 });
 
 let sw = readFileSync(join(OUT, 'sw.js'), 'utf8');
-sw = sw.replace('__VERSION__', version).replace('/*__PRECACHE__*/ []', JSON.stringify(urls));
+sw = sw.replace("const VERSION = '__VERSION__';", `const VERSION = '${version}';`).replace('/*__PRECACHE__*/ []', JSON.stringify(urls));
+if (sw.includes("'__VERSION__'") || sw.includes('/*__PRECACHE__*/')) {
+  console.error('sw.js placeholders were not replaced.');
+  process.exit(1);
+}
 writeFileSync(join(OUT, 'sw.js'), sw);
 console.log(`sw.js: version ${version}, precaching ${urls.length} files`);
