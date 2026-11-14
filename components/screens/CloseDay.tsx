@@ -47,7 +47,7 @@ export function CloseDay({
       role="dialog"
       aria-modal="true"
       aria-label="Close the day"
-      className="absolute inset-0 z-30 flex flex-col bg-white px-6"
+      className="screen-in absolute inset-0 z-30 flex flex-col bg-white px-6"
       style={{ paddingTop: 'calc(var(--safe-top) + 8px)', paddingBottom: 'calc(var(--safe-bottom) + 24px)' }}
     >
       <IconButton label="Back" onClick={onBack} className="-ml-3 self-start">

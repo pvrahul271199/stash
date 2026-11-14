@@ -67,7 +67,7 @@ export function PlanScreen({
       role="dialog"
       aria-modal="true"
       aria-label="Plan"
-      className="absolute inset-0 z-30 flex flex-col bg-white px-6"
+      className="screen-in absolute inset-0 z-30 flex flex-col bg-white px-6"
       style={{ paddingTop: 'calc(var(--safe-top) + 8px)', paddingBottom: 'calc(var(--safe-bottom) + 16px)' }}
     >
       <IconButton label="Back" onClick={onClose} className="-ml-3 self-start">

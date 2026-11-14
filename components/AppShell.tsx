@@ -346,50 +346,52 @@ export function AppShell() {
       body = (
         <>
           <div className="flex min-h-0 flex-1 flex-col">
-            {tab === 'today' && <TodayTab cycle={snap.cycle} plan={snap.plan} onHome={() => setForceWelcome(true)} onCreateAccount={() => {
-                openSignIn();
-              }} />}
-            {tab === 'history' && <HistoryTab activeCycle={snap.cycle} plan={snap.plan} />}
-            {tab === 'insights' && <InsightsTab cycle={snap.cycle} plan={snap.plan} />}
-            {tab === 'user' && (
-              <UserTab
-                plan={snap.plan}
-                cycle={snap.cycle}
-                onChangePlan={() => {
-                  setDraft({
-                    income: snap.plan!.income,
-                    bills: snap.plan!.bills,
-                    savings: snap.plan!.savings,
-                    monthLength: snap.plan!.monthLength,
-                    periodStartDay: snap.plan!.periodStartDay,
-                    billItems: snap.plan!.billItems,
-                    savingsItems: snap.plan!.savingsItems,
-                  });
-                  setFlow('changePlan');
-                }}
-                onSwitchUser={() => setAskLogout(true)}
-                onLeaveSample={leaveSample}
-                onLogIn={() => {
+            <div key={tab} className="tab-in flex min-h-0 flex-1 flex-col">
+              {tab === 'today' && <TodayTab cycle={snap.cycle} plan={snap.plan} onHome={() => setForceWelcome(true)} onCreateAccount={() => {
                   openSignIn();
-                }}
-                onCreateAccount={() => {
-                  openSignIn();
-                }}
-                onDeleted={() => {
+                }} />}
+              {tab === 'history' && <HistoryTab activeCycle={snap.cycle} plan={snap.plan} />}
+              {tab === 'insights' && <InsightsTab cycle={snap.cycle} plan={snap.plan} />}
+              {tab === 'user' && (
+                <UserTab
+                  plan={snap.plan}
+                  cycle={snap.cycle}
+                  onChangePlan={() => {
+                    setDraft({
+                      income: snap.plan!.income,
+                      bills: snap.plan!.bills,
+                      savings: snap.plan!.savings,
+                      monthLength: snap.plan!.monthLength,
+                      periodStartDay: snap.plan!.periodStartDay,
+                      billItems: snap.plan!.billItems,
+                      savingsItems: snap.plan!.savingsItems,
+                    });
+                    setFlow('changePlan');
+                  }}
+                  onSwitchUser={() => setAskLogout(true)}
+                  onLeaveSample={leaveSample}
+                  onLogIn={() => {
+                    openSignIn();
+                  }}
+                  onCreateAccount={() => {
+                    openSignIn();
+                  }}
+                  onDeleted={() => {
+                      setDraft(null);
+                      setForceWelcome(true);
+                    setFlow('welcome');
+                    setTab('today');
+                  }}
+                  onAccountDeleted={() => {
                     setDraft(null);
                     setForceWelcome(true);
-                  setFlow('welcome');
-                  setTab('today');
-                }}
-                onAccountDeleted={() => {
-                  setDraft(null);
-                  setForceWelcome(true);
-                  setFlow('welcome');
-                  setTab('today');
-                  setFarewell(true);
-                }}
-              />
-            )}
+                    setFlow('welcome');
+                    setTab('today');
+                    setFarewell(true);
+                  }}
+                />
+              )}
+            </div>
           </div>
           <TabBar tab={tab} onChange={setTab} />
           {sheet === 'plan' && (

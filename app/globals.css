@@ -198,8 +198,17 @@ select:focus {
 /* Bottom prompt: backdrop fades in, sheet rises from the bottom edge */
 @keyframes prompt-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes prompt-rise { from { transform: translateY(100%); } to { transform: translateY(0); } }
-.prompt-backdrop { animation: prompt-fade 0.2s ease-out both; }
-.prompt-sheet { animation: prompt-rise 0.32s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.prompt-backdrop { animation: prompt-fade 0.35s ease-out both; }
+.prompt-sheet { animation: prompt-rise 0.55s cubic-bezier(0.22, 1, 0.36, 1) both; }
+/* Every bottom sheet / dialog: a soft fade for the dim layer, a slow glide up for the panel. */
+.absolute.inset-0[role="presentation"] { animation: prompt-fade 0.35s ease-out both; }
+.absolute.inset-0[role="presentation"] > :first-child { animation: prompt-rise 0.55s cubic-bezier(0.22, 1, 0.36, 1) both; }
+/* Full-screen steps (log spend, close day, plan) ease in instead of popping. */
+@keyframes screen-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.screen-in { animation: screen-in 0.4s cubic-bezier(0.22, 1, 0.36, 1) both; }
+/* Switching Today / History / Insights: a gentle fade so content never snaps in. */
+@keyframes tab-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.tab-in { animation: tab-in 0.35s ease-out both; }
 
 /* "Tap anywhere" hint in the demo: a hand that taps, with a ripple under the fingertip */
 @keyframes tap-press { 0%, 100% { transform: translateY(0); } 45% { transform: translateY(3px) scale(0.96); } }

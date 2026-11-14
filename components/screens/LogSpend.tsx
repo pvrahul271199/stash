@@ -244,7 +244,7 @@ export function LogSpend({
       role="dialog"
       aria-modal="true"
       aria-label="Log a spend"
-      className="absolute inset-0 z-40 flex flex-col bg-white px-5"
+      className="screen-in absolute inset-0 z-40 flex flex-col bg-white px-5"
       style={{ paddingTop: 'calc(var(--safe-top) + 6px)', paddingBottom: 'calc(var(--safe-bottom) + 14px)' }}
     >
       {view === 'picker' && (
