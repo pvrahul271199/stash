@@ -124,14 +124,19 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: DerivedCycle; p
       {/* Search bar across all days and cycles */}
       <div className="relative mt-4">
         <input
-          type="search"
+          type="text"
+          inputMode="search"
+          enterKeyHint="search"
+          autoComplete="off"
+          autoCorrect="off"
+          spellCheck={false}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onFocus={() => setSearchFocused(true)}
           onBlur={() => setSearchFocused(false)}
           placeholder={`Search spends, category, UPI, Card, event, or ${currency.symbol}…`}
           aria-label="Search spends"
-          className="h-11 w-full rounded-key border border-line bg-white pl-3.5 pr-9 text-[14px] text-ink placeholder:text-faint"
+          className="h-11 w-full rounded-key border border-line bg-white pl-3.5 pr-9 text-[16px] text-ink placeholder:text-faint"
         />
         {query && (
           <button
