@@ -52,7 +52,7 @@ import { getStoredCurrencyCode } from '@/lib/currency';
 import { buildUserProfile, getActiveUserId, getStoredAvatarTheme, getStoredUsername } from '@/lib/user';
 import { requestSync, syncNow } from '@/lib/sync';
 import { getAuth } from '@/lib/auth';
-import { LEND_CATEGORY, creditsOf, remaining, validateLoan, type LoanKind, type WillPay } from '@/lib/lend';
+import { LEND_CATEGORY, remaining, validateLoan, writeOffEffects, type LoanKind, type WillPay } from '@/lib/lend';
 import { uuidv7 } from '@/lib/uuid';
 
 /* ---------- helpers ---------- */
@@ -75,13 +75,21 @@ function useLiveQuery<T, D>(q: () => Promise<T> | T, deps: unknown[] = [], def?:
 export interface LinkNames {
   cats: Map<string, string>;
   evts: Map<string, string>;
+  /** Ids of the spends that belong to a loan: shown in lists, but outside the budget (lib/lend.ts). */
+  lend: Set<string>;
+}
+
+/** Spends behind a live loan. They never count as spending: not in today's spend, the pool, History totals or Insights. */
+export async function lendTxnIds(db: StashDB = getDB()): Promise<Set<string>> {
+  return new Set((await db.loans.toArray()).filter((l) => alive(l) && l.txnId).map((l) => l.txnId as string));
 }
 
 export async function loadLinkNames(db: StashDB = getDB()): Promise<LinkNames> {
-  const [cats, evts] = await Promise.all([loadCategories(db), db.evts.toArray()]);
+  const [cats, evts, lend] = await Promise.all([loadCategories(db), db.evts.toArray(), lendTxnIds(db)]);
   return {
     cats: new Map(cats.map((c) => [c.id, c.name])),
     evts: new Map(evts.filter(alive).map((e) => [e.id, e.name])),
+    lend,
   };
 }
 
@@ -114,6 +122,7 @@ export function toEntry(
     fromSavings: t.fromSavings,
     adjustsPool: t.adjustsPool,
     isEstimate: t.isEstimate,
+    ...(names?.lend.has(t.id) ? { outsideBudget: true } : {}),
     hour: t.hour,
     createdAt: t.createdAt,
   };
@@ -127,17 +136,15 @@ const periodKey = (c: { startDate: string; totalDays: number }) => `p:${c.startD
 
 /** The derived cycle of the period that contains `date`; undefined before the first plan (or before tracking began). */
 export async function cycleFor(db: StashDB, date: string = todayISO(), today: string = todayISO()): Promise<DerivedCycle | undefined> {
-  const [plans, meta, firstSpend, loans] = await Promise.all([
-    db.plans.toArray(),
-    db.meta.get('main'),
-    db.transactions.orderBy('txnDate').filter(alive).first(),
-    db.loans.toArray(),
-  ]);
+  const [plans, meta, loans] = await Promise.all([db.plans.toArray(), db.meta.get('main'), db.loans.toArray()]);
+  const lend = new Set(loans.filter(alive).map((l) => l.txnId).filter(Boolean) as string[]);
+  // a lent amount is not spending, so it does not decide when budgeting started either
+  const firstSpend = await db.transactions.orderBy('txnDate').filter((t) => alive(t) && !lend.has(t.id)).first();
   const period = periodFor(startDayOf(plans), date);
   const tracking = trackingForPeriod(plans, firstSpend?.txnDate, period);
   if (!tracking) return undefined;
-  const txns = await db.transactions.where('txnDate').between(period.start, period.end, true, true).toArray();
-  const c = buildCycle(period, planInEffect(plans, period)!, txns, today, tracking, false, creditsOf(loans));
+  const txns = (await db.transactions.where('txnDate').between(period.start, period.end, true, true).toArray()).filter((t) => !lend.has(t.id));
+  const c = buildCycle(period, planInEffect(plans, period)!, txns, today, tracking, false, writeOffEffects(loans));
   if (!c) return undefined;
   c.leftoverMoved = (meta?.leftoverMoved ?? []).includes(c.id);
   return c;
@@ -149,10 +156,11 @@ async function cycleById(db: StashDB, id: string): Promise<DerivedCycle | undefi
   return r ? cycleFor(db, r.startDate) : undefined;
 }
 
-async function allCycles(db: StashDB, today: string = todayISO()): Promise<DerivedCycle[]> {
+export async function allCycles(db: StashDB, today: string = todayISO()): Promise<DerivedCycle[]> {
   const [plans, txns, meta, loans] = await Promise.all([db.plans.toArray(), db.transactions.toArray(), db.meta.get('main'), db.loans.toArray()]);
   const moved = new Set(meta?.leftoverMoved ?? []);
-  return buildAllCycles(plans, txns, today, (id) => moved.has(id), creditsOf(loans));
+  const lend = new Set(loans.filter(alive).map((l) => l.txnId).filter(Boolean) as string[]);
+  return buildAllCycles(plans, txns.filter((t) => !lend.has(t.id)), today, (id) => moved.has(id), writeOffEffects(loans));
 }
 
 const cycleOfDate = (cycles: DerivedCycle[], iso: string) => cycles.find((c) => iso >= c.startDate && iso <= endOf(c));
@@ -278,7 +286,8 @@ export function useCycleEntries(cycleId: string | undefined): Entry[] | undefine
       db.transactions.where('txnDate').between(range.startDate, endOf(range), true, true).toArray(),
       loadLinkNames(db),
     ]);
-    return rows.filter(alive).map((t) => toEntry(t, range, names));
+    // Insights is about spending: money lent is not part of it
+    return rows.filter(alive).map((t) => toEntry(t, range, names)).filter((e) => !e.outsideBudget);
   }, [cycleId]);
 }
 
@@ -388,22 +397,24 @@ export interface DateTotal {
  * Per-date totals straight from the transactions table (indexed by txnDate) for an inclusive
  * date range. The date a spend was logged on is the only thing that decides which cell it lands in.
  */
+export async function dateTotalsBetween(db: StashDB, fromIso: string, toIso: string): Promise<Map<string, DateTotal>> {
+  const [rows, lend] = await Promise.all([db.transactions.where('txnDate').between(fromIso, toIso, true, true).toArray(), lendTxnIds(db)]);
+  const map = new Map<string, DateTotal>();
+  for (const t of rows) {
+    if (t.deletedAt != null) continue;
+    const d = map.get(t.txnDate) ?? { spent: 0, fromSavings: 0, count: 0 };
+    if (lend.has(t.id)) {
+      // lent money is listed on its day but adds to no total: lending is not spending
+    } else if (t.fromSavings) d.fromSavings += t.amount;
+    else d.spent += t.amount;
+    d.count += 1;
+    map.set(t.txnDate, d);
+  }
+  return map;
+}
+
 export function useDateTotals(fromIso: string, toIso: string): Map<string, DateTotal> {
-  return (
-    useLiveQuery(async () => {
-      const rows = await getDB().transactions.where('txnDate').between(fromIso, toIso, true, true).toArray();
-      const map = new Map<string, DateTotal>();
-      for (const t of rows) {
-        if (t.deletedAt != null) continue;
-        const d = map.get(t.txnDate) ?? { spent: 0, fromSavings: 0, count: 0 };
-        if (t.fromSavings) d.fromSavings += t.amount;
-        else d.spent += t.amount;
-        d.count += 1;
-        map.set(t.txnDate, d);
-      }
-      return map;
-    }, [fromIso, toIso]) ?? new Map<string, DateTotal>()
-  );
+  return useLiveQuery(() => dateTotalsBetween(getDB(), fromIso, toIso), [fromIso, toIso]) ?? new Map<string, DateTotal>();
 }
 
 /** Every live spend on one calendar date, newest first. */
@@ -816,10 +827,11 @@ export async function addLoan(
     willPay: input.willPay,
     repayments: [],
     writtenOff: false,
+    writtenOffOn: null,
     createdAt: stamp,
   };
-  await db.transaction('rw', [db.transactions, db.loans, db.meta, db.plans], async () => {
-    await extendTrackingStart(db, txn.txnDate);
+  await db.transaction('rw', [db.transactions, db.loans, db.meta], async () => {
+    // no extendTrackingStart: a loan is not spending, so a lend dated before budgeting began must not move its start
     await db.transactions.add(txn);
     await db.loans.add(loan);
     await db.meta.update('main', { lastUsedLabel: person || kind, ...(txn.payment ? { lastPayment: txn.payment } : {}) });
@@ -857,8 +869,8 @@ async function patchLoan(id: string, f: (l: Loan) => Loan | null): Promise<Loan 
 }
 
 /**
- * Money came back. Clamped to what is still owed; ignored when nothing is owed. It is a credit in the budget maths
- * (lib/period.ts), so today's amount (or the closed day's pool) rises by it. Append-only: a mistake is undone with
+ * Money came back. Clamped to what is still owed; ignored when nothing is owed. The wallet gets back what the lend took
+ * out, but the lend never touched the budget, so neither does this (lib/lend.ts). Append-only: a mistake is undone with
  * `undoLastRepayment`.
  */
 export async function recordRepayment(id: string, amount: number, date: string = todayISO()): Promise<Loan | null> {
@@ -871,7 +883,7 @@ export async function recordRepayment(id: string, amount: number, date: string =
 }
 
 export async function undoLastRepayment(id: string): Promise<Loan | null> {
-  return patchLoan(id, (l) => (l.repayments.length ? { ...l, repayments: l.repayments.slice(0, -1), writtenOff: false } : null));
+  return patchLoan(id, (l) => (l.repayments.length ? { ...l, repayments: l.repayments.slice(0, -1), writtenOff: false, writtenOffOn: null } : null));
 }
 
 export async function setLoanDue(id: string, dueDate: string | null): Promise<Loan | null> {
@@ -882,9 +894,17 @@ export async function setLoanWillPay(id: string, willPay: WillPay): Promise<Loan
   return patchLoan(id, (l) => ({ ...l, willPay }));
 }
 
-/** The rest is not coming back. Owes nothing afterwards and gives nothing back to the budget. */
-export async function writeOffLoan(id: string): Promise<Loan | null> {
-  return patchLoan(id, (l) => (remaining(l) > 0 ? { ...l, writtenOff: true } : null));
+/**
+ * The rest is not coming back. It is now a real loss: what was still owed counts as spent in the month it is written off
+ * (a month-level debit that lowers the pool, never "left today"), once. Nothing else about a loan touches the budget.
+ */
+export async function writeOffLoan(id: string, date: string = todayISO()): Promise<Loan | null> {
+  return patchLoan(id, (l) => (remaining(l) > 0 ? { ...l, writtenOff: true, writtenOffOn: date } : null));
+}
+
+/** Takes a write-off back: the loan is open again and the month gets the money back. */
+export async function reopenLoan(id: string): Promise<Loan | null> {
+  return patchLoan(id, (l) => (l.writtenOff ? { ...l, writtenOff: false, writtenOffOn: null } : null));
 }
 
 /** Soft delete: the tombstone syncs; the month's numbers are derived, so nothing else changes. */
@@ -920,7 +940,8 @@ export async function previewCloseDay(today: string = todayISO()): Promise<Close
   const db = getDB();
   const c = await cycleFor(db, today, today);
   if (!c || c.currentDay > c.totalDays) return null;
-  const spends = (await db.transactions.where('txnDate').equals(today).toArray()).filter(alive);
+  const lend = await lendTxnIds(db);
+  const spends = (await db.transactions.where('txnDate').equals(today).toArray()).filter((t) => alive(t) && !lend.has(t.id));
   return closeDay(c, spentToday(spends));
 }
 

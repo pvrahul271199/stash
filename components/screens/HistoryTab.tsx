@@ -86,7 +86,9 @@ export function HistoryTab({ activeCycle, plan, initialTab = 'spends' }: { activ
   const selectedStat = useMemo(() => {
     const t = { spent: 0, fromSavings: 0, count: 0 };
     for (const e of selectedDateEntries) {
-      if (e.fromSavings) t.fromSavings += e.amount;
+      if (e.outsideBudget) {
+        // lent money is listed on its day but is not spending
+      } else if (e.fromSavings) t.fromSavings += e.amount;
       else t.spent += e.amount;
       t.count += 1;
     }
@@ -120,7 +122,7 @@ export function HistoryTab({ activeCycle, plan, initialTab = 'spends' }: { activ
     return sum;
   }, [totalsByDate, monthPrefix]);
 
-  // Spends paid from savings are left out of "spent"; money lent that month is inside it (it left the wallet).
+  // "spent" leaves out spends paid from savings and money lent (lending is not spending); both are shown on their own line.
   const monthSavings = useMemo(() => {
     let sum = 0;
     for (const [iso, t] of totalsByDate) if (iso.startsWith(monthPrefix)) sum += t.fromSavings;
@@ -425,15 +427,15 @@ export function HistoryTab({ activeCycle, plan, initialTab = 'spends' }: { activ
 
           <p className="mt-1 text-[15px] text-soft">
             <span className="num text-ink">{inr(monthSpent)}</span> spent
-            {monthLent > 0 && (
-              <>
-                , <span className="num">{inr(monthLent)}</span> of it lent
-              </>
-            )}
           </p>
-          {monthSavings > 0 && (
+          {(monthSavings > 0 || monthLent > 0) && (
             <p className="text-[12px] text-faint">
-              + <span className="num">{inr(monthSavings)}</span> from savings
+              {[
+                monthSavings > 0 ? `+ ${inr(monthSavings)} from savings` : '',
+                monthLent > 0 ? `${inr(monthLent)} lent, not counted` : '',
+              ]
+                .filter(Boolean)
+                .join(' · ')}
             </p>
           )}
 
@@ -581,6 +583,7 @@ export function HistoryTab({ activeCycle, plan, initialTab = 'spends' }: { activ
                       <p className="truncate text-[15px] font-medium text-ink">
                         {entryLines(e).title}
                         {e.fromSavings && <span className="ml-2 text-[12px] text-warm">from savings</span>}
+                          {e.outsideBudget && <span className="ml-2 text-[12px] text-faint">lent, not counted</span>}
                         {e.isEstimate && <span className="ml-2 text-[12px] text-faint">estimate</span>}
                       </p>
                       {entryLines(e).detail && <p className="truncate text-[13px] text-soft">{entryLines(e).detail}</p>}

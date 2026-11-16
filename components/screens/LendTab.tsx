@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { HugeNumber } from '../ui/HugeNumber';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
-import { recordRepayment, setLoanDue, setLoanWillPay, undoLastRepayment, useLoans, useToday, writeOffLoan } from '@/db/queries';
+import { recordRepayment, reopenLoan, setLoanDue, setLoanWillPay, undoLastRepayment, useLoans, useToday, writeOffLoan } from '@/db/queries';
 import type { Loan } from '@/db/schema';
 import { addDays, formatShort } from '@/lib/dates';
 import { inr } from '@/lib/format';
@@ -32,7 +32,7 @@ export function LendTab() {
 
   async function gotIt(l: Loan) {
     const owed = remaining(l);
-    if (await recordRepayment(l.id, owed)) toast(`${loanName(l)} paid back ${inr(owed)}. It's back in your month`);
+    if (await recordRepayment(l.id, owed)) toast(`${loanName(l)} paid back ${inr(owed)}`);
     setOpenId(null);
   }
   async function partPaid(l: Loan) {
@@ -42,7 +42,7 @@ export function LendTab() {
       return;
     }
     await recordRepayment(l.id, a);
-    toast(`${inr(a)} from ${loanName(l)} is back in your month`);
+    toast(`${inr(a)} from ${loanName(l)} noted`);
     setPart(null);
     setPartAmt('');
   }
@@ -120,6 +120,18 @@ export function LendTab() {
                   </button>
                 </>
               )}
+              {l.writtenOff && (
+                <button
+                  type="button"
+                  className={action}
+                  onClick={() => {
+                    void reopenLoan(l.id);
+                    toast('Write-off undone');
+                  }}
+                >
+                  Undo write-off
+                </button>
+              )}
               {l.repayments.length > 0 && (
                 <button
                   type="button"
@@ -195,7 +207,7 @@ export function LendTab() {
       {confirmOff && (
         <ConfirmDialog
           title={`Write off ${inr(remaining(confirmOff))}?`}
-          body={`${loanName(confirmOff)} won't be asked for it any more. It stays out of your month: that money is gone.`}
+          body={`${loanName(confirmOff)} won't be asked for it any more. It counts as spent in this month's numbers: that money is gone. Until now lending never touched them.`}
           confirmLabel="Write off"
           onCancel={() => setConfirmOff(null)}
           onConfirm={() => {

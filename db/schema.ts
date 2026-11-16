@@ -148,8 +148,10 @@ export interface Loan extends Syncable {
   dueDate: string | null;
   willPay: WillPay;
   repayments: Repayment[];
-  /** The rest is not coming back. Owes nothing, gives nothing back to the budget. */
+  /** The rest is not coming back. Owes nothing; counts as spent in the month of `writtenOffOn` (lib/lend.ts `writeOffEffects`). */
   writtenOff: boolean;
+  /** yyyy-mm-dd it was written off, or null. */
+  writtenOffOn: string | null;
   createdAt: number;
 }
 
@@ -204,6 +206,8 @@ export interface Entry {
   fromSavings: boolean;
   adjustsPool: boolean;
   isEstimate: boolean;
+  /** True for the spend behind a loan: shown in lists, but not part of today's spend, the pool, History totals or Insights. */
+  outsideBudget?: boolean;
   hour: number;
   createdAt: number;
 }

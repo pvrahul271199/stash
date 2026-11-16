@@ -108,6 +108,7 @@ export function CloseDay({
                   <p className="truncate text-[15px] font-medium text-ink">
                     {entryLines(e).title}
                     {e.fromSavings && <span className="ml-2 text-[12px] font-normal text-warm">from savings</span>}
+                    {e.outsideBudget && <span className="ml-2 text-[12px] font-normal text-faint">lent, not counted</span>}
                   </p>
                   {entryLines(e).detail && <p className="truncate text-[13px] text-soft">{entryLines(e).detail}</p>}
                   {entryLines(e).meta && <p className="truncate text-[12px] text-faint">{entryLines(e).meta}</p>}

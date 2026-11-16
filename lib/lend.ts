@@ -4,9 +4,12 @@ import { addDays, daysBetween, formatShort } from './dates';
 /**
  * Money the user lent to someone (docs/ENHANCEMENTS.md E-LEND). Pure helpers: no database, no clock (callers pass `today`).
  *
- * A loan is the *record* (who, how much, due when, will they pay, what came back). The money that left the wallet is an
- * ordinary spend in the `Lend` category, linked by `Loan.txnId`. Repayments are not stored as transactions: they are
- * *credits* that `buildCycle` adds to the month's money to live on (lib/period.ts), so amounts stay positive everywhere.
+ * A loan is the *record* (who, how much, due when, will they pay, what came back). The money that left the wallet is a row
+ * in `transactions` (category `Lend`, linked by `Loan.txnId`) so it shows in History, but it is **outside the budget**:
+ * lending is not spending, so it never touches today's spend, "left today", the pool or Insights, and a repayment (money
+ * returning to the wallet) changes nothing either. The only time a loan touches the budget is a **write-off**: the rest
+ * is gone for good, so it counts as spent in the month it was written off (`writeOffEffects`), once, as a month-level
+ * debit (it lowers the pool, never "left today" of the day it was written off).
  */
 
 export const LEND_CATEGORY = 'Lend';
@@ -37,6 +40,8 @@ export interface LoanLike {
   dueDate: string | null;
   repayments: Repayment[];
   writtenOff: boolean;
+  /** yyyy-mm-dd the rest was written off (the month it counts against). */
+  writtenOffOn?: string | null;
   deletedAt?: number | null;
 }
 
@@ -105,16 +110,26 @@ export function summarize(loans: LoanLike[], today: string): LendSummary {
   return s;
 }
 
-/** Money that came back, dated, for `buildCycle` to add to that month's money to live on. */
+/** A dated money adjustment for `buildCycle`: positive adds to the month's money, negative takes from it. */
 export interface Credit {
   date: string;
   amount: number;
 }
-export function creditsOf(loans: Pick<LoanLike, 'repayments' | 'deletedAt'>[]): Credit[] {
+
+/** What is lost when the rest of a loan is written off (what was still owed at that moment). */
+export const writtenOffAmount = (l: Pick<LoanLike, 'amount' | 'repayments'>): number => Math.max(0, l.amount - repaid(l));
+
+/**
+ * The only way a loan reaches the budget: a written-off loan is a loss, counted once in the month it was written off.
+ * Returned as negative adjustments (`buildCycle` -> `rollupCycle`). Open, repaid and deleted loans return nothing, and a
+ * write-off without a date (never written) is ignored.
+ */
+export function writeOffEffects(loans: Pick<LoanLike, 'amount' | 'repayments' | 'writtenOff' | 'writtenOffOn' | 'deletedAt'>[]): Credit[] {
   const out: Credit[] = [];
   for (const l of loans) {
-    if (l.deletedAt != null) continue;
-    for (const r of l.repayments) out.push({ date: r.date, amount: r.amount });
+    if (l.deletedAt != null || !l.writtenOff || !l.writtenOffOn) continue;
+    const lost = writtenOffAmount(l);
+    if (lost > 0) out.push({ date: l.writtenOffOn, amount: -lost });
   }
   return out;
 }

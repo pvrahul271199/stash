@@ -193,6 +193,7 @@ export const MAPPERS = {
       will_pay: l.willPay,
       repayments: l.repayments,
       written_off: l.writtenOff,
+      written_off_on: l.writtenOffOn,
       created_at: l.createdAt,
     }),
     toLocal: (r: Remote): Loan => ({
@@ -208,6 +209,7 @@ export const MAPPERS = {
       willPay: r.will_pay as Loan['willPay'],
       repayments: (r.repayments as Loan['repayments'] | null) ?? [],
       writtenOff: !!r.written_off,
+      writtenOffOn: (r.written_off_on as string | null) ?? null,
       createdAt: Number(r.created_at),
     }),
   },

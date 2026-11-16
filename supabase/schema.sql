@@ -288,8 +288,11 @@ create table if not exists public.loans (
   will_pay text not null default 'yes',
   repayments jsonb not null default '[]'::jsonb,
   written_off boolean not null default false,
+  written_off_on date,
   created_at bigint not null
 );
+-- for a database that already ran the first version of this block
+alter table public.loans add column if not exists written_off_on date;
 create index if not exists idx_loans_user_updated on public.loans (user_id, updated_at, id);
 alter table public.loans add column if not exists version bigint not null default 1;
 drop trigger if exists trg_loans_lww on public.loans;

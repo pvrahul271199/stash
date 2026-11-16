@@ -77,10 +77,12 @@ export function todayAllowance(s: CycleState): number {
 export interface SpendLike {
   amount: number;
   fromSavings: boolean;
+  /** A lent amount: not spending (lib/lend.ts). */
+  outsideBudget?: boolean;
 }
 
 export function spentToday(entries: SpendLike[]): number {
-  return entries.reduce((sum, e) => (e.fromSavings ? sum : sum + e.amount), 0);
+  return entries.reduce((sum, e) => (e.fromSavings || e.outsideBudget ? sum : sum + e.amount), 0);
 }
 
 export function leftToday(allowance: number, spent: number): number {
@@ -242,9 +244,10 @@ export function dayOfTxn(c: Pick<RollupCycle, 'startDate' | 'totalDays'>, txnDat
  * fromSavings total from its live transactions. Replays `closeDay` for every
  * closed day, so it matches the incremental math and heals any drift.
  *
- * `credits` is money that came back (a lent amount repaid, lib/lend.ts). It is not a transaction: on a closed day it
- * lowers that day's net `spent` and gives the pool the money back; a credit dated today or ahead raises the pool at once
- * (income-like, unlike a spend, which only moves the pool once its day is closed). Dates outside the cycle are ignored.
+ * `credits` are dated month-level adjustments that are not transactions (lib/lend.ts `writeOffEffects`: a written-off loan
+ * is a negative amount). On a closed day a credit changes that day's net `spent` and the pool; one dated today or ahead
+ * moves the pool at once (not "left today": a spend only moves the pool once its day is closed). Dates outside the cycle
+ * are ignored.
  */
 export function rollupCycle(
   c: RollupCycle,

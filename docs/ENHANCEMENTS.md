@@ -282,4 +282,5 @@ Decisions taken as in the plan above; "Remind me" was dropped (the Today card is
 - `fillSample` does not create sample loans (the "how it works" tour numbers stay unchanged); the stories seed their own.
 - CSV export lists Lend spends but not loan details; `stash-mobile/` is untouched.
 - Repayments are embedded JSON: two devices recording *different* repayments at the same moment can lose one (last write wins on that field). Use a child table if that matters.
-- Repayment amounts always return to the month (no "keep as savings" choice yet).
+- **Budget rule changed after the first build**: lending is not spending. The lend and repayments no longer touch the budget; only a write-off does (see ARCHITECTURE section 3). This replaces defaults 1 and 2 of the plan above ("a lend lowers the month, a repayment adds back").
+- Write-off date is always today (`writeOffLoan` takes a date, the UI does not offer one yet).

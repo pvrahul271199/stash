@@ -24,7 +24,7 @@ export function DayPeek({
   onClose: () => void;
 }) {
   const entries = useDayEntries(cycle.id, day) ?? [];
-  const total = entries.filter((e) => !e.fromSavings).reduce((s, e) => s + e.amount, 0);
+  const total = entries.filter((e) => !e.fromSavings && !e.outsideBudget).reduce((s, e) => s + e.amount, 0);
   const kind = day < cycle.currentDay ? 'Past day' : day > cycle.currentDay ? 'Upcoming' : 'Today';
   return (
     <div className="absolute inset-0 z-[45] flex items-end bg-ink/40" role="presentation" onClick={onClose}>
@@ -65,7 +65,7 @@ export function DayPeek({
                       <span className="block truncate text-[14px] font-medium text-ink">{entryLines(e).title}</span>
                       {entryLines(e).detail && <span className="block truncate text-[13px] text-soft">{entryLines(e).detail}</span>}
                       <span className="block truncate text-[12px] text-faint">
-                        {[entryLines(e).meta, e.fromSavings ? 'from savings' : ''].filter(Boolean).join(' · ')}
+                        {[entryLines(e).meta, e.fromSavings ? 'from savings' : '', e.outsideBudget ? 'lent, not counted' : ''].filter(Boolean).join(' · ')}
                       </span>
                     </span>
                     <span className="num text-[14px] text-ink">{inr(e.amount)}</span>
