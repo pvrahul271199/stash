@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import {
   closeDay,
   displayLeft,
-  isBigSpend,
   isPlanValid,
   moneyToLiveOn,
   monthEnd,
@@ -34,8 +33,9 @@ describe('allowance', () => {
     const s = { ...fresh(), pool: 3000, currentDay: 21 };
     expect(todayAllowance(s)).toBeCloseTo(3000 / 10);
   });
-  it('is 0 when the pool is empty or negative', () => {
-    expect(todayAllowance({ ...fresh(), pool: -50 })).toBe(0);
+  it('stays negative when the pool is overspent (no clamp, nothing blocks the log)', () => {
+    expect(todayAllowance({ ...fresh(), pool: -50 })).toBe(-50 / 30);
+    expect(todayAllowance({ ...fresh(), pool: 0 })).toBe(0);
   });
   it('excludes fromSavings from spentToday and shows a negative when over', () => {
     const e = [
@@ -80,17 +80,13 @@ describe('spreading', () => {
   });
 });
 
-describe('big spend', () => {
+describe('spends bigger than the pool', () => {
   const s = fresh();
   const a = todayAllowance(s); // ~733
-  it('is big only when the amount is more than the pool', () => {
-    expect(isBigSpend(30000, 30000, s)).toBe(false);
-    expect(isBigSpend(30001, 30000, s)).toBe(true);
-    expect(isBigSpend(100, 80, s)).toBe(true);
-    expect(isBigSpend(1200, a * 30, s)).toBe(false);
-  });
-  it('is never big on the last day', () => {
-    expect(isBigSpend(5000, 100, { ...s, currentDay: 30 })).toBe(false);
+  it('a spend larger than the whole pool just drives it negative', () => {
+    const over = { ...s, pool: s.pool - 99999 };
+    expect(over.pool).toBeLessThan(0);
+    expect(todayAllowance(over)).toBeLessThan(0);
   });
   it('closing a day carries the savings total and leaves the pool alone', () => {
     const next = { ...s, fromSavingsTotal: 2400 };

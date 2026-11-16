@@ -8,7 +8,7 @@ import { addDays, daysBetween, formatShort } from './dates';
  * in `transactions` (category `Lend`, linked by `Loan.txnId`) so it shows in History, but it is **outside the budget**:
  * lending is not spending, so it never touches today's spend, "left today", the pool or Insights, and a repayment (money
  * returning to the wallet) changes nothing either. The only time a loan touches the budget is a **write-off**: the rest
- * is gone for good, so it counts as spent in the month it was written off (`writeOffEffects`), once, as a month-level
+ * is gone for good, so it counts as spent in the month it was written off (`loanEffects`), once, as a month-level
  * debit (it lowers the pool, never "left today" of the day it was written off).
  */
 
@@ -42,6 +42,10 @@ export interface LoanLike {
   writtenOff: boolean;
   /** yyyy-mm-dd the rest was written off (the month it counts against). */
   writtenOffOn?: string | null;
+  /** The user chose to take the money out of their daily amount while it is owed. */
+  holdBack?: boolean;
+  /** yyyy-mm-dd it was lent (needed for `holdBack`). */
+  lentOn?: string;
   deletedAt?: number | null;
 }
 
@@ -120,14 +124,25 @@ export interface Credit {
 export const writtenOffAmount = (l: Pick<LoanLike, 'amount' | 'repayments'>): number => Math.max(0, l.amount - repaid(l));
 
 /**
- * The only way a loan reaches the budget: a written-off loan is a loss, counted once in the month it was written off.
- * Returned as negative adjustments (`buildCycle` -> `rollupCycle`). Open, repaid and deleted loans return nothing, and a
- * write-off without a date (never written) is ignored.
+ * The only ways a loan reaches the budget, returned as dated adjustments (`buildCycle` -> `rollupCycle`):
+ *  - default: a written-off loan is a loss, counted once in the month it was written off (negative).
+ *  - `holdBack` (the user's choice on the Lend screen): the whole amount comes out of the daily amount on the day it was
+ *    lent, and each repayment gives its share back on the day it arrives. A write-off then adds nothing: what is still
+ *    owed is already held back.
+ * Open, repaid and deleted loans without `holdBack` return nothing, and a write-off without a date is ignored.
  */
-export function writeOffEffects(loans: Pick<LoanLike, 'amount' | 'repayments' | 'writtenOff' | 'writtenOffOn' | 'deletedAt'>[]): Credit[] {
+export function loanEffects(
+  loans: Pick<LoanLike, 'amount' | 'repayments' | 'writtenOff' | 'writtenOffOn' | 'deletedAt' | 'holdBack' | 'lentOn'>[],
+): Credit[] {
   const out: Credit[] = [];
   for (const l of loans) {
-    if (l.deletedAt != null || !l.writtenOff || !l.writtenOffOn) continue;
+    if (l.deletedAt != null) continue;
+    if (l.holdBack && l.lentOn) {
+      out.push({ date: l.lentOn, amount: -l.amount });
+      for (const r of l.repayments) out.push({ date: r.date, amount: r.amount });
+      continue;
+    }
+    if (!l.writtenOff || !l.writtenOffOn) continue;
     const lost = writtenOffAmount(l);
     if (lost > 0) out.push({ date: l.writtenOffOn, amount: -lost });
   }

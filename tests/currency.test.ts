@@ -43,6 +43,32 @@ describe('Multi-currency engine', () => {
     expect(inr?.shortName).toBe('Rupee');
   });
 
+  it('adds Omani, Saudi and Qatari riyal without disturbing the existing list', () => {
+    const codes = SUPPORTED_CURRENCIES.map((c) => c.code);
+    // the original nine keep their order, so INR stays the fallback at index 0
+    expect(codes.slice(0, 9)).toEqual(['INR', 'USD', 'EUR', 'GBP', 'AED', 'CAD', 'AUD', 'SGD', 'JPY']);
+    expect(codes.slice(9)).toEqual(['OMR', 'SAR', 'QAR']);
+    expect(new Set(codes).size).toBe(codes.length);
+    const omr = SUPPORTED_CURRENCIES.find((c) => c.code === 'OMR')!;
+    expect(omr).toMatchObject({ name: 'Omani Rial', shortName: 'Rial' });
+    expect(formatWithCurrency(1500, omr)).toBe('OMR 1,500');
+    expect(formatWithCurrency(-45, omr)).toBe('-OMR 45');
+    expect(formatWithCurrency(12500, SUPPORTED_CURRENCIES.find((c) => c.code === 'SAR')!)).toBe('SAR 12,500');
+    setStoredCurrency('OMR');
+    expect(inr(2500)).toBe('OMR 2,500');
+    expect(compactINR(1500000)).toBe('OMR 1.5M');
+  });
+
+  it('is backward compatible: saved codes still resolve, unknown or lowercase codes fall back safely', () => {
+    window.localStorage.setItem('stash:currency-code', 'USD');
+    expect(getStoredCurrencyInfo().code).toBe('USD');
+    window.localStorage.setItem('stash:currency-code', 'omr');
+    expect(getStoredCurrencyInfo().code).toBe('OMR');
+    window.localStorage.setItem('stash:currency-code', 'XYZ');
+    expect(getStoredCurrencyInfo().code).toBe('INR');
+    expect(setStoredCurrency('XYZ').code).toBe('INR');
+  });
+
   it('defaults to INR when no currency is stored', () => {
     expect(getStoredCurrencyCode()).toBe('INR');
     const info = getStoredCurrencyInfo();

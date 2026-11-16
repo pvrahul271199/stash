@@ -101,7 +101,7 @@ export function TodayTab({ cycle, plan, onCreateAccount, onHome, onOpenLend }: {
     };
   });
   const monthDay = daysBetween(cycle.monthStart, todayISO()) + 1;
-  const remaining = Math.max(state.pool - spent, 0);
+  const remaining = state.pool - spent;
 
   /** Really closes the day on screen: the app moves on to the next day now, not at midnight. One tap, no second screen. */
   async function close() {

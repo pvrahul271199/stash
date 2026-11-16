@@ -343,7 +343,7 @@ export function AppShell() {
     // Every finished month that has not been looked back on yet on this device, oldest first. Sample data has no real months to wrap up.
     const lastMonth = !inSample ? (snap.pending[0] ?? null) : null;
     if (lastMonth) {
-      body = <MonthEnd cycle={lastMonth} plan={snap.plan} onDone={() => void dismissMonthSummary(lastMonth.id)} onCreateAccount={() => openSignIn()} />;
+      body = <MonthEnd cycle={lastMonth} plan={snap.plan} onDone={() => void dismissMonthSummary(lastMonth.id)} />;
     } else {
       body = (
         <>

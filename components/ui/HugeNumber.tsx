@@ -40,7 +40,8 @@ export function HugeNumber({
         className={`num inline-block whitespace-nowrap ${color}`}
         style={{ fontSize: size * scale, lineHeight: 1.05 }}
       >
-        <span className="text-faint" aria-hidden="true">
+        {/* the symbol is a label, not the number: keep it small so the amount leads */}
+        <span className="mr-[0.08em] align-baseline text-faint" style={{ fontSize: '0.80em' }} aria-hidden="true">
           {currency.symbol}
           {space}
         </span>

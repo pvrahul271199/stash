@@ -10,7 +10,7 @@ describe('closing the last day of a month', () => {
     vi.useRealTimers();
   });
 
-  it('puts that month in the month-end list at once, with its numbers', async () => {
+  it('puts that month in the month-end list once December starts, with its numbers', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date(2026, 9, 1, 10)); // 1 Oct
     await openUserDB('close-last');
@@ -18,12 +18,13 @@ describe('closing the last day of a month', () => {
     vi.setSystemTime(new Date(2026, 9, 12, 10));
     await addSpend((await cycleFor(getDB()))!, { amount: 4000, label: 'x', category: 'Food' });
     vi.setSystemTime(new Date(2026, 9, 31, 22)); // last evening of October
-    expect((await loadSnapshot(getDB(), todayISO())).pending).toHaveLength(0);
+    await addSpend((await cycleFor(getDB()))!, { amount: 100, label: 'last day', category: 'Food' });
+    expect((await loadSnapshot(getDB(), todayISO())).pending).toHaveLength(0); // still October
     await closeToday();
     expect(todayISO()).toBe('2026-11-01');
     const snap = await loadSnapshot(getDB(), todayISO());
     expect(snap.cycle?.startDate).toBe('2026-11-01');
     expect(snap.pending.map((c) => c.startDate)).toEqual(['2026-10-01']);
-    expect(snap.pending[0].pool).toBe(28000);
+    expect(snap.pending[0].pool).toBe(27900);
   });
 });

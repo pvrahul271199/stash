@@ -1,17 +1,18 @@
 'use client';
 import { useId, useState } from 'react';
 import { MAX_NAME } from '@/lib/categories';
-import { WILL_PAY, WILL_PAY_LABEL, dueFromChoice, type DueChoice, type LoanKind, type WillPay } from '@/lib/lend';
+import { dueFromChoice, type DueChoice, type LoanKind } from '@/lib/lend';
 import { formatShort, todayISO } from '@/lib/dates';
 
 /** What the user has told us about a loan so far (Lend mode of the log screen). */
 export interface LendDraft {
   kind: LoanKind;
   person: string;
-  willPay: WillPay;
   due: DueChoice;
+  /** Take it out of the daily amount while it is owed (default: no). */
+  holdBack: boolean;
 }
-export const NEW_LEND_DRAFT: LendDraft = { kind: 'Friends', person: '', willPay: 'yes', due: 'month' };
+export const NEW_LEND_DRAFT: LendDraft = { kind: 'Friends', person: '', due: 'month', holdBack: false };
 
 const DUE_CHOICES: { key: DueChoice; label: string }[] = [
   { key: 'week', label: 'In a week' },
@@ -35,6 +36,7 @@ export function LendFields({
   onAddKind,
   people = [],
   today = todayISO(),
+  dailyHint,
 }: {
   draft: LendDraft;
   onChange: (d: LendDraft) => void;
@@ -44,6 +46,8 @@ export function LendFields({
   onAddKind: (name: string) => Promise<string | null>;
   people?: string[];
   today?: string;
+  /** "Daily ₹850 → ₹642": what holding this loan back would do to the daily amount. */
+  dailyHint?: string | null;
 }) {
   const listId = useId();
   const due = dueFromChoice(draft.due, today);
@@ -133,14 +137,6 @@ export function LendFields({
           ))}
         </datalist>
       )}
-      <div className="flex items-center gap-1.5" role="group" aria-label="Will they pay it back">
-        <span className="text-[11px] text-soft">Will pay</span>
-        {WILL_PAY.map((w) => (
-          <button key={w} type="button" aria-pressed={draft.willPay === w} onClick={() => onChange({ ...draft, willPay: w })} className={chip(draft.willPay === w)}>
-            {WILL_PAY_LABEL[w]}
-          </button>
-        ))}
-      </div>
       <div className="flex items-center gap-1.5" role="group" aria-label="Pay back by">
         <span className="text-[11px] text-soft">By</span>
         {DUE_CHOICES.map((c) => (
@@ -148,6 +144,18 @@ export function LendFields({
             {c.label}
           </button>
         ))}
+      </div>
+      <div className="flex flex-col items-center gap-1.5" role="group" aria-label="Take it out of your daily amount now">
+        <p className="text-[11px] text-soft">Take it out of your daily amount now?</p>
+        <div className="flex gap-1.5">
+          <button type="button" aria-pressed={!draft.holdBack} onClick={() => onChange({ ...draft, holdBack: false })} className={chip(!draft.holdBack)}>
+            No
+          </button>
+          <button type="button" aria-pressed={draft.holdBack} onClick={() => onChange({ ...draft, holdBack: true })} className={chip(draft.holdBack)}>
+            Yes, until repaid
+          </button>
+        </div>
+        {draft.holdBack && dailyHint && <p className="num text-[11px] text-faint">{dailyHint}</p>}
       </div>
       <p className="text-[11px] text-faint">
         {due ? `Back by ${formatShort(due)}. ` : ''}You can track this in History &gt; Lend

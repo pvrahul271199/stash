@@ -31,14 +31,14 @@ const openSandbox = () =>
     const cycle = await cycleFor(db);
     if (!cycle) return;
     const t = todayISO();
-    const lend = (amount: number, person: string, kind: 'Friends' | 'Family' | 'Coworker', ago: number, due: number | null, will: 'yes' | 'maybe' | 'unsure') =>
-      addLoan(monthView(cycle), { amount, person, kind, willPay: will, dueDate: due == null ? null : addDays(t, due) }, new Date(), undefined, addDays(t, -ago));
-    const a = await lend(1500, 'Arjun', 'Friends', 9, 14, 'yes');
+    const lend = (amount: number, person: string, kind: 'Friends' | 'Family' | 'Coworker', ago: number, due: number | null) =>
+      addLoan(monthView(cycle), { amount, person, kind, dueDate: due == null ? null : addDays(t, due) }, new Date(), undefined, addDays(t, -ago));
+    const a = await lend(1500, 'Arjun', 'Friends', 9, 14);
     await recordRepayment(a.loan.id, 500, addDays(t, -3));
-    await lend(1200, 'Karthik', 'Coworker', 18, -6, 'maybe');
-    await lend(2500, "Amma's cousin", 'Family', 7, 60, 'unsure');
-    await lend(800, 'Meera', 'Friends', 3, null, 'yes');
-    const p = await lend(600, 'Priya', 'Friends', 20, -8, 'yes');
+    await lend(1200, 'Karthik', 'Coworker', 18, -6);
+    await lend(2500, "Amma's cousin", 'Family', 7, 60);
+    await lend(800, 'Meera', 'Friends', 3, null);
+    const p = await lend(600, 'Priya', 'Friends', 20, -8);
     await recordRepayment(p.loan.id, 600, addDays(t, -9));
   }));
 

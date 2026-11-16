@@ -84,10 +84,10 @@ export function HistoryTab({ activeCycle, plan, initialTab = 'spends' }: { activ
 
   const selectedRow = rowByDate.get(selectedIso);
   const selectedStat = useMemo(() => {
-    const t = { spent: 0, fromSavings: 0, count: 0 };
+    const t = { spent: 0, fromSavings: 0, lent: 0, count: 0 };
     for (const e of selectedDateEntries) {
       if (e.outsideBudget) {
-        // lent money is listed on its day but is not spending
+        t.lent += e.amount; // lent money is listed on its day but is not spending
       } else if (e.fromSavings) t.fromSavings += e.amount;
       else t.spent += e.amount;
       t.count += 1;
@@ -515,7 +515,7 @@ export function HistoryTab({ activeCycle, plan, initialTab = 'spends' }: { activ
                               : 'text-faint'
                           }`}
                         >
-                          {hasData || isToday ? compactINR(spent) : cell.isCurrentMonth ? '—' : ''}
+                          {spent === 0 && (stat?.lent ?? 0) > 0 ? `${compactINR(stat!.lent)} lent` : hasData || isToday ? compactINR(spent) : cell.isCurrentMonth ? '—' : ''}
                         </span>
                       </button>
                     );
@@ -564,13 +564,14 @@ export function HistoryTab({ activeCycle, plan, initialTab = 'spends' }: { activ
                         : `Day ${activeDayNumber}/${activeCycle.totalDays}`
                     : 'Date outside this month'}
                   {selectedStat.fromSavings ? ` · +${inr(selectedStat.fromSavings)} from savings` : ''}
+                  {selectedStat.lent ? ` · ${inr(selectedStat.lent)} lent (not counted)` : ''}
                 </p>
               </div>
               <p className="num text-[22px] font-semibold text-ink">{inr(selectedSpent)}</p>
             </div>
 
             {selectedDateEntries.length === 0 ? (
-              <p className="py-4 text-[14px] text-soft">No spends logged on this date.</p>
+              <p className="py-4 text-[14px] text-soft">Nothing logged on this date.</p>
             ) : (
               <ul className="divide-y divide-line">
                 {selectedDateEntries.map((e) => (

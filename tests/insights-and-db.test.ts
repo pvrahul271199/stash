@@ -294,6 +294,14 @@ describe('database queries', () => {
     expect((await db.transactions.get(e2.id))?.type).toBe('Food');
   });
 
+  it('event category chips add up to the event total (savings-funded spends are not spent)', () => {
+    const mk = (o: Record<string, unknown>) => ({ id: String(Math.random()), cycleId: '', day: 1, date: '2026-11-02', subcategory: null, event: 'Trip', payment: null, note: null, fromSavings: false, adjustsPool: true, isEstimate: false, hour: 9, createdAt: 0, label: 'x', category: 'Food', amount: 100, ...o }) as never;
+    const [ev] = eventTotals([mk({ amount: 500 }), mk({ amount: 3000, category: 'Travel', fromSavings: true })], [], null);
+    expect(ev.total).toBe(500);
+    expect(ev.fromSavings).toBe(3000);
+    expect(ev.categories.reduce((s, c) => s + c.total, 0)).toBe(ev.total);
+  });
+
   it('tags every spend with the active event until it ends', async () => {
     await ensureSeed();
     await createPlan({ income: 50000, bills: 18000, savings: 10000, monthLength: 30 }, '2026-10-27');

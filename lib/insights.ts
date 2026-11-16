@@ -216,7 +216,7 @@ export function eventTotals(
       bucket.total += e.amount;
     }
     const catStat = bucket.cats.get(e.category) ?? { total: 0, count: 0 };
-    catStat.total += e.amount;
+    if (!e.fromSavings) catStat.total += e.amount;
     catStat.count += 1;
     bucket.cats.set(e.category, catStat);
   }
@@ -376,7 +376,7 @@ export function summarize(cycle: InsightCycle, days: DayPoint[]): Summary {
     closedDays,
     spentOnClosed,
     averageDay: closedDays ? spentOnClosed / closedDays : null,
-    leftToLive: Math.max(cycle.pool - (todayPoint?.totalSpent ?? 0), 0),
+    leftToLive: cycle.pool - (todayPoint?.totalSpent ?? 0),
     planMarker: Math.min(closedDays / cycle.totalDays, 1),
     paceMessage: enough ? pace(cycle.planAmount, cycle.totalDays, closedDays, spentOnClosed).message : null,
     projectionMessage: enough

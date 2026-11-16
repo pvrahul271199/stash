@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   addLoan, addSpend, addSubcategory, allCycles, createPlan, cycleFor, dateTotalsBetween, ensureSeed, loadCategories,
-  loadLinkNames, previewCloseDay, recordRepayment, removeEntry, reopenLoan, setLoanDue, setLoanWillPay, toEntry,
+  loadLinkNames, previewCloseDay, recordRepayment, removeEntry, reopenLoan, setLoanDue, toEntry,
   undoLastRepayment, updateEntry, writeOffLoan,
 } from '@/db/queries';
 import { getDB, openUserDB, type Loan } from '@/db/schema';
@@ -12,7 +12,7 @@ import { MAPPERS } from '@/lib/sync';
 import { addDays } from '@/lib/dates';
 import {
   closedLoans, dueFromChoice, dueText, loanName, loanStatus, openLoans, remaining, summarize, validateLoan,
-  writeOffEffects, writtenOffAmount, type LoanLike,
+  loanEffects, writtenOffAmount, type LoanLike,
 } from '@/lib/lend';
 
 const loan = (over: Partial<LoanLike & { createdAt: number }> = {}): LoanLike & { createdAt: number } => ({
@@ -74,19 +74,19 @@ describe('lend maths (lib/lend.ts)', () => {
   });
 
   it('only a write-off reaches the budget: open, part-paid and fully repaid loans give no effect', () => {
-    expect(writeOffEffects([loan(), loan({ repayments: [pay(2000)] }), loan({ repayments: [pay(5000)] })])).toEqual([]);
+    expect(loanEffects([loan(), loan({ repayments: [pay(2000)] }), loan({ repayments: [pay(5000)] })])).toEqual([]);
   });
 
   it('a write-off is a negative effect for what was still owed, dated the day it was written off', () => {
     const off = loan({ repayments: [pay(2000)], writtenOff: true, writtenOffOn: '2026-11-20' });
     expect(writtenOffAmount(off)).toBe(3000);
-    expect(writeOffEffects([off])).toEqual([{ date: '2026-11-20', amount: -3000 }]);
+    expect(loanEffects([off])).toEqual([{ date: '2026-11-20', amount: -3000 }]);
   });
 
   it('write-offs without a date, with nothing left, or deleted are ignored', () => {
-    expect(writeOffEffects([loan({ writtenOff: true })])).toEqual([]); // never dated
-    expect(writeOffEffects([loan({ writtenOff: true, writtenOffOn: '2026-11-20', repayments: [pay(5000)] })])).toEqual([]);
-    expect(writeOffEffects([loan({ writtenOff: true, writtenOffOn: '2026-11-20', deletedAt: 1 })])).toEqual([]);
+    expect(loanEffects([loan({ writtenOff: true })])).toEqual([]); // never dated
+    expect(loanEffects([loan({ writtenOff: true, writtenOffOn: '2026-11-20', repayments: [pay(5000)] })])).toEqual([]);
+    expect(loanEffects([loan({ writtenOff: true, writtenOffOn: '2026-11-20', deletedAt: 1 })])).toEqual([]);
   });
 
   it('due choices: a week out, the last day of the month, none', () => {
@@ -184,7 +184,7 @@ describe('loans in the database', () => {
 
   it('addLoan writes the Lend spend and the loan together, linked by id', async () => {
     const cycle = await setup('lend-a');
-    const { loan: l, entry } = await addLoan(cycle, { amount: 5000, person: ' Arjun ', kind: 'Friends', willPay: 'yes', dueDate: null });
+    const { loan: l, entry } = await addLoan(cycle, { amount: 5000, person: ' Arjun ', kind: 'Friends', dueDate: null });
     const t = (await getDB().transactions.get(entry.id))!;
     expect(t).toMatchObject({ amount: 5000, type: 'Lend', categoryId: 'lend', subtype: 'Friends', label: 'Arjun', fromSavings: false });
     expect(await getDB().loans.get(l.id)).toMatchObject({ txnId: t.id, person: 'Arjun', kind: 'Friends', amount: 5000, lentOn: t.txnDate, repayments: [], writtenOff: false });
@@ -192,11 +192,11 @@ describe('loans in the database', () => {
 
   it('the name is optional: the type stands in for it, and a custom type works', async () => {
     const cycle = await setup('lend-names');
-    const a = await addLoan(cycle, { amount: 300, person: '  ', kind: 'Neighbour', willPay: 'maybe', dueDate: null });
+    const a = await addLoan(cycle, { amount: 300, person: '  ', kind: 'Neighbour', dueDate: null });
     expect(a.loan).toMatchObject({ person: '', kind: 'Neighbour' });
     expect(loanName(a.loan)).toBe('Neighbour');
     expect(await getDB().transactions.get(a.entry.id)).toMatchObject({ type: 'Lend', subtype: 'Neighbour', label: 'Neighbour' });
-    const b = await addLoan(cycle, { amount: 300, person: 'Arjun', kind: 'Friends', willPay: 'yes', dueDate: null });
+    const b = await addLoan(cycle, { amount: 300, person: 'Arjun', kind: 'Friends', dueDate: null });
     expect(loanName(b.loan)).toBe('Arjun');
   });
 
@@ -211,15 +211,15 @@ describe('loans in the database', () => {
 
   it('invalid input writes nothing', async () => {
     const cycle = await setup('lend-c');
-    await expect(addLoan(cycle, { amount: 0, person: 'A', kind: 'Friends', willPay: 'yes', dueDate: null })).rejects.toThrow(/amount/i);
-    await expect(addLoan(cycle, { amount: 10, person: 'A', kind: '', willPay: 'yes', dueDate: null })).rejects.toThrow(/who you lent/i);
+    await expect(addLoan(cycle, { amount: 0, person: 'A', kind: 'Friends', dueDate: null })).rejects.toThrow(/amount/i);
+    await expect(addLoan(cycle, { amount: 10, person: 'A', kind: '', dueDate: null })).rejects.toThrow(/who you lent/i);
     expect(await getDB().loans.count()).toBe(0);
     expect(await getDB().transactions.count()).toBe(0);
   });
 
   it('repayment is clamped to what is owed; undo takes the last one back', async () => {
     const cycle = await setup('lend-d');
-    const { loan: l } = await addLoan(cycle, { amount: 5000, person: 'Arjun', kind: 'Friends', willPay: 'yes', dueDate: null });
+    const { loan: l } = await addLoan(cycle, { amount: 5000, person: 'Arjun', kind: 'Friends', dueDate: null });
     const r1 = await recordRepayment(l.id, 2000);
     expect(r1!.repayments).toHaveLength(1);
     const r2 = await recordRepayment(l.id, 99999); // only 3000 is left
@@ -231,22 +231,21 @@ describe('loans in the database', () => {
 
   it('due date and will-pay edits; a date before the day it was lent is refused', async () => {
     const cycle = await setup('lend-f');
-    const { loan: l } = await addLoan(cycle, { amount: 1000, person: 'Meera', kind: 'Friends', willPay: 'yes', dueDate: null });
+    const { loan: l } = await addLoan(cycle, { amount: 1000, person: 'Meera', kind: 'Friends', dueDate: null });
     const later = addDays(l.lentOn, 3);
     expect((await setLoanDue(l.id, later))!.dueDate).toBe(later);
     expect(await setLoanDue(l.id, '2000-01-01')).toBeNull();
-    expect((await setLoanWillPay(l.id, 'unsure'))!.willPay).toBe('unsure');
     expect((await setLoanDue(l.id, null))!.dueDate).toBeNull();
   });
 
   it('deleting the Lend spend removes its loan, unless money already came back', async () => {
     const cycle = await setup('lend-g');
-    const a = await addLoan(cycle, { amount: 1000, person: 'A', kind: 'Friends', willPay: 'yes', dueDate: null });
+    const a = await addLoan(cycle, { amount: 1000, person: 'A', kind: 'Friends', dueDate: null });
     expect(await removeEntry(a.entry.id)).toBe('removed');
     expect((await getDB().loans.get(a.loan.id))!.deletedAt).toBeTypeOf('number');
     expect((await getDB().transactions.get(a.entry.id))!.deletedAt).toBeTypeOf('number');
 
-    const b = await addLoan(cycle, { amount: 1000, person: 'B', kind: 'Family', willPay: 'yes', dueDate: null });
+    const b = await addLoan(cycle, { amount: 1000, person: 'B', kind: 'Family', dueDate: null });
     await recordRepayment(b.loan.id, 100);
     expect(await removeEntry(b.entry.id)).toBe('has-repayments');
     expect((await getDB().loans.get(b.loan.id))!.deletedAt).toBeUndefined();
@@ -255,7 +254,7 @@ describe('loans in the database', () => {
 
   it('a loan owns its spend: amount, category and label cannot be edited, note and payment can', async () => {
     const cycle = await setup('lend-h');
-    const { entry } = await addLoan(cycle, { amount: 1000, person: 'A', kind: 'Friends', willPay: 'yes', dueDate: null });
+    const { entry } = await addLoan(cycle, { amount: 1000, person: 'A', kind: 'Friends', dueDate: null });
     await updateEntry(entry.id, { amount: 9, category: 'Food', subcategory: null, label: 'Lunch', note: 'for rent', payment: 'Cash' });
     const t = (await getDB().transactions.get(entry.id))!;
     expect(t).toMatchObject({ amount: 1000, type: 'Lend', subtype: 'Friends', label: 'A', note: 'for rent', payment: 'Cash' });
@@ -296,7 +295,7 @@ describe('lending and the budget', () => {
   }
   const now = async () => (await cycleFor(getDB(), TODAY_ISO, TODAY_ISO))!;
   const lend = (cycle: Awaited<ReturnType<typeof now>>, amount: number, date?: string) =>
-    addLoan(cycle, { amount, person: 'Arjun', kind: 'Friends', willPay: 'yes', dueDate: null }, NOON, undefined, date);
+    addLoan(cycle, { amount, person: 'Arjun', kind: 'Friends', dueDate: null }, NOON, undefined, date);
 
   it('adding a lend does not change today spend, the pool, the days or tomorrow', async () => {
     const base = await fixed('lb-1');
@@ -427,7 +426,7 @@ describe('sync mapping', () => {
   it('a loan survives local -> remote -> local, including repayments and null dates', () => {
     const l: Loan = {
       id: 'l1', updatedAt: 5, txnId: 't1', person: 'Arjun', kind: 'Friends', amount: 5000, lentOn: '2026-11-02',
-      dueDate: '2026-11-30', willPay: 'maybe', repayments: [{ id: 'r1', amount: 2000, date: '2026-11-10' }], writtenOff: true, writtenOffOn: '2026-11-18', createdAt: 3,
+      dueDate: '2026-11-30', willPay: 'maybe', repayments: [{ id: 'r1', amount: 2000, date: '2026-11-10' }], writtenOff: true, writtenOffOn: '2026-11-18', holdBack: false, createdAt: 3,
     };
     const remote = MAPPERS.loans.toRemote(l);
     expect(remote).toMatchObject({ txn_id: 't1', person: 'Arjun', kind: 'Friends', amount: 5000, lent_on: '2026-11-02', due_date: '2026-11-30', will_pay: 'maybe', written_off: true, written_off_on: '2026-11-18' });
@@ -435,5 +434,62 @@ describe('sync mapping', () => {
 
     const bare = MAPPERS.loans.toLocal({ id: 'l2', client_updated_at: 1, deleted_at: null, txn_id: null, person: 'M', kind: 'Family', amount: '800', lent_on: '2026-11-02', due_date: null, will_pay: 'yes', repayments: null, written_off: null, created_at: '9' } as never);
     expect(bare).toMatchObject({ txnId: null, dueDate: null, repayments: [], writtenOff: false, writtenOffOn: null, amount: 800, createdAt: 9 });
+  });
+});
+
+describe('hold back (design C)', () => {
+  const held = (over: Partial<LoanLike & { createdAt: number }> = {}) => loan({ holdBack: true, lentOn: '2026-11-05', ...over });
+
+  it('loanEffects: the whole amount out on the day lent, each repayment back on its day, nothing extra on write-off', () => {
+    expect(loanEffects([held()])).toEqual([{ date: '2026-11-05', amount: -5000 }]);
+    expect(loanEffects([held({ repayments: [pay(2000, '2026-11-12')] })])).toEqual([
+      { date: '2026-11-05', amount: -5000 },
+      { date: '2026-11-12', amount: 2000 },
+    ]);
+    // written off: what is still owed is already held back, so no second debit
+    expect(loanEffects([held({ writtenOff: true, writtenOffOn: '2026-11-20', repayments: [pay(2000, '2026-11-12')] })])).toEqual([
+      { date: '2026-11-05', amount: -5000 },
+      { date: '2026-11-12', amount: 2000 },
+    ]);
+    expect(loanEffects([held({ deletedAt: 1 })])).toEqual([]);
+    // a loan without the flag (every loan made before this existed) behaves exactly as before
+    expect(loanEffects([loan({ lentOn: '2026-11-05' })])).toEqual([]);
+  });
+
+  it('lowers the pool at once, and gives it back as money returns', async () => {
+    const cycle = await setup('lend-hold');
+    const base = (await cycleFor(getDB()))!.pool;
+    const { loan: l } = await addLoan(cycle, { amount: 6000, person: 'Arjun', kind: 'Friends', holdBack: true, dueDate: null });
+    expect((await cycleFor(getDB()))!.pool).toBe(base - 6000);
+    await recordRepayment(l.id, 2500);
+    expect((await cycleFor(getDB()))!.pool).toBe(base - 3500);
+    await recordRepayment(l.id, 3500);
+    expect((await cycleFor(getDB()))!.pool).toBe(base);
+  });
+
+  it('without hold back nothing changes until a write-off (the old behaviour)', async () => {
+    const cycle = await setup('lend-nohold');
+    const base = (await cycleFor(getDB()))!.pool;
+    const { loan: l } = await addLoan(cycle, { amount: 6000, person: 'Meera', kind: 'Friends', dueDate: null });
+    expect((await cycleFor(getDB()))!.pool).toBe(base);
+    await writeOffLoan(l.id);
+    expect((await cycleFor(getDB()))!.pool).toBe(base - 6000);
+  });
+
+  it('a held loan that is written off keeps the unpaid part held, with no double count', async () => {
+    const cycle = await setup('lend-hold-off');
+    const base = (await cycleFor(getDB()))!.pool;
+    const { loan: l } = await addLoan(cycle, { amount: 6000, person: 'Karthik', kind: 'Friends', holdBack: true, dueDate: null });
+    await recordRepayment(l.id, 1000);
+    await writeOffLoan(l.id);
+    expect((await cycleFor(getDB()))!.pool).toBe(base - 5000);
+  });
+
+  it('syncs both ways, and a row from before the column existed reads as not held', () => {
+    const l = { id: 'h1', updatedAt: 5, txnId: 't1', person: 'A', kind: 'Friends', amount: 900, lentOn: '2026-11-02', dueDate: null, willPay: 'yes', repayments: [], writtenOff: false, writtenOffOn: null, holdBack: true, createdAt: 3 } as Loan;
+    const remote = MAPPERS.loans.toRemote(l) as Record<string, unknown>;
+    expect(remote.hold_back).toBe(true);
+    expect(MAPPERS.loans.toLocal({ ...remote, client_updated_at: 5, deleted_at: null } as never).holdBack).toBe(true);
+    expect(MAPPERS.loans.toLocal({ id: 'o', client_updated_at: 1, deleted_at: null, txn_id: null, person: 'M', kind: 'Family', amount: '8', lent_on: '2026-11-02', due_date: null, will_pay: 'yes', repayments: null, written_off: null, created_at: '9' } as never).holdBack).toBe(false);
   });
 });

@@ -7,7 +7,6 @@ import { Keypad } from '../ui/Keypad';
 import { CALC_INIT, OP_SYMBOL, calcPress, calcResult, isOp, type CalcState } from '../../lib/calc';
 import { CategoryPicker } from './CategoryPicker';
 import { LendFields, NEW_LEND_DRAFT, type LendDraft } from './LendFields';
-import { BigSpend } from './BigSpend';
 import {
   addLoan,
   addSpend,
@@ -24,7 +23,7 @@ import {
 } from '@/db/queries';
 import { PAYMENT_MODES, type Plan } from '@/db/schema';
 import type { DerivedCycle } from '@/lib/period';
-import { daysLeft, isBigSpend, todayAllowance } from '@/lib/budget';
+import { daysLeft, todayAllowance } from '@/lib/budget';
 import { MAX_NAME } from '@/lib/categories';
 import { dateOfDay, daysBetween, formatShort, formatWithWeekday, todayISO } from '@/lib/dates';
 import { quickChips } from '@/lib/suggestions';
@@ -64,7 +63,7 @@ export function LogSpend({
   const [eventMenuOpen, setEventMenuOpen] = useState(false);
   const [newEventName, setNewEventName] = useState('');
   const [eventErr, setEventErr] = useState<string | null>(null);
-  const [view, setView] = useState<'keypad' | 'picker' | 'big'>('keypad');
+  const [view, setView] = useState<'keypad' | 'picker'>('keypad');
   /** Spend | Lend: Lend asks who / will they pay / by when instead of payment and note, and saves a loan too. */
   const [mode, setMode] = useState<'spend' | 'lend'>('spend');
   const [lend, setLend] = useState<LendDraft>(NEW_LEND_DRAFT);
@@ -107,7 +106,6 @@ export function LogSpend({
       /* ignore */
     }
   };
-  const [pending, setPending] = useState<Pending | null>(null);
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const lastPayment = useLastPayment();
@@ -211,12 +209,6 @@ export function LogSpend({
       await persist(p, false, false);
       return;
     }
-    // Spending record-only on another day (switch off) never touches the pool, so nothing to warn about.
-    if ((!isOtherDay || spread) && isBigSpend(amount, cycle.pool, cycle)) {
-      setPending(p);
-      setView('big');
-      return;
-    }
     if (isOtherDay) {
       await persist(p, false, spread);
       return;
@@ -224,7 +216,7 @@ export function LogSpend({
     await persist(p, false, true);
   }
 
-  /** Lend mode's Save: the spend and its loan in one go. Skips the big-spend prompt (that is about one-off purchases). */
+  /** Lend mode's Save: the spend and its loan in one go. */
   async function commitLend() {
     if (savingRef.current) return;
     const dueDate = dueFromChoice(lend.due, todayISO());
@@ -239,13 +231,13 @@ export function LogSpend({
     try {
       await addLoan(
         cycle,
-        { amount, person: lend.person, kind: lend.kind, willPay: lend.willPay, dueDate: dueDate && dueDate < targetIso ? targetIso : dueDate, payment },
+        { amount, person: lend.person, kind: lend.kind, holdBack: lend.holdBack, dueDate: dueDate && dueDate < targetIso ? targetIso : dueDate, payment },
         new Date(),
         effectiveDay ?? undefined,
         targetDate,
       );
       navigator.vibrate?.(10);
-      posthog.capture('lend_logged', { kind: lend.kind, has_due_date: dueDate != null, will_pay: lend.willPay });
+      posthog.capture('lend_logged', { kind: lend.kind, has_due_date: dueDate != null, hold_back: lend.holdBack });
       toast(`Tracking ${inr(amount)} lent to ${lend.person.trim() || lend.kind}. See History > Lend`);
       onClose();
     } catch {
@@ -312,23 +304,10 @@ export function LogSpend({
         />
       )}
 
-      {view === 'big' && pending && (
-        <BigSpend
-          amount={amount}
-          label={pending.label}
-          left={cycle.pool}
-          allowance={todayAllowance(cycle)}
-          busy={saving}
-          onClose={() => setView('keypad')}
-          onKeep={() => persist(pending, true, true)}
-          onSpread={() => persist(pending, false, true)}
-        />
-      )}
-
       {spreadInfo && (() => {
         const remDays = Math.max(1, daysLeft(cycle));
         const currentDaily = todayAllowance(cycle);
-        const newPool = Math.max(0, cycle.pool - amount);
+        const newPool = cycle.pool - amount;
         const newDaily = newPool / remDays;
         return (
           <div className="absolute inset-0 z-[60] flex items-end bg-ink/40" role="presentation" onClick={() => setSpreadInfo(false)}>
@@ -374,7 +353,7 @@ export function LogSpend({
         );
       })()}
 
-      {(view === 'keypad' || view === 'big') && (
+      {view === 'keypad' && (
         <>
           <div className="relative flex items-center justify-between gap-2">
             <IconButton label="Close" onClick={onClose} className="-ml-2 h-9 w-9 min-h-0 shrink-0">
@@ -620,6 +599,7 @@ export function LogSpend({
                 onChange={setLend}
                 kinds={lendKinds}
                 people={people}
+                dailyHint={amount > 0 ? `Daily ${inr(todayAllowance(cycle))} → ${inr((cycle.pool - amount) / Math.max(1, daysLeft(cycle)))}` : null}
                 onAddKind={async (name) => (lendCat ? addSubcategory(lendCat.id, name) : 'The Lend category was removed. Add it back in Categories.')}
               />
             ) : (
@@ -778,7 +758,7 @@ export function LogSpend({
                 <p className="num text-[11px] text-faint">
                   {spread
                     ? amount > 0
-                      ? `Daily ${inr(todayAllowance(cycle))} → ${inr(Math.max(0, cycle.pool - amount) / Math.max(1, daysLeft(cycle)))}`
+                      ? `Daily ${inr(todayAllowance(cycle))} → ${inr((cycle.pool - amount) / Math.max(1, daysLeft(cycle)))}`
                       : 'Your daily amount will adjust'
                     : `Just recorded. Daily stays ${inr(todayAllowance(cycle))}`}
                 </p>

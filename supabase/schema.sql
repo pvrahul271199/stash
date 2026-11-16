@@ -293,6 +293,8 @@ create table if not exists public.loans (
 );
 -- for a database that already ran the first version of this block
 alter table public.loans add column if not exists written_off_on date;
+-- hold-back: the user took the loan out of their daily amount while it is owed (older rows = false)
+alter table public.loans add column if not exists hold_back boolean not null default false;
 create index if not exists idx_loans_user_updated on public.loans (user_id, updated_at, id);
 alter table public.loans add column if not exists version bigint not null default 1;
 drop trigger if exists trg_loans_lww on public.loans;

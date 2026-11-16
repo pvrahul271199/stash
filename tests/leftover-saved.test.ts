@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ensureSeed, leftoverTotals, moveLeftoverToSavings } from '@/db/queries';
+import { ensureSeed, leftoverTotals } from '@/db/queries';
 import { MAPPERS } from '@/lib/sync';
 import { getDB, openUserDB } from '@/db/schema';
 
@@ -18,15 +18,15 @@ describe('leftovers moved to savings', () => {
     });
   });
 
-  it('stores one synced row per month, once', async () => {
+  it('sums the savings already moved in earlier months, one row per month', async () => {
     await openUserDB('leftover-a');
     await ensureSeed();
-    await moveLeftoverToSavings('p:2026-09-01:30', 4200);
-    await moveLeftoverToSavings('p:2026-09-01:30', 9999); // second tap changes nothing
-    await moveLeftoverToSavings('p:2026-10-01:31', 800);
+    const now = Date.now();
+    await getDB().leftovers.bulkAdd([
+      { id: 'a', monthId: 'p:2026-09-01:30', amount: 4200, createdAt: now, updatedAt: now },
+      { id: 'b', monthId: 'p:2026-10-01:31', amount: 800, createdAt: now, updatedAt: now },
+    ]);
     const rows = await getDB().leftovers.toArray();
-    expect(rows.map((r) => [r.monthId, r.amount]).sort()).toEqual([['p:2026-09-01:30', 4200], ['p:2026-10-01:31', 800]]);
-    expect(rows.every((r) => r.localRev != null)).toBe(true); // stamped, so sync will push it
     expect(leftoverTotals(rows)).toMatchObject({ total: 5000, months: 2 });
     expect(leftoverTotals(rows).byMonth[0].monthId).toBe('p:2026-10-01:31');
   });

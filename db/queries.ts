@@ -52,7 +52,7 @@ import { getStoredCurrencyCode } from '@/lib/currency';
 import { buildUserProfile, getActiveUserId, getStoredAvatarTheme, getStoredUsername } from '@/lib/user';
 import { requestSync, syncNow } from '@/lib/sync';
 import { getAuth } from '@/lib/auth';
-import { LEND_CATEGORY, remaining, validateLoan, writeOffEffects, type LoanKind, type WillPay } from '@/lib/lend';
+import { LEND_CATEGORY, remaining, validateLoan, loanEffects, type LoanKind } from '@/lib/lend';
 import { uuidv7 } from '@/lib/uuid';
 
 /* ---------- helpers ---------- */
@@ -144,7 +144,7 @@ export async function cycleFor(db: StashDB, date: string = todayISO(), today: st
   const tracking = trackingForPeriod(plans, firstSpend?.txnDate, period);
   if (!tracking) return undefined;
   const txns = (await db.transactions.where('txnDate').between(period.start, period.end, true, true).toArray()).filter((t) => !lend.has(t.id));
-  const c = buildCycle(period, planInEffect(plans, period)!, txns, today, tracking, false, writeOffEffects(loans));
+  const c = buildCycle(period, planInEffect(plans, period)!, txns, today, tracking, false, loanEffects(loans));
   if (!c) return undefined;
   c.leftoverMoved = (meta?.leftoverMoved ?? []).includes(c.id);
   return c;
@@ -160,7 +160,7 @@ export async function allCycles(db: StashDB, today: string = todayISO()): Promis
   const [plans, txns, meta, loans] = await Promise.all([db.plans.toArray(), db.transactions.toArray(), db.meta.get('main'), db.loans.toArray()]);
   const moved = new Set(meta?.leftoverMoved ?? []);
   const lend = new Set(loans.filter(alive).map((l) => l.txnId).filter(Boolean) as string[]);
-  return buildAllCycles(plans, txns.filter((t) => !lend.has(t.id)), today, (id) => moved.has(id), writeOffEffects(loans));
+  return buildAllCycles(plans, txns.filter((t) => !lend.has(t.id)), today, (id) => moved.has(id), loanEffects(loans));
 }
 
 const cycleOfDate = (cycles: DerivedCycle[], iso: string) => cycles.find((c) => iso >= c.startDate && iso <= endOf(c));
@@ -221,7 +221,7 @@ export interface Snapshot {
   previous: DerivedCycle | undefined;
   /** Whether the month-end summary of `previous` was already seen on this device. */
   previousSeen: boolean;
-  /** Every finished, budgeted month whose summary was not seen on this device yet, oldest first. */
+  /** Finished months the user logged on the last day of, not yet seen on this device, oldest first. */
   pending: DerivedCycle[];
 }
 
@@ -233,25 +233,19 @@ export async function loadSnapshot(db: StashDB, today: string): Promise<Snapshot
   const earlier = cycle ? await cycleFor(db, addDays(cycle.monthStart, -1), today) : undefined;
   const previous = earlier && (earlier.fromSavingsTotal > 0 || earlier.days.some((d) => d.spent > 0)) ? earlier : undefined;
   const previousSeen = !previous || (meta?.monthSummarySeen ?? []).includes(previous.id);
-  // Every finished month nobody has looked back on yet (not just the latest one, and not only in the first days of the next month).
+  // The month-end screen has one rule: the user logged something on a month's LAST day and the month has since turned over.
+  // It is a recap (spent, saved first, left over), shown once. Nothing else gates it: not "close the day", not whether the plan
+  // was budgeted, not the device's clock marker, not whether money is left. Seen months never come back.
   const seen = new Set(meta?.monthSummarySeen ?? []);
-  const closedThrough = meta?.closedThrough ?? null;
-  const plans = (await db.plans.toArray()).filter(alive);
-  const firstBudget = plans.reduce<string | null>((m, p) => (p.effectiveFrom && (m == null || p.effectiveFrom < m) ? p.effectiveFrom : m), null);
-  const pending = cycle
-    ? (await allCycles(db, today))
-        .filter(
-          (c) =>
-            c.monthEnd < today &&
-            // only once the user has closed the month's last day on this device (a login or new device never triggers it)
-            closedThrough != null &&
-            closedThrough >= c.monthEnd &&
-            !seen.has(c.id) &&
-            // a budgeted month always; an earlier month only reconstructed from backdated spends only when it has spends
-            (firstBudget == null || c.monthEnd >= firstBudget || c.fromSavingsTotal > 0 || c.days.some((d) => d.spent > 0)),
-        )
-        .reverse()
-    : [];
+  const pending: DerivedCycle[] = [];
+  if (cycle) {
+    for (const c of await allCycles(db, today)) {
+      if (c.monthEnd >= today || seen.has(c.id)) continue;
+      const onLastDay = (await db.transactions.where('txnDate').equals(c.monthEnd).toArray()).some(alive);
+      if (onLastDay) pending.push(c);
+    }
+    pending.reverse(); // oldest first
+  }
   return { plan, cycle, previous, previousSeen, pending };
 }
 
@@ -390,6 +384,8 @@ export function useAllEntries(enabled = true): Entry[] | undefined {
 export interface DateTotal {
   spent: number;
   fromSavings: number;
+  /** Money lent that day: listed, but not spending. */
+  lent: number;
   count: number;
 }
 
@@ -402,9 +398,9 @@ export async function dateTotalsBetween(db: StashDB, fromIso: string, toIso: str
   const map = new Map<string, DateTotal>();
   for (const t of rows) {
     if (t.deletedAt != null) continue;
-    const d = map.get(t.txnDate) ?? { spent: 0, fromSavings: 0, count: 0 };
+    const d = map.get(t.txnDate) ?? { spent: 0, fromSavings: 0, lent: 0, count: 0 };
     if (lend.has(t.id)) {
-      // lent money is listed on its day but adds to no total: lending is not spending
+      d.lent += t.amount; // listed on its day but adds to no spending total
     } else if (t.fromSavings) d.fromSavings += t.amount;
     else d.spent += t.amount;
     d.count += 1;
@@ -775,7 +771,8 @@ export interface NewLoan {
   amount: number;
   person: string;
   kind: LoanKind;
-  willPay: WillPay;
+  /** Take it out of the daily amount while it is owed (default: no). */
+  holdBack?: boolean;
   /** yyyy-mm-dd the money should be back, or null for "no date". */
   dueDate: string | null;
   payment?: string | null;
@@ -824,10 +821,11 @@ export async function addLoan(
     amount,
     lentOn: txn.txnDate,
     dueDate: input.dueDate,
-    willPay: input.willPay,
+    willPay: 'yes', // no longer asked; kept as a column for sync compatibility
     repayments: [],
     writtenOff: false,
     writtenOffOn: null,
+    holdBack: !!input.holdBack,
     createdAt: stamp,
   };
   await db.transaction('rw', [db.transactions, db.loans, db.meta], async () => {
@@ -888,10 +886,6 @@ export async function undoLastRepayment(id: string): Promise<Loan | null> {
 
 export async function setLoanDue(id: string, dueDate: string | null): Promise<Loan | null> {
   return patchLoan(id, (l) => (dueDate && dueDate < l.lentOn ? null : { ...l, dueDate }));
-}
-
-export async function setLoanWillPay(id: string, willPay: WillPay): Promise<Loan | null> {
-  return patchLoan(id, (l) => ({ ...l, willPay }));
 }
 
 /**
@@ -961,25 +955,6 @@ export async function closeToday(): Promise<CloseResult | null> {
   else await db.meta.put({ id: 'main', lastUsedLabel: null, schemaVersion: SCHEMA_VERSION, closedThrough: day });
   setClosedThrough(day);
   return r;
-}
-
-/**
- * Moves a finished month's leftover to savings: stores the amount (a synced row, one per month) so a running
- * "saved from leftovers" total can be shown. Idempotent per month. (The app tracks the money; it never moves real money.)
- */
-export async function moveLeftoverToSavings(cycleId: string, amount: number): Promise<void> {
-  const db = getDB();
-  await db.transaction('rw', [db.leftovers, db.meta], async () => {
-    const m = await db.meta.get('main');
-    if (!m) return;
-    const moved = m.leftoverMoved ?? [];
-    if (!moved.includes(cycleId)) await db.meta.update('main', { leftoverMoved: [...moved, cycleId] });
-    const has = (await db.leftovers.where('monthId').equals(cycleId).toArray()).some(alive);
-    if (has) return;
-    const now = Date.now();
-    await db.leftovers.add({ id: txnId(), monthId: cycleId, amount: Math.max(0, Math.round(amount)), createdAt: now, updatedAt: now });
-  });
-  requestSync();
 }
 
 /** One amount per month: if two devices both moved the same month, the newest row wins. `byMonth` is newest month first. */

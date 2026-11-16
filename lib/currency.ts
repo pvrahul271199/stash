@@ -19,6 +19,11 @@ export const SUPPORTED_CURRENCIES: CurrencyInfo[] = [
   { code: 'AUD', symbol: 'A$', name: 'Australian Dollar', shortName: 'Dollar', locale: 'en-AU' },
   { code: 'SGD', symbol: 'S$', name: 'Singapore Dollar', shortName: 'Dollar', locale: 'en-SG' },
   { code: 'JPY', symbol: '¥', name: 'Japanese Yen', shortName: 'Yen', locale: 'ja-JP' },
+  // Added later: appended, so every existing code keeps its place and the INR fallback stays first.
+  // `en-*` locales keep Western digits (ar-* would switch the numbers to Arabic-Indic).
+  { code: 'OMR', symbol: 'OMR', name: 'Omani Rial', shortName: 'Rial', locale: 'en-OM' },
+  { code: 'SAR', symbol: 'SAR', name: 'Saudi Riyal', shortName: 'Riyal', locale: 'en-SA' },
+  { code: 'QAR', symbol: 'QAR', name: 'Qatari Riyal', shortName: 'Riyal', locale: 'en-QA' },
 ];
 
 export const CURRENCY_STORAGE_KEY = 'stash:currency-code';

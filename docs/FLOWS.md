@@ -66,7 +66,7 @@ Triggered from `UserTab`/`PlanScreen` → `onSwitchUser`:
    - amount ≤ 0 → toast.
    - target date outside active cycle → `persist(..., adjustPool=false)`.
    - target day < currentDay → `pastAdjust` view (Yes/No rebalance).
-   - `isBigSpend` → `BigSpend` (spread across days vs take from savings).
+   - No big-spend prompt: an amount larger than the pool is saved as-is and the pool goes negative.
    - else `persist(p,false,true)`.
 3. `persist` guards double-submit with `savingRef`, calls `addSpend(cycle, spend, now, effectiveDay, targetDate)`, vibrates, toasts, closes.
 4. `addSpend` (single transaction): resolves label→category via `resolveLabel` (unknown label → "Other"), picks active event, computes `day/date/cycleId`, inserts entry, updates `meta`, then the day/pool bookkeeping in ARCHITECTURE §4. After the transaction: `push()` + `scheduleSync()`.
@@ -78,8 +78,7 @@ Triggered from `UserTab`/`PlanScreen` → `onSwitchUser`:
 
 > **2026-11-06 (E-4):** sections 7, 8, 9 and 18 below describe the old stored-cycle flows. Now: 7 = "Close the day"
 > (`closeToday`: one screen, really closes the day, per device, see section 7). Today's strip shows the whole
-> calendar month; tapping a day before tracking began and logging there moves the tracking start back to it. 8 = removed (no catch-up screen; unlogged days count as nothing spent). 9 = no "Start next month": a new month begins on the salary day by itself; `MonthEnd` is a dismissible summary
-> of last month in the first 3 days (`meta.monthSummarySeen`). 18 = removed (a restart can no longer happen).
+> calendar month; tapping a day before tracking began and logging there moves the tracking start back to it. 8 = removed (no catch-up screen; unlogged days count as nothing spent). 9 = no "Start next month": a new month begins on the salary day by itself; `MonthEnd` offers last month's leftover (see 106; `meta.monthSummarySeen`). 18 = removed (a restart can no longer happen).
 > Onboarding asks for the day the **month starts on** (default 1) instead of "days until next salary".
 
 ## 7. Close the day
@@ -88,7 +87,7 @@ One screen, one tap.
 1. Today → "Close the day" → `CloseDay`: spent vs today's amount, tomorrow's amount and why (`closeDay(cycle, spent)`, pure), the entries (remove, or "Paid cash or forgot something?" → log, returns here). The last day of a month shows "A new one starts tomorrow" instead of tomorrow's amount.
 2. "Close the day" → `closeToday()` (`db/queries.ts`) closes the day `todayISO()` says is on screen: writes `meta.closedThrough`, calls `setClosedThrough` (`lib/dates.ts`), shows the toast "Day closed" and returns to Today. There is no separate "Day closed" screen any more.
 3. From then `todayISO()` (no argument) returns the next day while the clock is still on the closed one, so `useToday` (subscribed via `subscribeDay`) re-renders everything on the next day immediately; `meta.closedThrough` is reloaded when a DB opens. No restriction: the user can log that next day and close it too.
-4. Not synced, nothing month-shaped stored. Closing the last day of a month starts the next month at once (`MonthEnd` summary as usual).
+4. Not synced, nothing month-shaped stored. Closing the last day of a month starts the next month at once (`MonthEnd` appears if something was logged on that last day and money is left).
 
 ## 7b. Home from the logo
 
@@ -103,8 +102,8 @@ Tapping the logo on Today sets `forceWelcome` (AppShell) and shows `Welcome`. Gu
 
 ## 9. Month end / next month
 
-1. `MonthEnd` for every finished, budgeted month with spends that this device has not looked back on yet (`snap.pending`, oldest first, any day of a later month; not in sample mode). It is shown until you tap Continue (`dismissMonthSummary`). Guests also get a "Keep your months safe / Create account" card. Shows: spent on daily life, saved first, taken from savings, left over.
-2. "Move X to savings" → `moveLeftoverToSavings(cycleId, amount)` sets `meta.leftoverMoved` (per device flag) and adds one synced row to `leftovers` (server table `leftover_savings`: `monthId`, `amount`; once per month, newest wins if two devices both moved it). The running total (`useSavedFromLeftovers`) shows on this screen and in Insights → Patterns. No real money moves. ⚠ F-17.
+1. `MonthEnd`, one rule: the user **logged something on a month's last day** and the month has since turned over (`snap.pending`, oldest first, any day of a later month; not in sample mode, not already seen). It is a recap only (`lib/recap.ts` `buildRecap`, same maths as Insights): the month, one sentence on how it went, what was left (or "All used" / "Over by") in a teal card with a spent/left bar, *Where it went* (an animated category ring, `components/charts/RecapRing.tsx`: tap a slice or a row to see that category's amount and share; plus up to three plain sentences: top weekday, most repeated spend, biggest event) and saved first / taken from savings. One *Continue* button (`dismissMonthSummary`). There is no move-to-savings any more (`moveLeftoverToSavings` was removed; earlier `leftovers` rows still count in User/Insights).
+2. (removed) Moving the leftover to savings no longer exists. Rows already saved that way stay in `leftovers` and still show in User/Insights (`useSavedFromLeftovers`).
 3. "Start next month" → `startNextMonth`: new cycle **starting today** with the same plan, then push.
 
 ## 10. Change plan
@@ -152,8 +151,8 @@ Tapping the logo on Today sets `forceWelcome` (AppShell) and shows `Welcome`. Gu
 
 ## 19b. Lending (E-LEND)
 1. **Log it.** Log spend has a `Spend | Lend` switch under the header (`LogSpend`, `mode`). Lend mode swaps the payment/note row for `LendFields` (**whom**: the Lend category's types, Friends/Family/Coworker plus anything added with the inline "+ Add" (it calls `addSubcategory` on Lend, so it also shows in Categories and the picker); a small **optional** name with suggestions from earlier loans; will they pay; pay back by: In a week / Month end / No date) and hides the quick chips. Picking the **Lend** category (or one of its types) in *More* flips the switch instead of saving a plain spend (`pickCategory`). Quick chips never offer Lend types (`quickChips`).
-2. **Save lend** -> `validateLoan` (amount, name optional and <= 24 chars, whom required and <= 24 chars, date not before the day lent) -> `addLoan`: the Lend spend and the loan in ONE Dexie transaction, `requestSync()`, toast "Tracking Rs 5,000 with Arjun. See History > Lend". Skips the big-spend prompt. Analytics: `lend_logged` with kind / has_due_date / will_pay only, never the name or amount.
-3. **Follow it.** History's title is `History | Lend` (`TitleTabs`, dash under the selected one). Lend (`LendTab`): the same `HugeNumber` as Today for what is still owed, rows like Today's spends. Tap a person: *Got it back* (the remainder), *Part paid* (amount), *Push a week*, *Will pay* (cycles yes/maybe/not sure), *Write off* (confirm), *Undo last repayment*. Finished loans fold under "Paid back".
+2. **Save lend** -> `validateLoan` (amount, name optional and <= 24 chars, whom required and <= 24 chars, date not before the day lent) -> `addLoan`: the Lend spend and the loan in ONE Dexie transaction, `requestSync()`, toast "Tracking Rs 5,000 with Arjun. See History > Lend". The form asks "Take it out of your daily amount now?" (No, default / Yes, until repaid = `holdBack`; the log screen previews "Daily X → Y"). Held loans show "held back" in History > Lend. Analytics: `lend_logged` with kind / has_due_date / hold_back only, never the name or amount.
+3. **Follow it.** History's title is `History | Lend` (`TitleTabs`, dash under the selected one). Lend (`LendTab`): the same `HugeNumber` as Today for what is still owed, rows like Today's spends. Tap a person: *Got it back* (the remainder), *Part paid* (amount), *Push a week*, *Write off* (confirm), *Undo last repayment*. Finished loans fold under "Paid back".
 4. **Money back** (`recordRepayment`) changes nothing in the budget: the lend never touched it (it is listed as "lent, not counted" and left out of today's spend, "left today", the pool, History totals and Insights). **Write off** is the only thing that reaches it: the rest counts as spent in the month it was written off (a month-level debit on the pool; "Undo write-off" takes it back). A lend/repay/never-written-off loan leaves every number exactly as if it did not exist.
 5. **Reminders.** No push (static PWA, no server). Today shows a card when a loan is due today or late; tapping it opens History > Lend (`AppShell.historyTab`).
 6. **Deleting.** Deleting a Lend spend (Today, History, Close the day, Edit sheet) removes its loan; once money came back it is refused and the user is told to settle it in Lend. The Edit sheet shows a loan's spend read-only except note, payment and event.

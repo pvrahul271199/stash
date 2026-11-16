@@ -71,7 +71,7 @@ export function daysLeft(s: Pick<CycleState, 'totalDays' | 'currentDay'>): numbe
 export function todayAllowance(s: CycleState): number {
   const left = daysLeft(s);
   if (left <= 0) return 0;
-  return Math.max(s.pool, 0) / left;
+  return s.pool / left;
 }
 
 export interface SpendLike {
@@ -106,13 +106,6 @@ export function overMessage(allowance: number, spent: number, s: CycleState): st
 
 export const POOL_USED_UP_MESSAGE =
   "This month's spending money is used up. You can pause spending, or take some from savings when something comes up.";
-
-/* ---------- big spend ---------- */
-
-/** A spend is "big" when it is more than everything still available this cycle (the pool) and more than one day remains. */
-export function isBigSpend(amount: number, pool: number, s: Pick<CycleState, 'totalDays' | 'currentDay'>): boolean {
-  return amount > Math.max(pool, 0) && daysLeft(s) > 1;
-}
 
 /* ---------- closing days ---------- */
 
@@ -244,7 +237,7 @@ export function dayOfTxn(c: Pick<RollupCycle, 'startDate' | 'totalDays'>, txnDat
  * fromSavings total from its live transactions. Replays `closeDay` for every
  * closed day, so it matches the incremental math and heals any drift.
  *
- * `credits` are dated month-level adjustments that are not transactions (lib/lend.ts `writeOffEffects`: a written-off loan
+ * `credits` are dated month-level adjustments that are not transactions (lib/lend.ts `loanEffects`: a written-off loan
  * is a negative amount). On a closed day a credit changes that day's net `spent` and the pool; one dated today or ahead
  * moves the pool at once (not "left today": a spend only moves the pool once its day is closed). Dates outside the cycle
  * are ignored.

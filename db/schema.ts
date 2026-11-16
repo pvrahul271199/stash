@@ -148,10 +148,12 @@ export interface Loan extends Syncable {
   dueDate: string | null;
   willPay: WillPay;
   repayments: Repayment[];
-  /** The rest is not coming back. Owes nothing; counts as spent in the month of `writtenOffOn` (lib/lend.ts `writeOffEffects`). */
+  /** The rest is not coming back. Owes nothing; counts as spent in the month of `writtenOffOn` (lib/lend.ts `loanEffects`). */
   writtenOff: boolean;
   /** yyyy-mm-dd it was written off, or null. */
   writtenOffOn: string | null;
+  /** Held back from the daily amount while owed (lib/lend.ts `loanEffects`). Absent on older loans = false. */
+  holdBack?: boolean;
   createdAt: number;
 }
 

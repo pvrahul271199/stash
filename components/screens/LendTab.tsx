@@ -2,11 +2,11 @@
 import { useState } from 'react';
 import { HugeNumber } from '../ui/HugeNumber';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
-import { recordRepayment, reopenLoan, setLoanDue, setLoanWillPay, undoLastRepayment, useLoans, useToday, writeOffLoan } from '@/db/queries';
+import { recordRepayment, reopenLoan, setLoanDue, undoLastRepayment, useLoans, useToday, writeOffLoan } from '@/db/queries';
 import type { Loan } from '@/db/schema';
 import { addDays, formatShort } from '@/lib/dates';
 import { inr } from '@/lib/format';
-import { WILL_PAY, WILL_PAY_LABEL, closedLoans, dueText, loanName, loanStatus, openLoans, remaining, repaid, summarize } from '@/lib/lend';
+import { closedLoans, dueText, loanName, loanStatus, openLoans, remaining, repaid, summarize } from '@/lib/lend';
 import { useToast } from '@/store/toast';
 
 const action = 'min-h-0 rounded-full border border-line bg-white px-3 py-1.5 text-[13px] text-ink active:bg-tint';
@@ -80,7 +80,7 @@ export function LendTab() {
         {isOpen && (
           <div className="mt-2">
             <p className="text-[13px] text-soft">
-              Lent {formatShort(l.lentOn)} · will pay: {WILL_PAY_LABEL[l.willPay]}
+              Lent {formatShort(l.lentOn)}{l.holdBack ? ' · held back from your daily amount' : ''}
             </p>
             <div className="mt-2 flex flex-wrap gap-2">
               {left > 0 && (
@@ -107,13 +107,6 @@ export function LendTab() {
                     }}
                   >
                     Push a week
-                  </button>
-                  <button
-                    type="button"
-                    className={action}
-                    onClick={() => void setLoanWillPay(l.id, WILL_PAY[(WILL_PAY.indexOf(l.willPay) + 1) % WILL_PAY.length])}
-                  >
-                    Will pay: {WILL_PAY_LABEL[l.willPay]}
                   </button>
                   <button type="button" className={`${action} text-warm`} onClick={() => setConfirmOff(l)}>
                     Write off
