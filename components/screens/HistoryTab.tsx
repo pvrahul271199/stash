@@ -7,12 +7,15 @@ import {
   useAllEntries,
   useDateEntries,
   useDateTotals,
+  useLoans,
   dayRowsOf,
 } from '@/db/queries';
 import type { Entry, Plan } from '@/db/schema';
 import { monthView, type DerivedCycle } from '@/lib/period';
 import { EditSpendSheet } from './EditSpendSheet';
 import { LogSpend } from './LogSpend';
+import { LendTab } from './LendTab';
+import { TitleTabs } from '../ui/TitleTabs';
 import {
   buildMonthCalendar,
   compactINR,
@@ -29,12 +32,15 @@ import {
 } from '@/lib/dates';
 import { inr } from '@/lib/format';
 import { useCurrency } from '@/lib/currency';
+import { useToast } from '@/store/toast';
 
 const WEEKDAY_HEADERS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
-export function HistoryTab({ activeCycle, plan }: { activeCycle: DerivedCycle; plan?: Plan }) {
+export function HistoryTab({ activeCycle, plan, initialTab = 'spends' }: { activeCycle: DerivedCycle; plan?: Plan; initialTab?: 'spends' | 'lend' }) {
   const { currency } = useCurrency();
   const allCycles = useAllCycles() ?? [activeCycle];
+  const [tab, setTab] = useState<'spends' | 'lend'>(initialTab);
+  const loans = useLoans() ?? [];
   const [query, setQuery] = useState('');
   const [searchFocused, setSearchFocused] = useState(false);
   const isSearching = query.trim().length > 0;
@@ -114,12 +120,38 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: DerivedCycle; p
     return sum;
   }, [totalsByDate, monthPrefix]);
 
+  // Spends paid from savings are left out of "spent"; money lent that month is inside it (it left the wallet).
+  const monthSavings = useMemo(() => {
+    let sum = 0;
+    for (const [iso, t] of totalsByDate) if (iso.startsWith(monthPrefix)) sum += t.fromSavings;
+    return sum;
+  }, [totalsByDate, monthPrefix]);
+  const monthLent = useMemo(
+    () => loans.filter((l) => l.lentOn.startsWith(monthPrefix)).reduce((s, l) => s + l.amount, 0),
+    [loans, monthPrefix],
+  );
+
+  const titleTabs = (
+    <TitleTabs
+      label="History sections"
+      tabs={[{ id: 'spends', label: 'History' }, { id: 'lend', label: 'Lend' }]}
+      value={tab}
+      onChange={setTab}
+    />
+  );
+
+  if (tab === 'lend') {
+    return (
+      <div className="flex-1 overflow-y-auto px-6 pb-8 pt-6">
+        {titleTabs}
+        <LendTab />
+      </div>
+    );
+  }
+
   return (
     <div className="flex-1 overflow-y-auto px-6 pb-8 pt-6">
-      <div className="flex items-baseline justify-between">
-        <h1 className="text-question font-semibold text-ink">History</h1>
-        <span className="num text-[14px] text-soft">{inr(monthSpent)} spent in {MONTHS[viewMonth - 1]}</span>
-      </div>
+      {titleTabs}
 
       {/* Search bar across all days and cycles */}
       <div className="relative mt-4">
@@ -391,6 +423,20 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: DerivedCycle; p
             )}
           </div>
 
+          <p className="mt-1 text-[15px] text-soft">
+            <span className="num text-ink">{inr(monthSpent)}</span> spent
+            {monthLent > 0 && (
+              <>
+                , <span className="num">{inr(monthLent)}</span> of it lent
+              </>
+            )}
+          </p>
+          {monthSavings > 0 && (
+            <p className="text-[12px] text-faint">
+              + <span className="num">{inr(monthSavings)}</span> from savings
+            </p>
+          )}
+
           {/* Interactive Spending Calendar */}
           <div role="table" aria-label="Spending calendar" className="mt-3">
             <div role="row" className="grid grid-cols-7 gap-1 text-center text-[11px] font-semibold text-faint">
@@ -565,7 +611,7 @@ export function HistoryTab({ activeCycle, plan }: { activeCycle: DerivedCycle; p
                     <button
                       type="button"
                       aria-label={`Remove ${e.label} ${inr(e.amount)}`}
-                      onClick={() => void removeEntry(e.id)}
+                      onClick={() => void removeEntry(e.id).then((r) => r === 'has-repayments' && useToast.getState().show('Money came back on this loan. Settle it in Lend instead.', 'warm'))}
                       className="flex h-7 w-7 min-h-0 items-center justify-center text-[16px] text-faint hover:text-warm"
                     >
                       ×

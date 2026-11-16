@@ -10,6 +10,7 @@ import {
   useActiveUid,
   type Category,
   type Entry,
+  type Loan,
   type Plan,
   type StashDB,
   type StashEvent,
@@ -46,11 +47,12 @@ import { resolveLabel } from '@/lib/suggestions';
 import { addDays, dateOfDay, daysBetween, setClosedThrough, subscribeDay, toISO, todayISO } from '@/lib/dates';
 import { DEFAULT_SAMPLE_PLAN, generateSampleSpends } from '@/lib/sample';
 import { buildCSV, type CsvRow } from '@/lib/csv';
-import { resolveCategories, validateName, type ResolvedCategory } from '@/lib/categories';
+import { MAX_NAME, resolveCategories, validateName, type ResolvedCategory } from '@/lib/categories';
 import { getStoredCurrencyCode } from '@/lib/currency';
 import { buildUserProfile, getActiveUserId, getStoredAvatarTheme, getStoredUsername } from '@/lib/user';
 import { requestSync, syncNow } from '@/lib/sync';
 import { getAuth } from '@/lib/auth';
+import { LEND_CATEGORY, creditsOf, remaining, validateLoan, type LoanKind, type WillPay } from '@/lib/lend';
 import { uuidv7 } from '@/lib/uuid';
 
 /* ---------- helpers ---------- */
@@ -125,16 +127,17 @@ const periodKey = (c: { startDate: string; totalDays: number }) => `p:${c.startD
 
 /** The derived cycle of the period that contains `date`; undefined before the first plan (or before tracking began). */
 export async function cycleFor(db: StashDB, date: string = todayISO(), today: string = todayISO()): Promise<DerivedCycle | undefined> {
-  const [plans, meta, firstSpend] = await Promise.all([
+  const [plans, meta, firstSpend, loans] = await Promise.all([
     db.plans.toArray(),
     db.meta.get('main'),
     db.transactions.orderBy('txnDate').filter(alive).first(),
+    db.loans.toArray(),
   ]);
   const period = periodFor(startDayOf(plans), date);
   const tracking = trackingForPeriod(plans, firstSpend?.txnDate, period);
   if (!tracking) return undefined;
   const txns = await db.transactions.where('txnDate').between(period.start, period.end, true, true).toArray();
-  const c = buildCycle(period, planInEffect(plans, period)!, txns, today, tracking);
+  const c = buildCycle(period, planInEffect(plans, period)!, txns, today, tracking, false, creditsOf(loans));
   if (!c) return undefined;
   c.leftoverMoved = (meta?.leftoverMoved ?? []).includes(c.id);
   return c;
@@ -147,9 +150,9 @@ async function cycleById(db: StashDB, id: string): Promise<DerivedCycle | undefi
 }
 
 async function allCycles(db: StashDB, today: string = todayISO()): Promise<DerivedCycle[]> {
-  const [plans, txns, meta] = await Promise.all([db.plans.toArray(), db.transactions.toArray(), db.meta.get('main')]);
+  const [plans, txns, meta, loans] = await Promise.all([db.plans.toArray(), db.transactions.toArray(), db.meta.get('main'), db.loans.toArray()]);
   const moved = new Set(meta?.leftoverMoved ?? []);
-  return buildAllCycles(plans, txns, today, (id) => moved.has(id));
+  return buildAllCycles(plans, txns, today, (id) => moved.has(id), creditsOf(loans));
 }
 
 const cycleOfDate = (cycles: DerivedCycle[], iso: string) => cycles.find((c) => iso >= c.startDate && iso <= endOf(c));
@@ -626,14 +629,14 @@ export interface SpendUpdate {
   fromSavings?: boolean;
 }
 
-/** Logs a spend on the cycle's current day (or a specific `targetDay` / `targetDate` when adding from History). */
-export async function addSpend(
+/** Builds (does not save) the transaction for a new spend: category/event links, the day it lands on, the pool flag. */
+async function buildTxn(
   cycle: { startDate: string; totalDays: number; currentDay: number },
   spend: NewSpend,
   now: Date = new Date(),
   targetDay?: number,
   targetDate?: string,
-): Promise<Entry> {
+): Promise<Txn> {
   const db = getDB();
   const cats = await loadCategories(db);
   const resolved =
@@ -688,8 +691,23 @@ export async function addSpend(
     createdAt,
   };
 
+  return txn;
+}
+
+type SpendCycle = { startDate: string; totalDays: number; currentDay: number };
+
+/** Logs a spend on the cycle's current day (or a specific `targetDay` / `targetDate` when adding from History). */
+export async function addSpend(
+  cycle: SpendCycle,
+  spend: NewSpend,
+  now: Date = new Date(),
+  targetDay?: number,
+  targetDate?: string,
+): Promise<Entry> {
+  const db = getDB();
+  const txn = await buildTxn(cycle, spend, now, targetDay, targetDate);
   await db.transaction('rw', [db.transactions, db.meta, db.plans], async () => {
-    await extendTrackingStart(db, entryDate);
+    await extendTrackingStart(db, txn.txnDate);
     await db.transactions.add(txn);
     await db.meta.update('main', {
       lastUsedLabel: spend.label,
@@ -707,9 +725,13 @@ export async function addSpend(
 export async function updateEntry(id: string, patch: SpendUpdate): Promise<Entry | null> {
   const db = getDB();
   let saved: Txn | null = null;
-  await db.transaction('rw', [db.transactions, db.cats, db.evts], async () => {
+  await db.transaction('rw', [db.transactions, db.cats, db.evts, db.loans], async () => {
     const prev = await db.transactions.get(id);
     if (!prev || prev.deletedAt != null) return;
+    // The loan owns a Lend spend's amount, category and type (and who it was lent to): only note, payment and event edit.
+    if ((await db.loans.where('txnId').equals(id).toArray()).some(alive)) {
+      patch = { ...patch, amount: undefined, category: undefined, subcategory: undefined, label: undefined, fromSavings: undefined };
+    }
     const cat = patch.category != null ? (await loadCategories(db)).find((c) => c.name.toLowerCase() === patch.category!.toLowerCase()) : undefined;
     const newEventName = patch.event !== undefined ? patch.event?.trim() || null : undefined;
     const ev = newEventName ? await findEventByName(db, newEventName) : undefined;
@@ -736,16 +758,157 @@ export async function updateEntry(id: string, patch: SpendUpdate): Promise<Entry
   return toEntry(t, await cycleFor(db, t.txnDate), await loadLinkNames(db));
 }
 
-/** Soft delete: the tombstone syncs; the month's numbers are derived, so nothing else changes. */
-export async function removeEntry(id: string): Promise<void> {
+/* ---------- lending (docs/ENHANCEMENTS.md E-LEND) ---------- */
+
+export interface NewLoan {
+  amount: number;
+  person: string;
+  kind: LoanKind;
+  willPay: WillPay;
+  /** yyyy-mm-dd the money should be back, or null for "no date". */
+  dueDate: string | null;
+  payment?: string | null;
+}
+
+/**
+ * Records a loan: the Lend spend (it lowers the month's money like any spend, the cash really left) and the loan row that
+ * tracks it, written in ONE transaction so neither can exist without the other. Throws on invalid input; the UI checks first
+ * with `validateLoan` and shows its message.
+ */
+export async function addLoan(
+  cycle: SpendCycle,
+  input: NewLoan,
+  now: Date = new Date(),
+  targetDay?: number,
+  targetDate?: string,
+): Promise<{ loan: Loan; entry: Entry }> {
   const db = getDB();
-  await db.transaction('rw', [db.transactions], async () => {
+  const amount = Math.round(input.amount);
+  const person = input.person.trim();
+  const kind = input.kind.trim();
+  const txn = await buildTxn(
+    cycle,
+    {
+      amount,
+      label: person || input.kind.trim(),
+      category: LEND_CATEGORY,
+      subcategory: kind,
+      payment: input.payment ?? null,
+      fromSavings: false,
+      adjustPool: true,
+    },
+    now,
+    targetDay,
+    targetDate,
+  );
+  const bad = validateLoan({ amount, person, kind, dueDate: input.dueDate }, txn.txnDate, MAX_NAME);
+  if (bad) throw new Error(bad);
+  const stamp = Date.now();
+  const loan: Loan = {
+    id: uuid(),
+    updatedAt: stamp,
+    txnId: txn.id,
+    person,
+    kind,
+    amount,
+    lentOn: txn.txnDate,
+    dueDate: input.dueDate,
+    willPay: input.willPay,
+    repayments: [],
+    writtenOff: false,
+    createdAt: stamp,
+  };
+  await db.transaction('rw', [db.transactions, db.loans, db.meta, db.plans], async () => {
+    await extendTrackingStart(db, txn.txnDate);
+    await db.transactions.add(txn);
+    await db.loans.add(loan);
+    await db.meta.update('main', { lastUsedLabel: person || kind, ...(txn.payment ? { lastPayment: txn.payment } : {}) });
+  });
+  requestSync();
+  return { loan, entry: toEntry(txn, cycle) };
+}
+
+/** Live loans (open and closed), newest first. `undefined` while loading. */
+export function useLoans(): Loan[] | undefined {
+  return useLiveQuery(async () => (await getDB().loans.toArray()).filter(alive).sort((a, b) => b.createdAt - a.createdAt), []);
+}
+
+/** Ids of the spends that belong to a loan: their amount and category are owned by the loan. */
+export function useLoanTxnIds(): Set<string> {
+  return (
+    useLiveQuery(async () => new Set((await getDB().loans.toArray()).filter((l) => alive(l) && l.txnId).map((l) => l.txnId as string)), [], new Set<string>()) ??
+    new Set<string>()
+  );
+}
+
+async function patchLoan(id: string, f: (l: Loan) => Loan | null): Promise<Loan | null> {
+  const db = getDB();
+  let out: Loan | null = null;
+  await db.transaction('rw', [db.loans], async () => {
+    const l = await db.loans.get(id);
+    if (!l || l.deletedAt != null) return;
+    const next = f(l);
+    if (!next) return;
+    await db.loans.put({ ...next, updatedAt: Date.now() });
+    out = next;
+  });
+  if (out) requestSync();
+  return out;
+}
+
+/**
+ * Money came back. Clamped to what is still owed; ignored when nothing is owed. It is a credit in the budget maths
+ * (lib/period.ts), so today's amount (or the closed day's pool) rises by it. Append-only: a mistake is undone with
+ * `undoLastRepayment`.
+ */
+export async function recordRepayment(id: string, amount: number, date: string = todayISO()): Promise<Loan | null> {
+  return patchLoan(id, (l) => {
+    const owed = remaining(l);
+    const a = Math.min(Math.round(amount), owed);
+    if (!(a > 0)) return null;
+    return { ...l, repayments: [...l.repayments, { id: uuid(), amount: a, date }] };
+  });
+}
+
+export async function undoLastRepayment(id: string): Promise<Loan | null> {
+  return patchLoan(id, (l) => (l.repayments.length ? { ...l, repayments: l.repayments.slice(0, -1), writtenOff: false } : null));
+}
+
+export async function setLoanDue(id: string, dueDate: string | null): Promise<Loan | null> {
+  return patchLoan(id, (l) => (dueDate && dueDate < l.lentOn ? null : { ...l, dueDate }));
+}
+
+export async function setLoanWillPay(id: string, willPay: WillPay): Promise<Loan | null> {
+  return patchLoan(id, (l) => ({ ...l, willPay }));
+}
+
+/** The rest is not coming back. Owes nothing afterwards and gives nothing back to the budget. */
+export async function writeOffLoan(id: string): Promise<Loan | null> {
+  return patchLoan(id, (l) => (remaining(l) > 0 ? { ...l, writtenOff: true } : null));
+}
+
+/** Soft delete: the tombstone syncs; the month's numbers are derived, so nothing else changes. */
+export async function removeEntry(id: string): Promise<'removed' | 'has-repayments'> {
+  const db = getDB();
+  let result: 'removed' | 'has-repayments' = 'removed';
+  await db.transaction('rw', [db.transactions, db.loans], async () => {
     const t = await db.transactions.get(id);
     if (!t || t.deletedAt != null) return;
     const now = Date.now();
+    // A Lend spend takes its loan with it (the record of who owes what is meaningless without the spend), unless money
+    // already came back: that credit is in the month's numbers, so the loan has to be settled or written off in Lend instead.
+    const loan = (await db.loans.where('txnId').equals(id).toArray()).find(alive);
+    if (loan) {
+      if (loan.repayments.length > 0) {
+        result = 'has-repayments';
+        return;
+      }
+      await db.loans.update(loan.id, { deletedAt: now, updatedAt: now });
+    }
     await db.transactions.update(id, { deletedAt: now, updatedAt: now });
   });
-  requestSync();
+  if (result === 'removed') requestSync();
+  return result;
 }
 
 /* ---------- the day and the month ---------- */
@@ -1249,10 +1412,11 @@ export async function deleteAllData(): Promise<void> {
   const now = Date.now();
   await db.transaction(
     'rw',
-    [db.plans, db.transactions, db.cats, db.evts, db.leftovers, db.meta],
+    [db.plans, db.transactions, db.cats, db.evts, db.leftovers, db.loans, db.meta],
     async () => {
       const tombstone = { deletedAt: now, updatedAt: now };
       await db.leftovers.toCollection().modify(tombstone);
+      await db.loans.toCollection().modify(tombstone);
       await db.transactions.toCollection().modify(tombstone);
       await db.plans.toCollection().modify(tombstone);
       await db.cats.toCollection().modify(tombstone);

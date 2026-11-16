@@ -6,14 +6,18 @@ import { Chip } from '../ui/Chip';
 import { Keypad } from '../ui/Keypad';
 import { CALC_INIT, OP_SYMBOL, calcPress, calcResult, isOp, type CalcState } from '../../lib/calc';
 import { CategoryPicker } from './CategoryPicker';
+import { LendFields, NEW_LEND_DRAFT, type LendDraft } from './LendFields';
 import { BigSpend } from './BigSpend';
 import {
+  addLoan,
   addSpend,
+  addSubcategory,
   endEvent,
   startEvent,
   useActiveEvent,
   useEvents,
   useLastPayment,
+  useLoans,
   useCategories,
   useQuickTypes,
   useUsedTypes,
@@ -24,6 +28,7 @@ import { daysLeft, isBigSpend, todayAllowance } from '@/lib/budget';
 import { MAX_NAME } from '@/lib/categories';
 import { dateOfDay, daysBetween, formatShort, formatWithWeekday, todayISO } from '@/lib/dates';
 import { quickChips } from '@/lib/suggestions';
+import { DEFAULT_LOAN_KINDS, LEND_CATEGORY, dueFromChoice, isLoanKind, validateLoan } from '@/lib/lend';
 import { inr, num } from '@/lib/format';
 import { useCurrency } from '@/lib/currency';
 import { useToast } from '@/store/toast';
@@ -60,6 +65,11 @@ export function LogSpend({
   const [newEventName, setNewEventName] = useState('');
   const [eventErr, setEventErr] = useState<string | null>(null);
   const [view, setView] = useState<'keypad' | 'picker' | 'big'>('keypad');
+  /** Spend | Lend: Lend asks who / will they pay / by when instead of payment and note, and saves a loan too. */
+  const [mode, setMode] = useState<'spend' | 'lend'>('spend');
+  const [lend, setLend] = useState<LendDraft>(NEW_LEND_DRAFT);
+  const loans = useLoans() ?? [];
+  const people = [...new Set(loans.map((l) => l.person).filter(Boolean))].slice(0, 20);
   /** For past/upcoming days: spread the spend over the remaining days (remembered between sessions). */
   const [spread, setSpread] = useState(true);
   const [spreadInfo, setSpreadInfo] = useState(false);
@@ -112,6 +122,9 @@ export function LogSpend({
   const used = useUsedTypes();
   const chips = quickChips(cats, pinned, used, new Date().getHours());
   const amount = calcResult(calc);
+  // Whom you can lend to = the Lend category's types; "+ Add" in Lend mode adds one there (same as Categories).
+  const lendCat = cats.find((c) => c.name.toLowerCase() === LEND_CATEGORY.toLowerCase());
+  const lendKinds = lendCat?.subcategories.length ? lendCat.subcategories : [...DEFAULT_LOAN_KINDS];
 
   const press = useCallback((k: string) => setCalc((c) => calcPress(c, k)), []);
 
@@ -211,6 +224,49 @@ export function LogSpend({
     await persist(p, false, true);
   }
 
+  /** Lend mode's Save: the spend and its loan in one go. Skips the big-spend prompt (that is about one-off purchases). */
+  async function commitLend() {
+    if (savingRef.current) return;
+    const dueDate = dueFromChoice(lend.due, todayISO());
+    const bad = validateLoan({ amount, person: lend.person, kind: lend.kind, dueDate }, targetIso);
+    if (bad) {
+      toast(bad, 'warm');
+      if (amount <= 0) setView('keypad');
+      return;
+    }
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      await addLoan(
+        cycle,
+        { amount, person: lend.person, kind: lend.kind, willPay: lend.willPay, dueDate: dueDate && dueDate < targetIso ? targetIso : dueDate, payment },
+        new Date(),
+        effectiveDay ?? undefined,
+        targetDate,
+      );
+      navigator.vibrate?.(10);
+      posthog.capture('lend_logged', { kind: lend.kind, has_due_date: dueDate != null, will_pay: lend.willPay });
+      toast(`Tracking ${inr(amount)} lent to ${lend.person.trim() || lend.kind}. See History > Lend`);
+      onClose();
+    } catch {
+      toast('Couldn’t save that. Please try again.', 'warm');
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  }
+
+  /** Picking the Lend category (or one of its types) in the picker is the same as flipping the switch to Lend. */
+  function pickCategory(category: string, subcategory: string | null) {
+    if (category.toLowerCase() === LEND_CATEGORY.toLowerCase()) {
+      setLend((d) => ({ ...d, kind: isLoanKind(subcategory) ? subcategory : d.kind }));
+      setMode('lend');
+      setView('keypad');
+      return;
+    }
+    void commit({ label: subcategory ?? category, category, subcategory });
+  }
+
   useEffect(() => {
     if (view !== 'keypad') return;
     const onKey = (e: KeyboardEvent) => {
@@ -228,13 +284,14 @@ export function LogSpend({
           press('=');
           return;
         }
-        void commit({ label: 'Sort later' });
+        if (mode === 'lend') void commitLend();
+        else void commit({ label: 'Sort later' });
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [press, onClose, amount, view, calc.op]);
+  }, [press, onClose, amount, view, calc.op, mode, lend]);
 
   const shown = String(amount).length;
   const size = shown <= 5 ? 72 : shown === 6 ? 60 : 52;
@@ -251,7 +308,7 @@ export function LogSpend({
         <CategoryPicker
           amount={amount}
           onBack={() => setView('keypad')}
-          onPick={(category, subcategory) => commit({ label: subcategory ?? category, category, subcategory })}
+          onPick={pickCategory}
         />
       )}
 
@@ -506,6 +563,21 @@ export function LogSpend({
             )}
           </div>
 
+          <div role="tablist" aria-label="Spend or lend" className="mx-auto mt-2 flex w-fit rounded-full bg-tint p-0.5">
+            {(['spend', 'lend'] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                role="tab"
+                aria-selected={mode === m}
+                onClick={() => setMode(m)}
+                className={`h-7 min-h-0 rounded-full px-5 text-[12px] font-medium transition-colors ${mode === m ? 'bg-ink text-white' : 'text-soft'}`}
+              >
+                {m === 'spend' ? 'Spend' : 'Lend'}
+              </button>
+            ))}
+          </div>
+
           <div
             className="flex flex-1 flex-col items-center justify-center"
             aria-live="polite"
@@ -542,6 +614,15 @@ export function LogSpend({
               </span>
             </div>
 
+            {mode === 'lend' ? (
+              <LendFields
+                draft={lend}
+                onChange={setLend}
+                kinds={lendKinds}
+                people={people}
+                onAddKind={async (name) => (lendCat ? addSubcategory(lendCat.id, name) : 'The Lend category was removed. Add it back in Categories.')}
+              />
+            ) : (
             <div className="mt-2 flex w-fit flex-col items-stretch">
             <div className="inline-flex rounded-full bg-tint p-0.5" role="group" aria-label="Payment mode">
               {PAYMENT_MODES.map((m) => (
@@ -659,8 +740,9 @@ export function LogSpend({
               )}
             </div>
             </div>
+            )}
 
-            {isOtherDay && !isOutsideActiveCycle && (
+            {mode === 'spend' && isOtherDay && !isOutsideActiveCycle && (
               <div className="mt-5 flex flex-col items-center gap-1">
                 <div className="inline-flex items-center gap-2 rounded-full border border-line bg-white py-1 pl-1.5 pr-1">
                   <button
@@ -704,6 +786,7 @@ export function LogSpend({
             )}
           </div>
 
+          {mode === 'spend' && (
           <div className="mb-2 flex flex-wrap justify-center gap-1">
             {chips.map((c) => (
               <Chip
@@ -726,14 +809,15 @@ export function LogSpend({
               More
             </Chip>
           </div>
+          )}
 
           <Keypad onKey={press} pendingOp={calc.op} opSelected={calc.digits === ''} calc />
           <PrimaryButton
             disabled={saving}
             className="mt-2 h-[46px] min-h-0 text-[15px]"
-            onClick={() => commit({ label: 'Sort later' })}
+            onClick={() => (mode === 'lend' ? commitLend() : commit({ label: 'Sort later' }))}
           >
-            {saving ? 'Saving…' : 'Save'}
+            {saving ? 'Saving…' : mode === 'lend' ? 'Save lend' : 'Save'}
           </PrimaryButton>
         </>
       )}

@@ -1,7 +1,8 @@
 'use client';
 import { useState } from 'react';
 import { CloseIcon, IconButton, PrimaryButton } from '../ui/Button';
-import { removeEntry, updateEntry, useCategories, useEvents } from '@/db/queries';
+import { removeEntry, updateEntry, useCategories, useEvents, useLoanTxnIds } from '@/db/queries';
+import { LEND_CATEGORY } from '@/lib/lend';
 import { PAYMENT_MODES, type Entry } from '@/db/schema';
 import { num } from '@/lib/format';
 import { useCurrency } from '@/lib/currency';
@@ -15,7 +16,10 @@ export function EditSpendSheet({
   entry: Entry;
   onClose: () => void;
 }) {
-  const cats = useCategories() ?? [];
+  const allCats = useCategories() ?? [];
+  const isLoan = useLoanTxnIds().has(entry.id);
+  // Lend is a mode of the log screen (it records the loan too), so an ordinary spend can't be moved into it here.
+  const cats = allCats.filter((c) => c.name.toLowerCase() !== LEND_CATEGORY.toLowerCase());
   const events = useEvents() ?? [];
   const toast = useToast((s) => s.show);
   const { currency } = useCurrency();
@@ -66,9 +70,12 @@ export function EditSpendSheet({
     if (busy) return;
     setBusy(true);
     try {
-      await removeEntry(entry.id);
+      if ((await removeEntry(entry.id)) === 'has-repayments') {
+        toast('Money came back on this loan. Settle it in History > Lend instead.', 'warm');
+        return;
+      }
       posthog.capture('spend_deleted');
-      toast('Spend removed');
+      toast(isLoan ? 'Spend and loan removed' : 'Spend removed');
       onClose();
     } finally {
       setBusy(false);
@@ -101,7 +108,16 @@ export function EditSpendSheet({
           </IconButton>
         </div>
 
+        {isLoan && (
+          <p className="mt-3 rounded-note bg-tint px-3.5 py-3 text-[13px] leading-snug text-soft">
+            This spend is a loan to <span className="font-medium text-ink">{entry.label}</span>
+            {entry.subcategory && entry.subcategory !== entry.label ? ` (${entry.subcategory})` : ''}.
+            Its amount and who it was for are kept in History &gt; Lend.
+          </p>
+        )}
+
         {/* Amount & Label */}
+        {!isLoan && (
         <div className="mt-3 grid grid-cols-2 gap-2.5">
           <label className="block">
             <span className="text-[12px] font-medium text-soft">Amount ({currency.symbol})</span>
@@ -127,6 +143,7 @@ export function EditSpendSheet({
             />
           </label>
         </div>
+        )}
 
         {/* Optional Note */}
         <label className="mt-3 block">
@@ -161,6 +178,8 @@ export function EditSpendSheet({
           </div>
         </div>
 
+        {!isLoan && (
+          <>
         {/* Category */}
         <div className="mt-3">
           <span className="block text-[12px] font-medium text-soft">Category</span>
@@ -215,6 +234,8 @@ export function EditSpendSheet({
             </div>
           </div>
         )}
+          </>
+        )}
 
         {/* Event */}
         {events.length > 0 && (
@@ -249,6 +270,7 @@ export function EditSpendSheet({
         )}
 
         {/* From savings toggle */}
+        {!isLoan && (
         <label className="mt-3 flex items-center gap-2 text-[13px] text-soft">
           <input
             type="checkbox"
@@ -257,6 +279,7 @@ export function EditSpendSheet({
             className="h-4 w-4 min-h-0 rounded border-line"
           />
         </label>
+        )}
 
         <div className="mt-5 flex flex-col gap-2">
           <PrimaryButton disabled={busy} onClick={save}>

@@ -18,7 +18,8 @@ import { IosHint } from '../pwa/IosHint';
 import { BackupPrompt } from '../ui/BackupPrompt';
 import { PreviousDayHint } from '../ui/PreviousDayHint';
 import { useSampleMode } from '@/lib/sampleMode';
-import { closeToday, dayRowsOf, useDayEntries } from '@/db/queries';
+import { closeToday, dayRowsOf, useDayEntries, useLoans } from '@/db/queries';
+import { loanName, loanStatus, openLoans, remaining as loanRemaining } from '@/lib/lend';
 import type { Entry, Plan } from '@/db/schema';
 import { monthView, type DerivedCycle } from '@/lib/period';
 import {
@@ -35,7 +36,7 @@ import { inr } from '@/lib/format';
 
 type View = 'today' | 'log' | 'close';
 
-export function TodayTab({ cycle, plan, onCreateAccount, onHome }: { cycle: DerivedCycle; plan: Plan; onCreateAccount: () => void; onHome: () => void }) {
+export function TodayTab({ cycle, plan, onCreateAccount, onHome, onOpenLend }: { cycle: DerivedCycle; plan: Plan; onCreateAccount: () => void; onHome: () => void; onOpenLend?: () => void }) {
   const [view, setView] = useState<View>('today');
   useEffect(() => {
     if (view !== 'today') posthog.capture('screen_viewed', { screen: `today_${view}`, from: 'tab_today' });
@@ -70,6 +71,12 @@ export function TodayTab({ cycle, plan, onCreateAccount, onHome }: { cycle: Deri
       /* ignore */
     }
   };
+  // Money people owe you that is due today or late (History > Lend has the rest). No notifications: this card is the reminder.
+  const todayIso = todayISO();
+  const dueLoans = openLoans(useLoans() ?? []).filter((l) => {
+    const st = loanStatus(l, todayIso);
+    return st === 'overdue' || (st === 'soon' && l.dueDate === todayIso);
+  });
   const entries = useDayEntries(cycle.id, cycle.currentDay) ?? [];
   const dayRows = dayRowsOf(cycle);
   const todayEntries = entries.slice(0, 10);
@@ -163,6 +170,21 @@ export function TodayTab({ cycle, plan, onCreateAccount, onHome }: { cycle: Deri
         <p className="mt-5 text-[15px] text-soft">
           <span className="num text-ink">{inr(remaining)}</span> left for {n} {n === 1 ? 'day' : 'days'}
         </p>
+
+        {dueLoans.length > 0 && onOpenLend && (
+          <button
+            type="button"
+            onClick={onOpenLend}
+            className="mt-5 flex w-full items-center justify-between gap-3 rounded-note bg-tint px-[14px] py-3 text-left"
+          >
+            <span className="min-w-0 text-[14px] leading-snug text-ink">
+              <span className="num">{inr(loanRemaining(dueLoans[0]))}</span> to get back from{' '}
+              <span className="font-semibold">{loanName(dueLoans[0])}</span>
+              {dueLoans.length > 1 ? ` and ${dueLoans.length - 1} more are due` : dueLoans[0].dueDate === todayIso ? ', due today' : ', it was due earlier'}
+            </span>
+            <span aria-hidden="true" className="text-soft">›</span>
+          </button>
+        )}
 
         <section className="mt-6" aria-label="Today's spends">
           {todayEntries.length === 0 ? (

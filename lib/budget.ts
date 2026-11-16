@@ -241,10 +241,15 @@ export function dayOfTxn(c: Pick<RollupCycle, 'startDate' | 'totalDays'>, txnDat
  * Pure, order-independent derivation of a cycle's closed-day rows, pool and
  * fromSavings total from its live transactions. Replays `closeDay` for every
  * closed day, so it matches the incremental math and heals any drift.
+ *
+ * `credits` is money that came back (a lent amount repaid, lib/lend.ts). It is not a transaction: on a closed day it
+ * lowers that day's net `spent` and gives the pool the money back; a credit dated today or ahead raises the pool at once
+ * (income-like, unlike a spend, which only moves the pool once its day is closed). Dates outside the cycle are ignored.
  */
 export function rollupCycle(
   c: RollupCycle,
   txns: RollupTxn[],
+  credits: { date: string; amount: number }[] = [],
 ): { days: DayRecord[]; pool: number; fromSavingsTotal: number } {
   const perDay = new Map<number, { spent: number; poolSpent: number }>();
   let fromSavingsTotal = 0;
@@ -261,14 +266,20 @@ export function rollupCycle(
     if (t.adjustsPool !== false) row.poolSpent += t.amount;
     perDay.set(d, row);
   }
+  const creditOn = new Map<number, number>();
+  for (const k of credits) {
+    const d = dayOfTxn(c, k.date);
+    if (d !== 0) creditOn.set(d, (creditOn.get(d) ?? 0) + k.amount);
+  }
   const estimated = new Set(c.estimatedDays ?? []);
   let state: CycleState = { currentDay: 1, totalDays: c.totalDays, pool: c.planAmount, fromSavingsTotal: 0 };
   const days: DayRecord[] = [];
   const lastClosed = Math.min(c.currentDay - 1, c.totalDays);
   for (let d = 1; d <= lastClosed; d++) {
     const row = perDay.get(d) ?? { spent: 0, poolSpent: 0 };
-    const r = closeDay(state, row.poolSpent, estimated.has(d) ? 'estimated' : 'closed');
-    days.push({ ...r.record, spent: row.spent });
+    const credit = creditOn.get(d) ?? 0;
+    const r = closeDay(state, row.poolSpent - credit, estimated.has(d) ? 'estimated' : 'closed');
+    days.push({ ...r.record, spent: row.spent - credit });
     state = r.state;
   }
   // Spends logged ahead of time on an upcoming day that the user chose to spread over the
@@ -277,5 +288,6 @@ export function rollupCycle(
   for (const [d, row] of perDay) {
     if (d > c.currentDay && d <= c.totalDays) pool -= row.poolSpent;
   }
+  for (const [d, credit] of creditOn) if (d >= c.currentDay) pool += credit;
   return { days, pool, fromSavingsTotal };
 }

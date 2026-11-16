@@ -1,4 +1,5 @@
 import type { Category } from '@/db/schema';
+import { LEND_CATEGORY } from './lend';
 
 /** Time-of-day label suggestions (hour 0-23). */
 export function suggestionsForHour(hour: number): string[] {
@@ -68,6 +69,7 @@ export function quickChips(
   const out: QuickChip[] = [];
   const seen = new Set<string>();
   const add = (category: string, subcategory: string, pinned: boolean) => {
+    if (category.toLowerCase() === LEND_CATEGORY.toLowerCase()) return; // lending has its own mode on the log screen
     const cat = cats.find((c) => c.name.toLowerCase() === category.toLowerCase());
     const sub = cat?.subcategories.find((s) => s.toLowerCase() === subcategory.toLowerCase());
     if (!cat || !sub) return;

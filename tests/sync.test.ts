@@ -153,7 +153,7 @@ describe('sync engine', () => {
     vi.stubGlobal('fetch', fakeFetch);
     vi.stubGlobal('navigator', { onLine: true });
     vi.stubGlobal('window', {
-      localStorage: { getItem: (k: string) => (k === 'stash:consent' ? JSON.stringify({ v: 1 }) : null), setItem: () => {}, removeItem: () => {} },
+      localStorage: { getItem: (k: string) => (k === 'stash:consent' ? JSON.stringify({ v: 2 }) : null), setItem: () => {}, removeItem: () => {} },
       addEventListener: () => {},
     });
     token = 'tok-1';
@@ -374,7 +374,7 @@ describe('pull cursor', () => {
   it('re-reads a row that committed late with an older updated_at, and pages past 1000 rows', async () => {
     vi.stubGlobal('fetch', fakeFetch);
     vi.stubGlobal('navigator', { onLine: true });
-    vi.stubGlobal('window', { localStorage: { getItem: (k: string) => (k === 'stash:consent' ? JSON.stringify({ v: 1 }) : null), setItem: () => {}, removeItem: () => {} }, addEventListener: () => {} });
+    vi.stubGlobal('window', { localStorage: { getItem: (k: string) => (k === 'stash:consent' ? JSON.stringify({ v: 2 }) : null), setItem: () => {}, removeItem: () => {} }, addEventListener: () => {} });
     await freshUser();
     const t = new Map<string, Row & { updated_at: string; version: number }>();
     server.set('categories', t);
@@ -427,7 +427,7 @@ describe('sync robustness (B1, B2, M2)', () => {
     vi.stubGlobal('fetch', fakeFetch);
     vi.stubGlobal('navigator', { onLine: true });
     vi.stubGlobal('window', {
-      localStorage: { getItem: (k: string) => (k === 'stash:consent' ? JSON.stringify({ v: 1 }) : null), setItem: () => {}, removeItem: () => {} },
+      localStorage: { getItem: (k: string) => (k === 'stash:consent' ? JSON.stringify({ v: 2 }) : null), setItem: () => {}, removeItem: () => {} },
       addEventListener: () => {},
     });
     token = 'tok-1';
@@ -542,7 +542,7 @@ describe('account isolation (the app enforces it, not only RLS)', () => {
   beforeEach(async () => {
     vi.stubGlobal('fetch', fakeFetch);
     vi.stubGlobal('navigator', { onLine: true });
-    vi.stubGlobal('window', { localStorage: { getItem: (k: string) => (k === 'stash:consent' ? JSON.stringify({ v: 1 }) : null), setItem: () => {}, removeItem: () => {} }, addEventListener: () => {} });
+    vi.stubGlobal('window', { localStorage: { getItem: (k: string) => (k === 'stash:consent' ? JSON.stringify({ v: 2 }) : null), setItem: () => {}, removeItem: () => {} }, addEventListener: () => {} });
     ignoreUserFilter = false;
     await freshUser();
   });
@@ -599,7 +599,7 @@ describe('export CSV syncs first', () => {
   beforeEach(async () => {
     vi.stubGlobal('fetch', fakeFetch);
     vi.stubGlobal('navigator', { onLine: true });
-    vi.stubGlobal('window', { localStorage: { getItem: (k: string) => (k === 'stash:consent' ? JSON.stringify({ v: 1 }) : null), setItem: () => {}, removeItem: () => {} }, addEventListener: () => {} });
+    vi.stubGlobal('window', { localStorage: { getItem: (k: string) => (k === 'stash:consent' ? JSON.stringify({ v: 2 }) : null), setItem: () => {}, removeItem: () => {} }, addEventListener: () => {} });
     ignoreUserFilter = false;
     await freshUser();
   });

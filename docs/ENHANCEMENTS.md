@@ -181,3 +181,105 @@ blocking screen.
 `stash-default` is an IndexedDB database scoped to one browser profile on one device. Guests never sync, so guests on
 different devices cannot see each other. Sharing happens only between people on the same browser (shared family
 device), via logout → `dropToGuest()`, and via silent claim at sign-up (see E-2).
+
+## E-LEND: lending tracker (BUILT 2026-11-16; Dexie v13, server `loans`)
+
+**Flow.** Log spend (existing screen) → pick category **Lend** → popup (type Friends / Family / Coworker, name, will they
+pay back, pay back by, "you can track this in History") → **Save & track**. History gets a second tab, **Lend**
+(Spends | Lend), with minimal rows; tap a row for *Got it back / Part paid / Push a week / Remind me*.
+Stories: `stories/lend-history.stories.tsx` (real LogSpend, CategoryPicker, HistoryTab on the sample sandbox).
+
+**Do we need DB changes? Yes, one new table; the category needs none.**
+
+| Piece | Change | Why |
+|---|---|---|
+| Category `Lend` (types Friends, Family, Coworker) | Add to `DEFAULT_CATEGORIES` in `db/schema.ts`. **No Dexie version, no server change.** | Defaults are merged at read time (`loadCategories`); spends store the name + `categoryId`. Existing users get it automatically. Edge: a user who already made their own "Lend" category will see two until one is renamed. |
+| The Lend spend itself | None. It is a normal `transactions` row (category Lend, subtype = kind). | Money really left the wallet, so it lowers today's allowance like any spend. |
+| Person, due date, will-they-pay, repayments | **New table `loans`** (Dexie v13, `SCHEMA_VERSION` 13) + server table `loans`. | A spend row has no place for these. Packing them into `note` would not be queryable, sortable by due date, or mergeable. |
+
+**`loans` row** (extends `Syncable`): `txnId` (the Lend spend, nullable), `person`, `kind`, `amount`, `dueDate | null`,
+`willPay` (`yes | maybe | unsure`), `repayments: {id, amount, date}[]`, `settledAt | null`, `writtenOff`, `createdAt`.
+Index: `id, txnId, dueDate, updatedAt, localRev`. Remaining = `amount − Σ repayments`; "settled" is derived, not stored
+beyond `settledAt`. Repayments are embedded JSON for v1; the array is merged as one field (last write wins), so two
+devices recording *different* repayments at the same moment could lose one. If that matters, use a child
+`loan_repayments` table (one more mapper + SQL block).
+
+**Touch list (the leftovers table is the template, it was the last one added):**
+- `db/schema.ts`: `Loan` type, `loans!: Table`, `version(13)`, add `'loans'` to `SYNCED_TABLES`.
+- `lib/sync.ts`: `MAPPERS.loans` (toRemote/toLocal), `TABLE_ORDER` (after `transactions`), the two `db.transaction` table lists (~L510, ~L629).
+- `supabase/schema.sql`: table + `version` column + LWW/touch triggers + RLS `auth.uid()` + index + size checks; add `'loans'` to `v_tables` (~L419) and to the tombstone cleanup / return JSON (~L567-571).
+- `db/queries.ts`: `addLoan` (writes the spend and the loan in ONE Dexie transaction), `recordRepayment`, `setLoanDue`, `writeOffLoan`, `useLoans`; add `db.loans` to `deleteAllData` (~L1252) and `claimGuestData`; add to `fillSample` if the sample should show loans.
+- UI: Lend popup in `LogSpend` (intercept the Lend tile in `CategoryPicker`), tab switch + Lend list in `HistoryTab`.
+- Tests (fake-indexeddb): remaining/settled maths, spend+loan atomicity, delete-spend-orphans-loan, sync round trip, claim.
+
+**Decisions needed before building.**
+1. *Repayment and the budget.* Lending lowers the allowance now. When money comes back: (a) record only, budget untouched;
+   (b) add it back to this month's pool (derive from `loans.repayments` in `lib/period.ts`, do NOT insert negative
+   transactions, amounts are assumed positive everywhere); (c) ask each time (Add to this month / Keep as savings).
+   Recommended: (b) with (c) as a later refinement. (b) needs `cycleFor` + `lib/budget.ts` changes and tests.
+2. *Insights / History totals.* Lend spends would count as spending by category. Probably show them but exclude `Lend`
+   from the category breakdown, or show a separate "lent" line. Pick one.
+3. *Editing or deleting the Lend spend.* Loan owns `amount`; the txn link is informational. Deleting the spend should
+   keep the loan (user may have the cash back) but clear `txnId`.
+4. *Reminders.* "Remind me" has no mechanism in a static-export PWA with no server (no push). v1: an in-app "due today /
+   overdue" card on Today; real notifications are a separate project.
+5. `stash-mobile/` has its own storage and is not synced: out of scope, port later.
+
+### E-LEND build plan (decided: Log entry **C**, History tabs **B2**)
+
+**Final UX.** Log spend gets a small **Spend | Lend** switch under the header. Lend mode swaps the payment/note row for
+*who (Friends/Family/Coworker), name, will they pay, pay back by*, the chip row hides, and Save becomes **Save lend**.
+The category picker's **Lend** category (types Friends/Family/Coworker) switches the screen to Lend mode instead of saving
+a plain spend. History's title row becomes **History | Lend** (same size, short ink dash under the selected one, no count).
+The Lend tab uses Today's look (72px `HugeNumber` total, Today's spend rows). Stories: `stories/lend-history.stories.tsx`
+(`Log_C_SpendLendSwitch`, `History_B2_Dash`, `History_MonthTotal_Wording`).
+
+**Defaults I'm building on (change before P2 if you disagree).**
+1. Lend is a normal spend, so it lowers today's amount. A repayment adds back to *that month's* money to live on
+   (`planAmount += repayments dated in the period`, inside `buildCycle`; no negative transactions, `rollupCycle` untouched).
+2. Insights keeps Lend in totals; the category chart shows it like any category. History's month total says "of it lent".
+3. Editing/deleting a Lend spend: the loan owns the amount. Delete = confirm "This also removes the loan"; blocked if it has repayments.
+4. No push notifications (static PWA, no server). v1 reminder = a "due today / overdue" card on Today (P5). "Remind me" is dropped from v1.
+5. Lend skips the BigSpend prompt (it is about one-off purchases, and its "keep" path would mark the spend `fromSavings`, which would double count a repayment).
+
+**Phases (each ends with `npm run lint` + `npm test` green and is shippable alone except where noted).**
+
+| # | Phase | Work | Size |
+|---|---|---|---|
+| P0 | Confirm | The 5 defaults above | -- |
+| P1 | Data + sync | `lib/lend.ts` pure helpers (remaining, status, due text) + tests. Dexie v13 `loans`, `SYNCED_TABLES`, `MAPPERS.loans`, `TABLE_ORDER`, both `db.transaction` lists in sync.ts, `supabase/schema.sql` block + `v_tables` + cleanup. `queries.ts`: `addLoan` (spend + loan in ONE transaction; refactor `addSpend` so the txn builder is shared), `recordRepayment`, `setLoanDue`, `writeOffLoan`, `useLoans`, `deleteAllData`, `claimGuestData`/`describeGuestData`. **Deploy the SQL before the client**: a client that pulls `loans` from a server without the table fails sync (same rule as dropping `cycles`). | M |
+| P2 | Budget | `buildCycle(..., credits)`: add repayments in the period to `planAmount`; feed from `cycleFor` and `allCycles`. Tests: repay today raises today's amount by credit/daysLeft; repay in a past month only changes that month; two devices same rows same numbers; credit never makes pool NaN/negative-wrong. | M |
+| P3 | Log screen (C) | `components/screens/LendFields.tsx` (shared fields). `LogSpend`: `mode` state, switch under header, Lend block in the amount column, hide payment/note + chips in Lend mode, Save → `addLoan`. `CategoryPicker`: tapping Lend (or one of its types) returns to keypad in Lend mode with the kind preset. Name required (trim, `MAX_NAME`). Toast: "Tracking ₹5,000 with Arjun". | M |
+| P4 | History (B2) | `TitleTabs` (dash look) in `HistoryTab`; Spends content unchanged; `LendTab.tsx` (HugeNumber total, rows, expand for Got it back / Part paid / Push a week, "Paid back" fold). Move the month total under the month picker (see wording below). | M |
+| P5 | Polish | Add `Lend` + 3 types to `DEFAULT_CATEGORIES` (collision: user already has own "Lend", rename it or merge on first run). Today card for due/overdue. `fillSample` adds 2-3 loans. EditSpendSheet rules for Lend spends. CSV export includes loans. | S-M |
+| P6 | Wrap | Docs: ARCHITECTURE (data model, budget), FLOWS (log lend, repay, History tabs), ENHANCEMENTS status, FINDINGS if any. **PRIVACY_NOTICES.md**: loans store other people's names and what they owe, and sync to Supabase, so review the notice text and bump the version + hash if it changes. Analytics: `lend_logged` with kind only, never the name or amount. Manual run-through on 390x844. Update the stale e2e only if touched. | S |
+
+**Tests to add.** `lib/lend` (remaining/status/due text incl. no date, today, late); `addLoan` atomic (txn + loan or neither);
+repayment credit in `buildCycle`; sync round trip for `loans` (fake-indexeddb); claim guest → account moves loans;
+`deleteAllData` tombstones loans; delete-spend rules; DST/month-end for "Month end" due date.
+
+**Risks.** (a) Embedded `repayments` JSON is last-write-wins per row across devices (see table above). (b) Editing a past
+repayment's date moves credit between months: make repayments append-only in v1 (undo = delete the last one).
+(c) Injecting `credits` touches the core budget path: P2 must land with the property tests before P3 can show Lend to users.
+(d) `stash-mobile/` unaffected, not synced.
+
+**History month total wording.** Today: `₹12,029 spent in Nov` (title row, 14px soft). Problems: it repeats the month that the
+picker already shows right below, it sits away from that picker, it uses only a 3-letter month (no year), it leaves out
+spends paid from savings without saying so, and the title row is taken by the tabs. Proposal: move it under the month
+picker, "**₹12,029** spent" (ink `.num`, soft words, 15px like Today's "₹x left for n days"); add "+ ₹2,000 from savings"
+(12px faint) only when non-zero; add ", ₹5,000 of it lent" only when something was lent that month.
+
+### E-LEND status (built)
+
+Done: `lib/lend.ts` (+ `tests/lend.test.ts`, 22 tests), Dexie v13 `loans`, sync mapper + server table + `push_changes` / purge, `addLoan`
+and the repayment mutations, credits in `rollupCycle`/`buildCycle`, `Lend` default category, log screen switch (C), History tabs (B2) with
+`LendTab`, Today due card, EditSpendSheet / delete rules, claim guest + delete-all, stories (`stories/lend-history.stories.tsx`, real screens).
+Decisions taken as in the plan above; "Remind me" was dropped (the Today card is the reminder).
+
+**Not done / follow-ups.**
+- **Privacy notice**: it lists what is synced (`lib/privacyNotice.ts`). Loans add other people's names and what they owe. Review the wording; changing it means a new notice version + hash and probably a new `CONSENT_VERSION` (existing users re-accept), which is a product/legal call, so it was NOT changed.
+- **Deploy order**: run the new `loans` block of `supabase/schema.sql` (and the updated `push_changes` / `purge_deleted_data`) BEFORE shipping the app. A client without the table skips pulling it (`OPTIONAL_TABLES`) but its pushes of loan rows would be rejected and quarantined.
+- `fillSample` does not create sample loans (the "how it works" tour numbers stay unchanged); the stories seed their own.
+- CSV export lists Lend spends but not loan details; `stash-mobile/` is untouched.
+- Repayments are embedded JSON: two devices recording *different* repayments at the same moment can lose one (last write wins on that field). Use a child table if that matters.
+- Repayment amounts always return to the month (no "keep as savings" choice yet).

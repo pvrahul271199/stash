@@ -150,6 +150,15 @@ Tapping the logo on Today sets `forceWelcome` (AppShell) and shows `Welcome`. Gu
 
 `SyncStatusPill` (Today header) subscribes to `syncState`: `synced | syncing | offline | error | local_only`. Tap → `triggerSync()` (push). `scheduleSync` flips to `syncing` immediately and to `local_only` after 600 ms when sync is disabled. `online` event forces `synced` without verifying a push. ⚠ F-12.
 
+## 19b. Lending (E-LEND)
+1. **Log it.** Log spend has a `Spend | Lend` switch under the header (`LogSpend`, `mode`). Lend mode swaps the payment/note row for `LendFields` (**whom**: the Lend category's types, Friends/Family/Coworker plus anything added with the inline "+ Add" (it calls `addSubcategory` on Lend, so it also shows in Categories and the picker); a small **optional** name with suggestions from earlier loans; will they pay; pay back by: In a week / Month end / No date) and hides the quick chips. Picking the **Lend** category (or one of its types) in *More* flips the switch instead of saving a plain spend (`pickCategory`). Quick chips never offer Lend types (`quickChips`).
+2. **Save lend** -> `validateLoan` (amount, name optional and <= 24 chars, whom required and <= 24 chars, date not before the day lent) -> `addLoan`: the Lend spend and the loan in ONE Dexie transaction, `requestSync()`, toast "Tracking Rs 5,000 with Arjun. See History > Lend". Skips the big-spend prompt. Analytics: `lend_logged` with kind / has_due_date / will_pay only, never the name or amount.
+3. **Follow it.** History's title is `History | Lend` (`TitleTabs`, dash under the selected one). Lend (`LendTab`): the same `HugeNumber` as Today for what is still owed, rows like Today's spends. Tap a person: *Got it back* (the remainder), *Part paid* (amount), *Push a week*, *Will pay* (cycles yes/maybe/not sure), *Write off* (confirm), *Undo last repayment*. Finished loans fold under "Paid back".
+4. **Money back** (`recordRepayment`) is a credit in the budget maths (ARCHITECTURE section 3): today's amount rises at once for a repayment dated today.
+5. **Reminders.** No push (static PWA, no server). Today shows a card when a loan is due today or late; tapping it opens History > Lend (`AppShell.historyTab`).
+6. **Deleting.** Deleting a Lend spend (Today, History, Close the day, Edit sheet) removes its loan; once money came back it is refused and the user is told to settle it in Lend. The Edit sheet shows a loan's spend read-only except note, payment and event.
+7. **History month total** moved under the month picker: "**Rs 12,029** spent[, Rs 5,000 of it lent]" and "+ Rs 2,400 from savings" when non-zero.
+
 ## 20. PWA install / update / offline
 
 - Android: `beforeinstallprompt` captured in `store/pwa.ts`, offered from Plan/User. iOS: `IosHint` explains Share → Add to Home Screen.

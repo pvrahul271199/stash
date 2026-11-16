@@ -2,6 +2,7 @@
 import { entryLines } from '@/lib/entryDisplay';
 import { BackIcon, IconButton, PrimaryButton } from '../ui/Button';
 import { removeEntry } from '@/db/queries';
+import { useToast } from '@/store/toast';
 import type { Entry } from '@/db/schema';
 import { inr, num } from '@/lib/format';
 import { closeDay, spentToday, todayAllowance, type CycleState } from '@/lib/budget';
@@ -114,7 +115,7 @@ export function CloseDay({
                 <p className="num text-[17px] text-ink">{inr(e.amount)}</p>
                 <button
                   aria-label={`Remove ${e.label} ${inr(e.amount)}`}
-                  onClick={() => removeEntry(e.id)}
+                  onClick={() => void removeEntry(e.id).then((r) => r === 'has-repayments' && useToast.getState().show('Money came back on this loan. Settle it in History > Lend instead.', 'warm'))}
                   className="flex h-11 w-9 items-center justify-center text-faint"
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">

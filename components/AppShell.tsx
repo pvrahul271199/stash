@@ -85,6 +85,8 @@ export function AppShell() {
   // keep the first (Welcome) page up until the user picks an option instead of landing on its home.
   const [forceWelcome, setForceWelcome] = useState(false);
   const [tab, setTab] = useState<Tab>('today');
+  /** Which section History opens on: the Today card for money that is due jumps straight to Lend. */
+  const [historyTab, setHistoryTab] = useState<'spends' | 'lend'>('spends');
   const [busy, setBusy] = useState(false);
   const [showDemo, setShowDemo] = useState(false);
   // New plans track from today by default; the user may pick any earlier day of this month on the calendar.
@@ -347,10 +349,10 @@ export function AppShell() {
         <>
           <div className="flex min-h-0 flex-1 flex-col">
             <div key={tab} className="tab-in flex min-h-0 flex-1 flex-col">
-              {tab === 'today' && <TodayTab cycle={snap.cycle} plan={snap.plan} onHome={() => setForceWelcome(true)} onCreateAccount={() => {
+              {tab === 'today' && <TodayTab cycle={snap.cycle} plan={snap.plan} onOpenLend={() => { setHistoryTab('lend'); setTab('history'); }} onHome={() => setForceWelcome(true)} onCreateAccount={() => {
                   openSignIn();
                 }} />}
-              {tab === 'history' && <HistoryTab activeCycle={snap.cycle} plan={snap.plan} />}
+              {tab === 'history' && <HistoryTab activeCycle={snap.cycle} plan={snap.plan} initialTab={historyTab} />}
               {tab === 'insights' && <InsightsTab cycle={snap.cycle} plan={snap.plan} />}
               {tab === 'user' && (
                 <UserTab
@@ -393,7 +395,7 @@ export function AppShell() {
               )}
             </div>
           </div>
-          <TabBar tab={tab} onChange={setTab} />
+          <TabBar tab={tab} onChange={(t) => { setHistoryTab('spends'); setTab(t); }} />
           {sheet === 'plan' && (
             <PlanScreen
               plan={snap.plan}

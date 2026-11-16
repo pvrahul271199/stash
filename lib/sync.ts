@@ -1,5 +1,5 @@
 import Dexie from 'dexie';
-import { getDB, getActiveDBUid, dbNameFor, GUEST_UID, nextRev, withoutRevStamp, type CategoryRow, type LeftoverSaving, type Plan, type StashDB, type StashEvent, type SyncBase, type SyncFailure, type Txn } from '@/db/schema';
+import { getDB, getActiveDBUid, dbNameFor, GUEST_UID, nextRev, withoutRevStamp, type CategoryRow, type LeftoverSaving, type Loan, type Plan, type StashDB, type StashEvent, type SyncBase, type SyncFailure, type Txn } from '@/db/schema';
 import { getAuth, getAccessToken } from './auth';
 import { getSupabase, supabaseEnv } from './supabaseClient';
 import { decodeBase64Username, encodeUsernameToBase64 } from './user';
@@ -180,6 +180,37 @@ export const MAPPERS = {
       createdAt: r.created_at as number,
     }),
   },
+  loans: {
+    local: 'loans' as const,
+    toRemote: (l: Loan) => ({
+      ...common(l),
+      txn_id: l.txnId,
+      person: l.person,
+      kind: l.kind,
+      amount: l.amount,
+      lent_on: l.lentOn,
+      due_date: l.dueDate,
+      will_pay: l.willPay,
+      repayments: l.repayments,
+      written_off: l.writtenOff,
+      created_at: l.createdAt,
+    }),
+    toLocal: (r: Remote): Loan => ({
+      id: r.id,
+      updatedAt: r.client_updated_at,
+      deletedAt: ms(r.deleted_at),
+      txnId: (r.txn_id as string | null) ?? null,
+      person: r.person as string,
+      kind: r.kind as Loan['kind'],
+      amount: Number(r.amount),
+      lentOn: r.lent_on as string,
+      dueDate: (r.due_date as string | null) ?? null,
+      willPay: r.will_pay as Loan['willPay'],
+      repayments: (r.repayments as Loan['repayments'] | null) ?? [],
+      writtenOff: !!r.written_off,
+      createdAt: Number(r.created_at),
+    }),
+  },
   leftover_savings: {
     local: 'leftovers' as const,
     toRemote: (l: LeftoverSaving) => ({
@@ -204,7 +235,7 @@ type TableName = keyof typeof MAPPERS;
  * Parents first: transactions reference categories and events (events.id is a real FK remotely).
  * `cycles` is not synced any more: months are derived from plans + transactions (lib/period.ts, E-4).
  */
-export const TABLE_ORDER: TableName[] = ['plans', 'categories', 'events', 'transactions', 'leftover_savings'];
+export const TABLE_ORDER: TableName[] = ['plans', 'categories', 'events', 'transactions', 'loans', 'leftover_savings'];
 
 export type RemoteRows = Partial<Record<TableName, Remote[]>>;
 
@@ -507,7 +538,7 @@ async function scanDirty(db: StashDB, cutoff: number): Promise<{ refs: Ref[]; ma
   const seen = new Set<string>();
   // One read transaction over every table: a write that already took its rev has either committed
   // (and is seen) or is still running (and this read waits for it), so no lower rev can appear later.
-  await db.transaction('r', [db.plans, db.cats, db.evts, db.transactions, db.leftovers], async () => {
+  await db.transaction('r', [db.plans, db.cats, db.evts, db.transactions, db.loans, db.leftovers], async () => {
     for (const name of TABLE_ORDER) {
       const table = db[MAPPERS[name].local] as unknown as Dexie.Table<{ id: string; updatedAt: number; localRev?: number }, string>;
       const dirty = await table.where('localRev').above(sinceRev).toArray();
@@ -561,7 +592,7 @@ export async function pushDirty(db: StashDB): Promise<number> {
 type Cursor = { ts: string; id: string };
 
 /** Tables the app can live without while the server schema catches up. */
-const OPTIONAL_TABLES = new Set<string>(['leftover_savings']);
+const OPTIONAL_TABLES = new Set<string>(['leftover_savings', 'loans']);
 
 async function pullTable(
   db: StashDB,
@@ -626,7 +657,7 @@ export async function applyRemote(db: StashDB, rows: RemoteRows, owner: string |
   const { dedupeCategories, migrateToPeriods } = await import('@/db/queries');
   await db.transaction(
     'rw',
-    [db.plans, db.transactions, db.cats, db.evts, db.leftovers, db.meta, db.syncBase],
+    [db.plans, db.transactions, db.cats, db.evts, db.loans, db.leftovers, db.meta, db.syncBase],
     async () => {
       for (const name of TABLE_ORDER) {
         const list = rows[name];

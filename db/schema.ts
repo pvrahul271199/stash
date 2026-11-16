@@ -4,6 +4,7 @@ import { migrateV4ToV5, migrateCatsToOverrides, migrateTxnLinks, migrateToDerive
 import { V4_STORES } from './legacy';
 import type { DefaultCategory } from '@/lib/categories';
 import { setClosedThrough } from '@/lib/dates';
+import type { LoanKind, Repayment, WillPay } from '@/lib/lend';
 
 export interface UserRecord {
   /** Primary key: Base64-encoded username (e.g. "cmFodWw="). */
@@ -130,6 +131,28 @@ export interface Txn extends Syncable {
   createdAt: number;
 }
 
+/**
+ * Money lent to someone (docs/ENHANCEMENTS.md E-LEND). The money that left is an ordinary spend in the `Lend` category,
+ * linked by `txnId`; this row is the record of who, when due, will they pay and what came back. Repayments are embedded
+ * (append-only; undo removes the last one) and are *credits* in the budget maths, never transactions (lib/lend.ts).
+ */
+export interface Loan extends Syncable {
+  /** The Lend spend this loan belongs to (null if that spend is gone). */
+  txnId: string | null;
+  person: string;
+  kind: LoanKind;
+  /** Whole currency units lent. */
+  amount: number;
+  /** yyyy-mm-dd the money was lent (the spend's date). */
+  lentOn: string;
+  dueDate: string | null;
+  willPay: WillPay;
+  repayments: Repayment[];
+  /** The rest is not coming back. Owes nothing, gives nothing back to the budget. */
+  writtenOff: boolean;
+  createdAt: number;
+}
+
 /** Stored per-user row: a category the user created, or an override of a shared default (baseId). */
 export interface CategoryRow extends Syncable {
   name: string;
@@ -188,7 +211,7 @@ export interface Entry {
 export const PAYMENT_MODES = ['UPI', 'Card', 'Cash'] as const;
 export type PaymentMode = (typeof PAYMENT_MODES)[number];
 
-export const SCHEMA_VERSION = 12;
+export const SCHEMA_VERSION = 13;
 
 /* ---------- local revisions ----------
  * "What still needs pushing" must not depend on the phone's clock: a clock that moves backwards would
@@ -205,7 +228,7 @@ export function seedRev(n: number): void {
 }
 
 /** Tables whose rows sync; each gets `localRev` stamped by Dexie hooks. */
-export const SYNCED_TABLES = ['plans', 'transactions', 'cats', 'evts', 'leftovers'] as const;
+export const SYNCED_TABLES = ['plans', 'transactions', 'cats', 'evts', 'leftovers', 'loans'] as const;
 /** Fields that are local caches (written by recompute): changing only these is not a user edit. */
 const CACHE_FIELDS = new Set(['localRev']);
 let stampingOff = false;
@@ -228,6 +251,7 @@ export class StashDB extends Dexie {
   cats!: Table<CategoryRow, string>;
   evts!: Table<StashEvent, string>;
   leftovers!: Table<LeftoverSaving, string>;
+  loans!: Table<Loan, string>;
   syncBase!: Table<SyncBase, string>;
 
   constructor(name = dbNameFor(GUEST_UID)) {
@@ -285,6 +309,8 @@ export class StashDB extends Dexie {
       .upgrade((tx) => migrateToDerivedPeriods(tx));
     // v12: leftovers moved to savings sync like everything else (one row per month).
     this.version(12).stores({ leftovers: 'id, monthId, updatedAt, localRev' });
+    // v13: lending tracker. One row per loan; repayments are embedded. No upgrade step: nothing existed before.
+    this.version(13).stores({ loans: 'id, txnId, dueDate, updatedAt, localRev' });
 
     for (const name of SYNCED_TABLES) {
       const t = this.table(name) as Table<Record<string, unknown>, string>;
@@ -316,6 +342,8 @@ export const DEFAULT_CATEGORIES: DefaultCategory[] = [
   { key: 'health', name: 'Health', subcategories: ['Medicine', 'Doctor'] },
   { key: 'shopping', name: 'Shopping', subcategories: ['Clothes', 'Gifts'] },
   { key: 'fun', name: 'Fun', subcategories: ['Movies', 'Outings'] },
+  // Money lent to someone. Picking it on the log screen switches to Lend mode (see LogSpend) so a loan is always recorded.
+  { key: 'lend', name: 'Lend', subcategories: ['Friends', 'Family', 'Coworker'] },
   { key: 'other', name: 'Other', subcategories: [], isSystem: true },
 ];
 

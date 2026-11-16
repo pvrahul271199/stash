@@ -156,7 +156,7 @@ describe('layered categories', () => {
     await ensureSeed();
     expect(await getDB().cats.count()).toBe(0);
     const base = await loadCategories();
-    expect(base.map((c) => c.name)).toEqual(['Food', 'Travel', 'Home', 'Bills', 'Health', 'Shopping', 'Fun', 'Other']);
+    expect(base.map((c) => c.name)).toEqual(['Food', 'Travel', 'Home', 'Bills', 'Health', 'Shopping', 'Fun', 'Lend', 'Other']);
 
     const food = base.find((c) => c.name === 'Food')!;
     await addSubcategory(food.id, 'Biryani');

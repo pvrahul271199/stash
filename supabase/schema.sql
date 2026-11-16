@@ -267,6 +267,53 @@ do $$ begin
   end if;
 end $$;
 
+-- ---------- loans ----------
+-- Money the user lent to someone (docs/ENHANCEMENTS.md E-LEND). The money that left the wallet is an ordinary row in
+-- `transactions` (category Lend); txn_id links to it WITHOUT a foreign key (a soft-deleted or purged spend must not block
+-- or cascade into the loan). `repayments` is an append-only jsonb array [{id, amount, date}] merged as one field.
+-- Holds other people's names: it is personal data, see docs/PRIVACY_NOTICES.md.
+-- DEPLOY THIS BEFORE THE APP VERSION THAT SYNCS `loans`: a client pulling a missing table fails its sync.
+create table if not exists public.loans (
+  id uuid primary key,
+  user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  client_updated_at bigint not null,
+  updated_at timestamptz not null default now(),
+  deleted_at timestamptz,
+  txn_id uuid,
+  person text not null,
+  kind text not null,
+  amount bigint not null check (amount > 0),
+  lent_on date not null,
+  due_date date,
+  will_pay text not null default 'yes',
+  repayments jsonb not null default '[]'::jsonb,
+  written_off boolean not null default false,
+  created_at bigint not null
+);
+create index if not exists idx_loans_user_updated on public.loans (user_id, updated_at, id);
+alter table public.loans add column if not exists version bigint not null default 1;
+drop trigger if exists trg_loans_lww on public.loans;
+create trigger trg_loans_lww before update on public.loans
+  for each row execute function public.stash_lww_guard();
+drop trigger if exists trg_loans_touch on public.loans;
+create trigger trg_loans_touch before insert or update on public.loans
+  for each row execute function public.stash_touch();
+alter table public.loans enable row level security;
+revoke all on public.loans from anon;
+drop policy if exists loans_own on public.loans;
+create policy loans_own on public.loans for all
+  using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
+-- person is optional (empty string); kind is the Lend category type the user picked or added ("Friends", "Neighbour", ...).
+-- Dropped and re-added so a database that already ran the first version (kind limited to three values) is updated.
+alter table public.loans drop constraint if exists loans_shape_check;
+alter table public.loans add constraint loans_shape_check check (
+  length(person) <= 80
+  and length(kind) between 1 and 40
+  and will_pay in ('yes', 'maybe', 'unsure')
+  and jsonb_typeof(repayments) = 'array'
+  and jsonb_array_length(repayments) <= 200
+) not valid;
+
 -- ---------- feature_data ----------
 create table if not exists public.feature_data (
   id uuid primary key,
@@ -416,7 +463,7 @@ create or replace function public.push_changes(p_mutation_id uuid, p_changes jso
 returns jsonb language plpgsql as $$
 declare
   v_uid uuid := auth.uid();
-  v_tables constant text[] := array['plans', 'categories', 'events', 'transactions', 'leftover_savings'];
+  v_tables constant text[] := array['plans', 'categories', 'events', 'transactions', 'loans', 'leftover_savings'];
   t text;
   r jsonb;
   v_cur jsonb;
@@ -554,7 +601,7 @@ create or replace function public.purge_deleted_data(p_older_than interval defau
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare
   v_cut timestamptz := now() - p_older_than;
-  v_tx bigint; v_ev bigint; v_cat bigint; v_pl bigint; v_mut bigint; v_lo bigint;
+  v_tx bigint; v_ev bigint; v_cat bigint; v_pl bigint; v_mut bigint; v_lo bigint; v_ln bigint;
 begin
   delete from public.transactions where deleted_at is not null and deleted_at < v_cut;
   get diagnostics v_tx = row_count;
@@ -566,9 +613,11 @@ begin
   get diagnostics v_pl = row_count;
   delete from public.leftover_savings where deleted_at is not null and deleted_at < v_cut;
   get diagnostics v_lo = row_count;
+  delete from public.loans where deleted_at is not null and deleted_at < v_cut;
+  get diagnostics v_ln = row_count;
   delete from public.push_mutations where created_at < now() - interval '14 days';
   get diagnostics v_mut = row_count;
-  return jsonb_build_object('leftover_savings', v_lo, 'transactions', v_tx, 'events', v_ev, 'categories', v_cat, 'plans', v_pl, 'push_mutations', v_mut);
+  return jsonb_build_object('loans', v_ln, 'leftover_savings', v_lo, 'transactions', v_tx, 'events', v_ev, 'categories', v_cat, 'plans', v_pl, 'push_mutations', v_mut);
 end $$;
 revoke all on function public.purge_deleted_data(interval) from public, anon, authenticated;
 

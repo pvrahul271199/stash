@@ -8,6 +8,7 @@
  *   allowance(today)    = max(planAmount - spent on earlier days of the period, 0) / days left including today
  */
 import { moneyToLiveOn, rollupCycle, type DayRecord } from './budget';
+import type { Credit } from './lend';
 import { MONTHS_LONG, addDays, daysBetween, formatShort } from './dates';
 
 export interface Period {
@@ -238,6 +239,7 @@ export function buildCycle(
   today: string,
   tracking: string,
   leftoverMoved = false,
+  credits: Credit[] = [],
 ): DerivedCycle | null {
   const startDate = period.start < tracking ? tracking : period.start;
   if (startDate > period.end) return null;
@@ -254,7 +256,11 @@ export function buildCycle(
   }
   const estimatedDays = [...perDay].filter(([, r]) => r.all > 0 && r.all === r.est).map(([d]) => d).sort((a, b) => a - b);
   const planAmount = moneyToLiveOn(plan);
-  const r = rollupCycle({ startDate, totalDays, planAmount, currentDay, estimatedDays }, inRange);
+  // Money that came back from a loan, dated inside this month (one before tracking began counts on the first tracked day).
+  const inCredits = credits
+    .filter((k) => k.date >= period.start && k.date <= period.end)
+    .map((k) => ({ date: k.date < startDate ? startDate : k.date, amount: k.amount }));
+  const r = rollupCycle({ startDate, totalDays, planAmount, currentDay, estimatedDays }, inRange, inCredits);
   return {
     id: periodId(startDate, totalDays),
     updatedAt: 0,
@@ -304,6 +310,7 @@ export function buildAllCycles(
   txns: BudgetTxn[],
   today: string,
   leftoverMoved: (id: string) => boolean = () => false,
+  credits: Credit[] = [],
 ): DerivedCycle[] {
   const firstSpend = txns.reduce<string | null>((m, t) => (t.deletedAt == null && (m == null || t.txnDate < m) ? t.txnDate : m), null);
   const tracking = trackingWithSpends(plans, firstSpend);
@@ -312,7 +319,7 @@ export function buildAllCycles(
   const out: DerivedCycle[] = [];
   for (const p of periodsBetween(startDay, tracking, today > tracking ? today : tracking)) {
     const plan = planInEffect(plans, p)!;
-    const c = buildCycle(p, plan, txns, today, trackingForPeriod(plans, firstSpend, p) ?? tracking);
+    const c = buildCycle(p, plan, txns, today, trackingForPeriod(plans, firstSpend, p) ?? tracking, false, credits);
     if (c) out.push({ ...c, leftoverMoved: leftoverMoved(c.id) });
   }
   return out.reverse();

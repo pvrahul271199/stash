@@ -15,7 +15,7 @@ Browser (static export, no server)
         Supabase PostgREST  /rest/v1/stash_*   (RLS = allow all)
 ```
 
-## 2. Data model (Dexie v11, `db/schema.ts`)
+## 2. Data model (Dexie v13, `db/schema.ts`)
 
 One database **per user**: `stash-<auth uid>`; guest = `stash-default` (never synced). All rows have uuid `id`, `updatedAt` (client ms) and optional `deletedAt` (tombstone; reads filter it out).
 
@@ -24,6 +24,7 @@ One database **per user**: `stash-<auth uid>`; guest = `stash-default` (never sy
 | `users`, `meta` | `userId`, `'main'` | profile mirror; lastUsedLabel, activeEvent, lastPayment, sync cursors (`lastPushedRev`, legacy `lastPushedAt`, `pullCursors`), `syncFailures`, `calendarSeen`, `profileCurrencyPushed`, `guestClaimPending`, `migrationReport` |
 | `plans` | `id` | income, bills, savings, monthLength, items, currency |
 | `transactions` | `id` | cycleId\|null, `txnDate`, amount, type, subtype, label, event, payment, note, fromSavings, adjustsPool, isEstimate, hour, createdAt. Day is derived (`dayOfTxn`) |
+| `loans` | `id` | **Money lent to someone (v13, E-LEND).** `txnId` (the Lend spend; no FK), `person` (optional, may be ''; screens show `loanName` = name or type), `kind` (a type of the Lend category: Friends/Family/Coworker or one the user added; free text <= 24 chars), `amount`, `lentOn`, `dueDate\|null`, `willPay` (yes/maybe/unsure), `repayments` `[{id, amount, date}]` (embedded, append-only; undo removes the last), `writtenOff`. Server table `loans` (RLS, `loans_shape_check`). The money that left the wallet is an ordinary spend in the default category `Lend` (types Friends/Family/Coworker) linked by `txnId`; a loan and its spend are written in ONE Dexie transaction (`addLoan`). Remaining/status/due text are derived (`lib/lend.ts`), never stored. |
 | `cats`, `evts` | `id` | `cats` holds only this user's categories and changes to the shared defaults (`baseId`, `subAdded`, `subRemoved`, tombstone = default removed); defaults live once in `DEFAULT_CATEGORIES` and server table `default_categories`. `loadCategories` resolves them. Events are plain rows. |
 
 v1-v4 live in `db/legacy.ts`. v5 added the tables above, v6 drops the v4 tables; both upgrades run `migrateV4ToV5` (derived pool wins, old value kept in `meta.migrationReport`). The old shared `stash` DB is split into `stash-default` and dormant `stash-legacy-*` DBs by `db/migrate.ts`.
@@ -47,6 +48,7 @@ Every money write changes a transaction/cycle and calls `recompute(db, cycleId)`
 - `catchUp(state, total, gap)`: split `total` evenly (remainder to the first days), close each day as `estimated`, emit "Rough total" entries.
 - `isBigSpend`: `amount ≥ 500 && amount > 1.5×allowance && daysLeft > 1` (500 is hard-coded, not currency-scaled).
 - `monthEnd`, `pace`, `projection`: reporting only.
+- **Repayments are credits, not transactions** (E-LEND). `cycleFor`/`allCycles` pass `creditsOf(loans)` to `buildCycle` -> `rollupCycle(c, txns, credits)`. A credit dated on a *closed* day lowers that day's net `spent` and gives the pool the money back (earlier days' allowances are not rewritten); a credit dated *today or ahead* raises the pool at once (income-like; spends only move the pool once their day is closed); a credit outside the month is ignored; one dated before tracking began counts on the first tracked day. Written-off loans give nothing back. The lend itself is a normal spend, so it lowers the month. Amounts stay positive everywhere.
 
 ## 4. Mutation catalogue (`db/queries.ts`) — what each write changes
 
@@ -60,6 +62,9 @@ Every money write changes a transaction/cycle and calls `recompute(db, cycleId)`
 | `addSpend` (past day, no adjust) | +entry | day.spent+= | – | |
 | `addSpend` (date outside active cycle) | +entry on matching old cycle, else `day=0` on active cycle | matching old day.spent+= | – | never adjusts pool |
 | `updateEntry` | put | day.spent±, | pool∓ (closed/past only, clamped ≥0), fromSavingsTotal± | does **not** re-spread later days' allowance |
+| `addLoan` | +entry (category Lend) + loan row, one Dexie txn | – | as `addSpend` | meta.lastUsedLabel/lastPayment; validated by `validateLoan` |
+| `recordRepayment` / `undoLastRepayment` / `writeOffLoan` / `setLoanDue` / `setLoanWillPay` | – | – | repayment = credit in the month's pool | loan row only (clamped to what is owed) |
+| `removeEntry` (Lend spend) | tombstones the loan too; **refused (`'has-repayments'`) once money came back** | | | `updateEntry` ignores amount/category/type/label edits on a loan's spend |
 | `removeEntry` | delete | day.spent−, | pool+amount (past & adjustsPool), fromSavingsTotal− | remote delete best-effort |
 | `closeCurrentDay` | – | +row | pool−=spent, currentDay++ | – |
 | `syncCalendar` | – | +rows (quiet closes) | currentDay,pool | returns gap |
@@ -81,7 +86,7 @@ Every money write changes a transaction/cycle and calls `recompute(db, cycleId)`
 - Pull: per table keyset `(updated_at, id)` pages of 1000, applied by a field-level three-way merge against the last synced row (`mergeRows`); `currentDay` merges as max; touched cycles are re-derived. Pull never clears local data.
 - 401: refresh the session once and retry. Offline: stays dirty, retried on `online`/next write. Errors report `'error'`, never `'synced'`.
 - Deletes are tombstones both ways, purged locally after 30 days. The guest DB is deleted after the first successful sync following a claim.
-- Server (`supabase/schema.sql`): `profiles, plans, cycles, transactions, categories, events, feature_data`; uuid ids, `user_id default auth.uid()`, RLS `auth.uid() = user_id`, `push_changes` (the write path), `stash_lww_guard` (kept for direct writes by old clients: stale update = no-op), `stash_touch` (server `updated_at` and `version`, clamps `client_updated_at` to now()+1 min), `username_available(u)` for anon, `handle_new_user` creates the profile. The old `stash_*` tables are dropped by the cutover block.
+- Server (`supabase/schema.sql`): `profiles, plans, cycles, transactions, categories, events, loans, leftover_savings, feature_data`; uuid ids, `user_id default auth.uid()`, RLS `auth.uid() = user_id`, `push_changes` (the write path), `stash_lww_guard` (kept for direct writes by old clients: stale update = no-op), `stash_touch` (server `updated_at` and `version`, clamps `client_updated_at` to now()+1 min), `username_available(u)` for anon, `handle_new_user` creates the profile. The old `stash_*` tables are dropped by the cutover block.
 
 ### Sync hardening (2026-11-02)
 
