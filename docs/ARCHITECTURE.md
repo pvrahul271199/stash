@@ -138,6 +138,3 @@ Replaces "whole-row last-write-wins on the client clock" and "one PostgREST requ
 - New SW waits; `PWAManager` shows a "Reload" toast that posts `SKIP_WAITING`.
 - Desktop shows a 380×780 phone frame (CSS); ≤420px or standalone fills the screen.
 
-## 8. Mobile app (`stash-mobile/`)
-
-Expo SDK 58, AsyncStorage JSON blob (`stash_db_v1`), `noopSync`. Re-implements `budget/dates/insights/sample/suggestions/csv/categories/format` (copied, not shared) and a **subset** of `queries`: no events, payment, notes, `date`, user/identity, plan editing, past-day logging, `updateEntry`, merge, currency. Expect drift from the web app's logic.

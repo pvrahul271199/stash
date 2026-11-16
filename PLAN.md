@@ -124,4 +124,3 @@ applyRemote(db: StashDB, rows: RemoteRows): Promise<void>  // skip if local.upda
 6. **Client-clock LWW:** a wrong clock can win conflicts; reject `client_updated_at` more than 24 h ahead in the trigger.
 7. **Username enumeration** via `username_available` and signup errors is accepted, with Supabase rate limits.
 8. **Release coupling:** sync is off from phase 2 to phase 4, so don't release in between. The SDK adds bundle weight and drifts CLAUDE.md.
-9. **`stash-mobile/`** keeps its own logic and is not covered.

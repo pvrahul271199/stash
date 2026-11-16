@@ -339,5 +339,4 @@ Implementation checklist
 2. Validate the same bounds in the cycle-creation query in `db/queries.ts`, so the UI is not the only guard.
 3. Set `currentDay = daysBetween(startDate, today) + 1`. Days before it go through the existing catch-up / estimated path.
 4. Unit test in `lib/budget.ts`: `startDate` 0, 3 and 7 days ago give the right `currentDay`, `pool` and `daysLeft`.
-5. Mirror it in `stash-mobile/`, which has its own copy of the logic.
 6. Update `docs/ARCHITECTURE.md` and `docs/FLOWS.md`.

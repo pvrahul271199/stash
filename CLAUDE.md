@@ -24,7 +24,6 @@ Keep these three up to date when behaviour changes. `FINDINGS.md` has a status c
 - **Dexie / IndexedDB** is the source of truth on device. Zustand holds *UI-only* state (`store/*`, plus the currency store in `lib/currency.ts`).
 - **Supabase Auth** (`@supabase/supabase-js`, auth only; **Google sign-in only**: the username + password flow and `AuthScreen` were removed) plus PostgREST over raw `fetch` with the user's access token for data. RLS is per `auth.uid()`, **and the client enforces ownership too**: every pull filters `user_id=eq.<uid>` and `applyRemote` drops rows owned by anyone else (F-38). Never remove either. Guests (`stash-default`) never sync.
 - PWA: `app/manifest.ts`, `public/sw.js` + `scripts/build-sw.mjs` (precache + content-hash version).
-- `stash-mobile/`: separate Expo / React Native app with its own copy of the logic and an AsyncStorage JSON blob. Not synced with the web app.
 
 ## Commands
 
@@ -60,7 +59,6 @@ lib/history.ts insights.ts sample.ts suggestions.ts csv.ts categories.ts format.
 lib/lend.ts          pure lending maths (remaining, status, due text, credits, validation)
 supabase/schema.sql  idempotent DDL + RLS (currently allow-all)
 tests/               vitest unit + tests/e2e Playwright
-stash-mobile/        Expo app (separate package.json)
 ```
 
 ## Core concepts (memorise these)
@@ -92,4 +90,4 @@ stash-mobile/        Expo app (separate package.json)
 
 ## Review status
 
-First full review: 2026-11-01, by reading the code (no flaw has been reproduced in a running app). Depth: `db/*`, `lib/budget|dates|sync|syncState|user|currency|history`, `AppShell`, `TodayTab`, `LogSpend`, `CloseDay`, `WelcomeBack`, `MonthEnd`, `UserScreen`, `supabase/schema.sql`, `sw.js`/`build-sw.mjs` were read in full or near-full. `HistoryTab`, `InsightsTab`, `UserTab`, `Onboarding`, `CategoriesTab`, charts and `stash-mobile/` were only skimmed (targeted greps) — see "Not yet reviewed" in `docs/FINDINGS.md`.
+First full review: 2026-11-01, by reading the code (no flaw has been reproduced in a running app). Depth: `db/*`, `lib/budget|dates|sync|syncState|user|currency|history`, `AppShell`, `TodayTab`, `LogSpend`, `CloseDay`, `WelcomeBack`, `MonthEnd`, `UserScreen`, `supabase/schema.sql`, `sw.js`/`build-sw.mjs` were read in full or near-full. `HistoryTab`, `InsightsTab`, `UserTab`, `Onboarding`, `CategoriesTab` and charts were only skimmed (targeted greps) — see "Not yet reviewed" in `docs/FINDINGS.md`.
