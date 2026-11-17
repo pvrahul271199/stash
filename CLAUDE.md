@@ -30,14 +30,14 @@ Keep these three up to date when behaviour changes. `FINDINGS.md` has a status c
 ```bash
 npm run dev        # next dev --webpack -H 0.0.0.0  (http://localhost:3000)
 npm run lint       # tsc --noEmit  (there is no ESLint)
-npm test           # vitest run   (247 tests, fake-indexeddb)
+npm test           # vitest run   (271 tests, fake-indexeddb)
 npm run build      # next build --webpack && node scripts/build-sw.mjs  → out/
 npm start          # node scripts/serve-out.mjs → http://127.0.0.1:3100
 npm run test:e2e   # Playwright; needs `npm run build` first, mobile 390x844 + desktop
 npm run icons      # regenerate PWA icons
 ```
 
-State (2026-11-16): `tsc` clean, 247/247 unit tests pass, `npm run build` passes. e2e specs are stale (they walk an older multi-step onboarding) and were not run.
+State (2026-11-16): `tsc` clean, 271/271 unit tests pass, `npm run build` passes. e2e specs are stale (they walk an older multi-step onboarding) and were not run.
 
 ## Layout
 
@@ -47,7 +47,7 @@ components/
   AppShell.tsx       top-level state machine (flows, tabs, catch-up, sync bootstrapping)
   screens/           one file per screen/sheet (Today, History, Insights, User, Onboarding, …)
   ui/ charts/ pwa/   primitives, SVG charts, SW/iOS-hint
-db/schema.ts         Dexie schema (v13), types, default categories, getDB()
+db/schema.ts         Dexie schema (v14), types, default categories, getDB()
 db/queries.ts        ALL reads (useLiveQuery hooks) and writes (transactions)
 lib/budget.ts        pure budget math (closeDay, planSync, catchUp, pace, projection)
 lib/dates.ts         pure ISO-date helpers (UTC-midnight arithmetic)
@@ -56,6 +56,7 @@ lib/syncState.ts     sync-status pub/sub + useSyncStatus hook
 lib/user.ts          username → base64 user_id, localStorage/sessionStorage "session"
 lib/currency.ts      currency list + zustand store (display only; no conversion)
 lib/history.ts insights.ts sample.ts suggestions.ts csv.ts categories.ts format.ts
+lib/income.ts        pure extra-income helpers (validate, credits, range total)
 lib/lend.ts          pure lending maths (remaining, status, due text, credits, validation)
 supabase/schema.sql  idempotent DDL + RLS (currently allow-all)
 tests/               vitest unit + tests/e2e Playwright
@@ -70,7 +71,8 @@ tests/               vitest unit + tests/e2e Playwright
 - **Sample mode** ("explore with sample data") runs in its own throwaway Dexie DB `stash-sample` (`lib/sampleMode.ts`): two months of dummy spends are really in a DB, anything logged there is discarded (the sandbox is rebuilt on every visit/reload and dropped on exit), and `fillSample` refuses to run on any other DB. Never write sample data into a guest or account DB.
 - **"Close the day"** is a real, per-device action (`closeToday` in `db/queries.ts`): it stores `meta.closedThrough = <today by the clock>` and `todayISO()` (no-arg) then returns the *next* day while the clock is still on the closed one, so the app moves on at once instead of at midnight. The day on screen can always be closed (even one the clock hasn't reached, so a user can close several in a row); `clockISO()` is the real date. It is a single screen (`CloseDay`, includes the recap); there is no separate "Day closed" screen. Nothing month-shaped is stored and it is not synced. `previewCloseDay` stays the read-only recap. There is no catch-up / "rough total" screen: days nobody logged count as nothing spent, so the allowance just rises. Month-summary-seen and leftover-moved live in `meta` (per device).
 - **There are no `cycles` or `dayRows` tables** (Dexie v11 dropped them; the upgrade `migrateToDerivedPeriods` first carried the first cycle's start into the first plan's `effectiveFrom`). Transactions have no `cycleId`; a month is found by `txnDate`. On the server the `cycles` table and `transactions.cycle_id` are dropped (run the last block of `supabase/schema.sql` after deploying). Never reintroduce stored month state.
-- **Lending** (E-LEND, `lib/lend.ts`): the default category `Lend` (types Friends/Family/Coworker, user-extendable) is **outside the budget** (lending is not spending); a `loans` row (Dexie v13, server `loans`) records who/due/will-pay and embedded `repayments`. They are written together by `addLoan` (never create a Lend spend any other way). The Lend spend and repayments never touch today's spend, the pool, History totals or Insights (`lendTxnIds`, `outsideBudget`); only a **write-off** does, as a month-level debit in the month it was written off, **unless the user chose "Take it out of your daily amount now? Yes, until repaid"** (`loan.holdBack`): then the whole amount is debited on the day lent and each repayment is credited back on its day, and a write-off adds nothing more (`loanEffects`) (`loanEffects` passed to `buildCycle`/`rollupCycle`). The log screen's `Spend | Lend` switch and History's `History | Lend` tabs are the UI. A loan owns its spend: `updateEntry` ignores amount/category edits on it and `removeEntry` takes the loan with it (refused once repaid). See docs/FLOWS.md 19b.
+- **Lending** (E-LEND, `lib/lend.ts`): the default category `Lend` (types Friends/Family/Coworker, user-extendable) is **not spending**; a `loans` row (Dexie v13, server `loans`) records who/due/will-pay and embedded `repayments`. They are written together by `addLoan` (never create a Lend spend any other way). The Lend spend and repayments never touch today's spend, the pool, History totals or Insights (`lendTxnIds`, `outsideBudget`: they are listed but never counted as a spend; the pool moves only through `loanEffects`); the money is always taken out of the daily amount (no choice, `loan.holdBack` is a legacy column, ignored): the whole amount is debited on the day lent and each repayment is credited back on its day, and a write-off adds nothing more (`loanEffects`). The log screen's Lend part says so in small text (`loanEffects` passed to `buildCycle`/`rollupCycle`). The log screen's `Spend | Lend` switch and History's `History | Lend` tabs are the UI. A loan owns its spend: `updateEntry` ignores amount/category edits on it and `removeEntry` takes the loan with it (refused once repaid). See docs/FLOWS.md 19b.
+- **Additional income** (`lib/income.ts`, Dexie v14 `incomes`, server `incomes`, run the `incomes` block of `supabase/schema.sql` first): money that arrives after the plan was made. Logged from the log screen's `Spend | Lend | Income` switch (own wording: "Add income", "Your N days left go from ₹a to ₹b a day."; only the Income tab is teal; no categories or types: an income is just money in, labelled by its optional note; events still apply). It is listed on its day in History and as a "+ ₹X income" line in the History month line and Insights summary, never inside any spent total or from User tab > Additional income. It is NOT a transaction and never counts as spending or edits the plan: `incomeEffects` turns each row into a dated positive credit passed to `buildCycle`/`rollupCycle` (same path as loan credits), so the month's pool rises and every remaining day gets more. Removing it (soft delete) takes it back. Four design options per screen live in `stories/additional-income.stories.tsx` (Log A and User A are wired; Today/History are proposals only).
 - **`fromSavings`** entries never touch pool/allowance; they only add to `fromSavingsTotal`.
 - **`adjustsPool`** (entry flag): for past-day spends of this month, whether it rebalanced the remaining pool (false = record-only).
 - **Identity** = Supabase `auth.uid()`; one Dexie DB per user (`stash-<uid>`, guest `stash-default`). The client filters every pull by `user_id` and drops foreign rows (F-38).

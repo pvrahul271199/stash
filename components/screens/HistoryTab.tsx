@@ -3,6 +3,8 @@ import { entryLines } from '@/lib/entryDisplay';
 import { useMemo, useState } from 'react';
 import {
   removeEntry,
+  removeIncome,
+  useIncomes,
   useAllCycles,
   useAllEntries,
   useDateEntries,
@@ -14,6 +16,7 @@ import type { Entry, Plan } from '@/db/schema';
 import { monthView, type DerivedCycle } from '@/lib/period';
 import { EditSpendSheet } from './EditSpendSheet';
 import { LogSpend } from './LogSpend';
+import { incomeBetween, incomeLabel } from '@/lib/income';
 import { LendTab } from './LendTab';
 import { TitleTabs } from '../ui/TitleTabs';
 import {
@@ -41,6 +44,7 @@ export function HistoryTab({ activeCycle, plan, initialTab = 'spends' }: { activ
   const allCycles = useAllCycles() ?? [activeCycle];
   const [tab, setTab] = useState<'spends' | 'lend'>(initialTab);
   const loans = useLoans() ?? [];
+  const incomes = useIncomes() ?? [];
   const [query, setQuery] = useState('');
   const [searchFocused, setSearchFocused] = useState(false);
   const isSearching = query.trim().length > 0;
@@ -132,6 +136,10 @@ export function HistoryTab({ activeCycle, plan, initialTab = 'spends' }: { activ
     () => loans.filter((l) => l.lentOn.startsWith(monthPrefix)).reduce((s, l) => s + l.amount, 0),
     [loans, monthPrefix],
   );
+
+  // Extra income is shown as money, never as spending: it is listed on its day and summed on its own line.
+  const monthIncome = useMemo(() => incomeBetween(incomes, `${monthPrefix}-01`, `${monthPrefix}-31`), [incomes, monthPrefix]);
+  const selectedIncomes = useMemo(() => incomes.filter((i) => i.date === selectedIso), [incomes, selectedIso]);
 
   const titleTabs = (
     <TitleTabs
@@ -428,11 +436,12 @@ export function HistoryTab({ activeCycle, plan, initialTab = 'spends' }: { activ
           <p className="mt-1 text-[15px] text-soft">
             <span className="num text-ink">{inr(monthSpent)}</span> spent
           </p>
-          {(monthSavings > 0 || monthLent > 0) && (
+          {(monthSavings > 0 || monthLent > 0 || monthIncome > 0) && (
             <p className="text-[12px] text-faint">
               {[
                 monthSavings > 0 ? `+ ${inr(monthSavings)} from savings` : '',
                 monthLent > 0 ? `${inr(monthLent)} lent, not counted` : '',
+                monthIncome > 0 ? `+ ${inr(monthIncome)} income` : '',
               ]
                 .filter(Boolean)
                 .join(' · ')}
@@ -570,10 +579,30 @@ export function HistoryTab({ activeCycle, plan, initialTab = 'spends' }: { activ
               <p className="num text-[22px] font-semibold text-ink">{inr(selectedSpent)}</p>
             </div>
 
-            {selectedDateEntries.length === 0 ? (
+            {selectedDateEntries.length === 0 && selectedIncomes.length === 0 ? (
               <p className="py-4 text-[14px] text-soft">Nothing logged on this date.</p>
             ) : (
               <ul className="divide-y divide-line">
+                {selectedIncomes.map((i) => (
+                  <li key={i.id} className="flex items-center justify-between gap-2 py-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[15px] font-medium text-ink">
+                        {incomeLabel(i)}
+                        <span className="ml-2 text-[12px] text-faint">income, not a spend</span>
+                      </p>
+                      {(i.event || i.payment) && <p className="truncate text-[12px] text-faint">{[i.event, i.payment].filter(Boolean).join(' · ')}</p>}
+                    </div>
+                    <p className="num text-[18px] text-ink">+{inr(i.amount)}</p>
+                    <button
+                      type="button"
+                      aria-label={`Remove income ${incomeLabel(i)} ${inr(i.amount)}`}
+                      onClick={() => void removeIncome(i.id)}
+                      className="flex h-7 w-7 min-h-0 items-center justify-center text-[16px] text-faint hover:text-warm"
+                    >
+                      ×
+                    </button>
+                  </li>
+                ))}
                 {selectedDateEntries.map((e) => (
                   <li key={e.id} className="flex items-center justify-between gap-2 py-3">
                     <button

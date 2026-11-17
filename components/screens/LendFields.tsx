@@ -9,10 +9,8 @@ export interface LendDraft {
   kind: LoanKind;
   person: string;
   due: DueChoice;
-  /** Take it out of the daily amount while it is owed (default: no). */
-  holdBack: boolean;
 }
-export const NEW_LEND_DRAFT: LendDraft = { kind: 'Friends', person: '', due: 'month', holdBack: false };
+export const NEW_LEND_DRAFT: LendDraft = { kind: 'Friends', person: '', due: 'month' };
 
 const DUE_CHOICES: { key: DueChoice; label: string }[] = [
   { key: 'week', label: 'In a week' },
@@ -46,7 +44,7 @@ export function LendFields({
   onAddKind: (name: string) => Promise<string | null>;
   people?: string[];
   today?: string;
-  /** "Daily ₹850 → ₹642": what holding this loan back would do to the daily amount. */
+  /** "Daily ₹850 → ₹642": what this loan does to the daily amount while it is owed. */
   dailyHint?: string | null;
 }) {
   const listId = useId();
@@ -69,7 +67,7 @@ export function LendFields({
   }
 
   return (
-    <div className="mt-3 flex w-full flex-col items-center gap-2" aria-label="Loan details">
+    <div className="flex w-full flex-col items-center gap-2" aria-label="Loan details">
       <div className="flex max-w-[330px] flex-wrap items-center justify-center gap-1.5" role="group" aria-label="Lent to">
         {kinds.map((k) => (
           <button key={k} type="button" aria-pressed={draft.kind === k} onClick={() => onChange({ ...draft, kind: k })} className={chip(draft.kind === k)}>
@@ -145,20 +143,9 @@ export function LendFields({
           </button>
         ))}
       </div>
-      <div className="flex flex-col items-center gap-1.5" role="group" aria-label="Take it out of your daily amount now">
-        <p className="text-[11px] text-soft">Take it out of your daily amount now?</p>
-        <div className="flex gap-1.5">
-          <button type="button" aria-pressed={!draft.holdBack} onClick={() => onChange({ ...draft, holdBack: false })} className={chip(!draft.holdBack)}>
-            No
-          </button>
-          <button type="button" aria-pressed={draft.holdBack} onClick={() => onChange({ ...draft, holdBack: true })} className={chip(draft.holdBack)}>
-            Yes, until repaid
-          </button>
-        </div>
-        {draft.holdBack && dailyHint && <p className="num text-[11px] text-faint">{dailyHint}</p>}
-      </div>
-      <p className="text-[11px] text-faint">
-        {due ? `Back by ${formatShort(due)}. ` : ''}You can track this in History &gt; Lend
+      <p className="num text-[11px] leading-tight text-faint">
+        {dailyHint ? `${dailyHint} until repaid` : 'Comes out of your daily amount until repaid'}
+        {due ? ` · back by ${formatShort(due)}` : ''}
       </p>
     </div>
   );

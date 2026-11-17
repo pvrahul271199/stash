@@ -80,7 +80,7 @@ export function LendTab() {
         {isOpen && (
           <div className="mt-2">
             <p className="text-[13px] text-soft">
-              Lent {formatShort(l.lentOn)}{l.holdBack ? ' · held back from your daily amount' : ''}
+              Lent {formatShort(l.lentOn)}
             </p>
             <div className="mt-2 flex flex-wrap gap-2">
               {left > 0 && (

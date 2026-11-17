@@ -157,6 +157,24 @@ export interface Loan extends Syncable {
   createdAt: number;
 }
 
+/**
+ * Extra income received after the plan was made (lib/income.ts). Not a transaction: it never counts as spending and is not
+ * part of the plan's income. It is a dated positive credit to the month's money (`incomeEffects`).
+ */
+export interface Income extends Syncable {
+  amount: number;
+  /** Always 'Income' for new rows (no types any more); older rows may hold "Bonus" etc. Shown via `incomeLabel`. */
+  source: string;
+  /** yyyy-mm-dd it was received. */
+  date: string;
+  /** Event name snapshot, or null. */
+  event: string | null;
+  /** How it arrived (UPI / Card / Cash), or null. */
+  payment: string | null;
+  note: string | null;
+  createdAt: number;
+}
+
 /** Stored per-user row: a category the user created, or an override of a shared default (baseId). */
 export interface CategoryRow extends Syncable {
   name: string;
@@ -217,7 +235,7 @@ export interface Entry {
 export const PAYMENT_MODES = ['UPI', 'Card', 'Cash'] as const;
 export type PaymentMode = (typeof PAYMENT_MODES)[number];
 
-export const SCHEMA_VERSION = 13;
+export const SCHEMA_VERSION = 14;
 
 /* ---------- local revisions ----------
  * "What still needs pushing" must not depend on the phone's clock: a clock that moves backwards would
@@ -234,7 +252,7 @@ export function seedRev(n: number): void {
 }
 
 /** Tables whose rows sync; each gets `localRev` stamped by Dexie hooks. */
-export const SYNCED_TABLES = ['plans', 'transactions', 'cats', 'evts', 'leftovers', 'loans'] as const;
+export const SYNCED_TABLES = ['plans', 'transactions', 'cats', 'evts', 'leftovers', 'loans', 'incomes'] as const;
 /** Fields that are local caches (written by recompute): changing only these is not a user edit. */
 const CACHE_FIELDS = new Set(['localRev']);
 let stampingOff = false;
@@ -258,6 +276,7 @@ export class StashDB extends Dexie {
   evts!: Table<StashEvent, string>;
   leftovers!: Table<LeftoverSaving, string>;
   loans!: Table<Loan, string>;
+  incomes!: Table<Income, string>;
   syncBase!: Table<SyncBase, string>;
 
   constructor(name = dbNameFor(GUEST_UID)) {
@@ -317,6 +336,8 @@ export class StashDB extends Dexie {
     this.version(12).stores({ leftovers: 'id, monthId, updatedAt, localRev' });
     // v13: lending tracker. One row per loan; repayments are embedded. No upgrade step: nothing existed before.
     this.version(13).stores({ loans: 'id, txnId, dueDate, updatedAt, localRev' });
+    // v14: extra income (lib/income.ts). One row per income; no upgrade step: nothing existed before.
+    this.version(14).stores({ incomes: 'id, date, updatedAt, localRev' });
 
     for (const name of SYNCED_TABLES) {
       const t = this.table(name) as Table<Record<string, unknown>, string>;

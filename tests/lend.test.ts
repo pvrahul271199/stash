@@ -297,16 +297,17 @@ describe('lending and the budget', () => {
   const lend = (cycle: Awaited<ReturnType<typeof now>>, amount: number, date?: string) =>
     addLoan(cycle, { amount, person: 'Arjun', kind: 'Friends', dueDate: null }, NOON, undefined, date);
 
-  it('adding a lend does not change today spend, the pool, the days or tomorrow', async () => {
+  it('adding a lend takes it out of the pool at once (daily amount drops); "spent today" and the days are untouched', async () => {
     const base = await fixed('lb-1');
     const before = await previewCloseDay(TODAY_ISO);
     await lend(base, 5000);
     const after = await now();
-    expect(after.pool).toBe(base.pool);
+    expect(after.pool).toBe(base.pool - 5000);
+    expect(todayAllowance(after)).toBeLessThan(todayAllowance(base));
     expect(after.days).toEqual(base.days);
     const preview = await previewCloseDay(TODAY_ISO);
-    expect(preview!.record.spent).toBe(0); // "spent today" is not touched
-    expect(preview!.tomorrowAllowance).toBe(before!.tomorrowAllowance);
+    expect(preview!.record.spent).toBe(0); // not a spend
+    expect(preview!.tomorrowAllowance).toBeLessThan(before!.tomorrowAllowance);
   });
 
   it('a real spend on the same day still counts, the lend beside it does not', async () => {
@@ -316,13 +317,12 @@ describe('lending and the budget', () => {
     expect((await previewCloseDay(TODAY_ISO))!.record.spent).toBe(100);
   });
 
-  it('a lend dated on a past day leaves that day and the pool alone', async () => {
+  it('a lend dated on a past day comes out of the pool and shows on that day', async () => {
     const base = await fixed('lb-3');
     await lend(base, 5000, '2026-11-10');
     const after = await now();
-    expect(after.pool).toBe(base.pool);
-    expect(after.days).toEqual(base.days);
-    expect(after.days[9].spent).toBe(0); // day 10
+    expect(after.pool).toBe(base.pool - 5000);
+    expect(after.days[9].spent).toBe(5000); // day 10
   });
 
   it('a lend dated before budgeting began does not move the tracking start or create an earlier month', async () => {
@@ -333,17 +333,18 @@ describe('lending and the budget', () => {
     expect((await now()).pool).toBe(base.pool);
   });
 
-  it('not written off: lend, part repayment and full repayment leave every number exactly as without the loan', async () => {
+  it('lend, part repayment and full repayment: the pool goes down by the lend and comes back as money returns', async () => {
     const base = await fixed('lb-5');
     const { loan: l } = await lend(base, 5000);
+    expect((await now()).pool).toBe(base.pool - 5000);
     await recordRepayment(l.id, 2000, TODAY_ISO);
-    expect(await now()).toEqual(base);
+    expect((await now()).pool).toBe(base.pool - 3000);
     await recordRepayment(l.id, 3000, '2026-11-12');
-    expect(await now()).toEqual(base);
+    expect((await now()).pool).toBe(base.pool);
     expect((await allCycles(getDB(), TODAY_ISO)).find((c) => c.id === base.id)!.pool).toBe(base.pool);
   });
 
-  it('writing off counts the rest in that month only: the pool drops by what was left, today spend does not move', async () => {
+  it('writing off adds nothing more: what was left is already out of the pool, today spend does not move', async () => {
     const base = await fixed('lb-6');
     const { loan: l } = await lend(base, 5000);
     await recordRepayment(l.id, 2000, TODAY_ISO);
@@ -355,41 +356,43 @@ describe('lending and the budget', () => {
     expect((await allCycles(getDB(), TODAY_ISO)).find((c) => c.id === base.id)!.pool).toBe(base.pool - 3000);
   });
 
-  it('a write-off in November does not change October', async () => {
+  it('a lend hits the month it was lent in, and a later write-off in November changes nothing', async () => {
     await openUserDB('lb-7');
     await ensureSeed();
     await createPlan(plan, '2026-10-01');
     const octBefore = (await cycleFor(getDB(), '2026-10-15', TODAY_ISO))!;
     const novBefore = (await cycleFor(getDB(), TODAY_ISO, TODAY_ISO))!;
     const { loan: l } = await lend(novBefore, 4000, '2026-10-20'); // lent in October...
+    const octAfter = (await cycleFor(getDB(), '2026-10-15', TODAY_ISO))!;
+    expect(octAfter.pool).toBe(octBefore.pool - 4000);
     await writeOffLoan(l.id, TODAY_ISO); // ...written off in November
-    expect((await cycleFor(getDB(), '2026-10-15', TODAY_ISO))).toEqual(octBefore); // October never saw the lend or the write-off
-    expect((await cycleFor(getDB(), TODAY_ISO, TODAY_ISO))!.pool).toBe(novBefore.pool - 4000);
+    expect(await cycleFor(getDB(), '2026-10-15', TODAY_ISO)).toEqual(octAfter);
+    expect((await cycleFor(getDB(), TODAY_ISO, TODAY_ISO))!.pool).toBe(novBefore.pool); // November never saw it
   });
 
-  it('a write-off dated on a closed day shows as spent on that day and lowers the pool', async () => {
+  it('a write-off dated on a closed day changes no day: the lend already took the money out', async () => {
     const base = await fixed('lb-8');
     const { loan: l } = await lend(base, 3000);
+    const held = await now();
     await writeOffLoan(l.id, '2026-11-05');
     const after = await now();
-    expect(after.days[4].spent).toBe(base.days[4].spent + 3000); // day 5
     expect(after.pool).toBe(base.pool - 3000);
-    expect(after.days[0]).toEqual(base.days[0]); // days before it are not rewritten
+    expect(after.days).toEqual(held.days);
   });
 
-  it('undoing a write-off (or the last repayment of a written-off loan) gives the month its money back', async () => {
+  it('undoing a write-off (or the last repayment of a written-off loan) keeps the unpaid part out of the pool', async () => {
     const base = await fixed('lb-9');
     const { loan: l } = await lend(base, 3000);
     await writeOffLoan(l.id, TODAY_ISO);
     expect((await now()).pool).toBe(base.pool - 3000);
     expect((await reopenLoan(l.id))!.writtenOff).toBe(false);
-    expect(await now()).toEqual(base);
+    expect((await now()).pool).toBe(base.pool - 3000);
     expect(await reopenLoan(l.id)).toBeNull(); // nothing to undo
     await recordRepayment(l.id, 500, TODAY_ISO);
     await writeOffLoan(l.id, TODAY_ISO);
     expect((await now()).pool).toBe(base.pool - 2500);
     await undoLastRepayment(l.id); // also reopens
-    expect(await now()).toEqual(base);
+    expect((await now()).pool).toBe(base.pool - 3000);
   });
 
   it('a loan with nothing left cannot be written off (no zero debit)', async () => {
@@ -437,7 +440,7 @@ describe('sync mapping', () => {
   });
 });
 
-describe('hold back (design C)', () => {
+describe('hold back (always on)', () => {
   const held = (over: Partial<LoanLike & { createdAt: number }> = {}) => loan({ holdBack: true, lentOn: '2026-11-05', ...over });
 
   it('loanEffects: the whole amount out on the day lent, each repayment back on its day, nothing extra on write-off', () => {
@@ -452,14 +455,14 @@ describe('hold back (design C)', () => {
       { date: '2026-11-12', amount: 2000 },
     ]);
     expect(loanEffects([held({ deletedAt: 1 })])).toEqual([]);
-    // a loan without the flag (every loan made before this existed) behaves exactly as before
-    expect(loanEffects([loan({ lentOn: '2026-11-05' })])).toEqual([]);
+    // the flag is ignored now: every loan, old or new, comes out of the daily amount until repaid
+    expect(loanEffects([loan({ lentOn: '2026-11-05' })])).toEqual([{ date: '2026-11-05', amount: -5000 }]);
   });
 
   it('lowers the pool at once, and gives it back as money returns', async () => {
     const cycle = await setup('lend-hold');
     const base = (await cycleFor(getDB()))!.pool;
-    const { loan: l } = await addLoan(cycle, { amount: 6000, person: 'Arjun', kind: 'Friends', holdBack: true, dueDate: null });
+    const { loan: l } = await addLoan(cycle, { amount: 6000, person: 'Arjun', kind: 'Friends', dueDate: null });
     expect((await cycleFor(getDB()))!.pool).toBe(base - 6000);
     await recordRepayment(l.id, 2500);
     expect((await cycleFor(getDB()))!.pool).toBe(base - 3500);
@@ -467,11 +470,12 @@ describe('hold back (design C)', () => {
     expect((await cycleFor(getDB()))!.pool).toBe(base);
   });
 
-  it('without hold back nothing changes until a write-off (the old behaviour)', async () => {
+  it('there is no choice any more: a new loan is always held back, and a write-off adds nothing', async () => {
     const cycle = await setup('lend-nohold');
     const base = (await cycleFor(getDB()))!.pool;
     const { loan: l } = await addLoan(cycle, { amount: 6000, person: 'Meera', kind: 'Friends', dueDate: null });
-    expect((await cycleFor(getDB()))!.pool).toBe(base);
+    expect(l.holdBack).toBe(true);
+    expect((await cycleFor(getDB()))!.pool).toBe(base - 6000);
     await writeOffLoan(l.id);
     expect((await cycleFor(getDB()))!.pool).toBe(base - 6000);
   });
@@ -479,7 +483,7 @@ describe('hold back (design C)', () => {
   it('a held loan that is written off keeps the unpaid part held, with no double count', async () => {
     const cycle = await setup('lend-hold-off');
     const base = (await cycleFor(getDB()))!.pool;
-    const { loan: l } = await addLoan(cycle, { amount: 6000, person: 'Karthik', kind: 'Friends', holdBack: true, dueDate: null });
+    const { loan: l } = await addLoan(cycle, { amount: 6000, person: 'Karthik', kind: 'Friends', dueDate: null });
     await recordRepayment(l.id, 1000);
     await writeOffLoan(l.id);
     expect((await cycleFor(getDB()))!.pool).toBe(base - 5000);

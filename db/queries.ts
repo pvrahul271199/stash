@@ -10,6 +10,7 @@ import {
   useActiveUid,
   type Category,
   type Entry,
+  type Income,
   type Loan,
   type Plan,
   type StashDB,
@@ -53,6 +54,7 @@ import { buildUserProfile, getActiveUserId, getStoredAvatarTheme, getStoredUsern
 import { requestSync, syncNow } from '@/lib/sync';
 import { getAuth } from '@/lib/auth';
 import { LEND_CATEGORY, remaining, validateLoan, loanEffects, type LoanKind } from '@/lib/lend';
+import { DEFAULT_INCOME_SOURCE, incomeEffects, validateIncome } from '@/lib/income';
 import { uuidv7 } from '@/lib/uuid';
 
 /* ---------- helpers ---------- */
@@ -136,7 +138,7 @@ const periodKey = (c: { startDate: string; totalDays: number }) => `p:${c.startD
 
 /** The derived cycle of the period that contains `date`; undefined before the first plan (or before tracking began). */
 export async function cycleFor(db: StashDB, date: string = todayISO(), today: string = todayISO()): Promise<DerivedCycle | undefined> {
-  const [plans, meta, loans] = await Promise.all([db.plans.toArray(), db.meta.get('main'), db.loans.toArray()]);
+  const [plans, meta, loans, incomes] = await Promise.all([db.plans.toArray(), db.meta.get('main'), db.loans.toArray(), db.incomes.toArray()]);
   const lend = new Set(loans.filter(alive).map((l) => l.txnId).filter(Boolean) as string[]);
   // a lent amount is not spending, so it does not decide when budgeting started either
   const firstSpend = await db.transactions.orderBy('txnDate').filter((t) => alive(t) && !lend.has(t.id)).first();
@@ -144,7 +146,7 @@ export async function cycleFor(db: StashDB, date: string = todayISO(), today: st
   const tracking = trackingForPeriod(plans, firstSpend?.txnDate, period);
   if (!tracking) return undefined;
   const txns = (await db.transactions.where('txnDate').between(period.start, period.end, true, true).toArray()).filter((t) => !lend.has(t.id));
-  const c = buildCycle(period, planInEffect(plans, period)!, txns, today, tracking, false, loanEffects(loans));
+  const c = buildCycle(period, planInEffect(plans, period)!, txns, today, tracking, false, [...loanEffects(loans), ...incomeEffects(incomes)]);
   if (!c) return undefined;
   c.leftoverMoved = (meta?.leftoverMoved ?? []).includes(c.id);
   return c;
@@ -157,10 +159,10 @@ async function cycleById(db: StashDB, id: string): Promise<DerivedCycle | undefi
 }
 
 export async function allCycles(db: StashDB, today: string = todayISO()): Promise<DerivedCycle[]> {
-  const [plans, txns, meta, loans] = await Promise.all([db.plans.toArray(), db.transactions.toArray(), db.meta.get('main'), db.loans.toArray()]);
+  const [plans, txns, meta, loans, incomes] = await Promise.all([db.plans.toArray(), db.transactions.toArray(), db.meta.get('main'), db.loans.toArray(), db.incomes.toArray()]);
   const moved = new Set(meta?.leftoverMoved ?? []);
   const lend = new Set(loans.filter(alive).map((l) => l.txnId).filter(Boolean) as string[]);
-  return buildAllCycles(plans, txns.filter((t) => !lend.has(t.id)), today, (id) => moved.has(id), loanEffects(loans));
+  return buildAllCycles(plans, txns.filter((t) => !lend.has(t.id)), today, (id) => moved.has(id), [...loanEffects(loans), ...incomeEffects(incomes)]);
 }
 
 const cycleOfDate = (cycles: DerivedCycle[], iso: string) => cycles.find((c) => iso >= c.startDate && iso <= endOf(c));
@@ -765,14 +767,77 @@ export async function updateEntry(id: string, patch: SpendUpdate): Promise<Entry
   return toEntry(t, await cycleFor(db, t.txnDate), await loadLinkNames(db));
 }
 
+/* ---------- extra income (lib/income.ts) ---------- */
+
+export interface NewIncome {
+  amount: number;
+  /** Optional label (older rows). New incomes are just "Income" plus the note. */
+  source?: string;
+  payment?: string | null;
+  note?: string | null;
+  /** Event name; `undefined` = the active event, `null` = none. */
+  event?: string | null;
+}
+
+/**
+ * Records extra income on the cycle's current day (or `targetDay` / `targetDate` when adding from History). It raises that
+ * month's money, so every remaining day gets more (a credit, see `incomeEffects`). It is not a spend and does not move when
+ * budgeting started. Throws on invalid input; the UI checks first with `validateIncome`.
+ */
+export async function addIncome(
+  cycle: { startDate: string; totalDays: number; currentDay: number },
+  input: NewIncome,
+  targetDay?: number,
+  targetDate?: string,
+): Promise<Income> {
+  const db = getDB();
+  const amount = Math.round(input.amount);
+  const source = (input.source ?? DEFAULT_INCOME_SOURCE).trim();
+  const bad = validateIncome({ amount, source }, MAX_NAME);
+  if (bad) throw new Error(bad);
+  const date =
+    targetDate ??
+    dateOfDay(cycle.startDate, targetDay != null ? Math.min(Math.max(1, Math.round(targetDay)), cycle.totalDays) : cycle.currentDay);
+  const stamp = Date.now();
+  const event = input.event === undefined ? ((await db.meta.get('main'))?.activeEvent ?? null) : input.event;
+  const income: Income = {
+    id: uuid(),
+    updatedAt: stamp,
+    amount,
+    source,
+    date,
+    event: event?.trim() || null,
+    payment: input.payment ?? null,
+    note: input.note?.trim() || null,
+    createdAt: stamp,
+  };
+  await db.incomes.add(income);
+  requestSync();
+  return income;
+}
+
+/** Live extra incomes, newest first. `undefined` while loading. */
+export function useIncomes(): Income[] | undefined {
+  return useLiveQuery(
+    async () => (await getDB().incomes.toArray()).filter(alive).sort((a, b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt),
+    [],
+  );
+}
+
+/** Takes an income back: the month's money drops by that amount again. */
+export async function removeIncome(id: string): Promise<void> {
+  const db = getDB();
+  const now = Date.now();
+  await db.incomes.update(id, { deletedAt: now, updatedAt: now });
+  requestSync();
+}
+
 /* ---------- lending (docs/ENHANCEMENTS.md E-LEND) ---------- */
 
 export interface NewLoan {
   amount: number;
   person: string;
   kind: LoanKind;
-  /** Take it out of the daily amount while it is owed (default: no). */
-  holdBack?: boolean;
   /** yyyy-mm-dd the money should be back, or null for "no date". */
   dueDate: string | null;
   payment?: string | null;
@@ -825,7 +890,7 @@ export async function addLoan(
     repayments: [],
     writtenOff: false,
     writtenOffOn: null,
-    holdBack: !!input.holdBack,
+    holdBack: true, // always: a lend comes out of the daily amount until it is paid back (lib/lend.ts loanEffects)
     createdAt: stamp,
   };
   await db.transaction('rw', [db.transactions, db.loans, db.meta], async () => {
@@ -1408,11 +1473,12 @@ export async function deleteAllData(): Promise<void> {
   const now = Date.now();
   await db.transaction(
     'rw',
-    [db.plans, db.transactions, db.cats, db.evts, db.leftovers, db.loans, db.meta],
+    [db.plans, db.transactions, db.cats, db.evts, db.leftovers, db.loans, db.incomes, db.meta],
     async () => {
       const tombstone = { deletedAt: now, updatedAt: now };
       await db.leftovers.toCollection().modify(tombstone);
       await db.loans.toCollection().modify(tombstone);
+      await db.incomes.toCollection().modify(tombstone);
       await db.transactions.toCollection().modify(tombstone);
       await db.plans.toCollection().modify(tombstone);
       await db.cats.toCollection().modify(tombstone);

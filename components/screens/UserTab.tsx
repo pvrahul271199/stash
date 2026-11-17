@@ -15,19 +15,23 @@ import {
   exportCSV,
   removeCategory,
   removeEvent,
+  removeIncome,
   removeSubcategory,
   useSavedFromLeftovers,
   useCategories,
   useCategoryCounts,
   useEventCounts,
   useEvents,
+  useIncomes,
 } from '@/db/queries';
 import type { Category, Plan, StashEvent } from '@/db/schema';
 import type { DerivedCycle } from '@/lib/period';
 import { moneyToLiveOn } from '@/lib/budget';
 import { MAX_NAME } from '@/lib/categories';
-import { cycleEndDate, formatMonthYear, formatWithWeekday } from '@/lib/dates';
-import { decodePeriodId, ordinal } from '@/lib/period';
+import { cycleEndDate, formatMonthYear, formatShort, formatWithWeekday } from '@/lib/dates';
+import { decodePeriodId, monthView, ordinal } from '@/lib/period';
+import { incomeBetween, incomeLabel } from '@/lib/income';
+import { LogSpend } from './LogSpend';
 import { inr } from '@/lib/format';
 import { useCurrency } from '@/lib/currency';
 import { useAuth } from '@/lib/auth';
@@ -81,6 +85,11 @@ export function UserTab({
   const eventCounts = useEventCounts();
 
   const [confirm, setConfirm] = useState<'delete' | 'account' | null>(null);
+  const incomes = useIncomes() ?? [];
+  const monthIncomes = incomes.filter((i) => i.date >= cycle.monthStart && i.date <= cycle.monthEnd);
+  const monthIncomeTotal = incomeBetween(incomes, cycle.monthStart, cycle.monthEnd);
+  const [addingIncome, setAddingIncome] = useState(false);
+  const [incomeOpen, setIncomeOpen] = useState(false);
   const auth = useAuth();
   const username = auth.username ?? '';
   const shownName = auth.displayName || username;
@@ -135,6 +144,7 @@ export function UserTab({
   }
 
   return (
+    <>
     <div className="flex-1 overflow-y-auto px-6 pb-12 pt-6">
       <div className="flex items-center justify-between">
         <h1 className="text-[20px] font-semibold tracking-tight text-ink">User Profile & Plan</h1>
@@ -298,6 +308,76 @@ export function UserTab({
             Edit budget plan
           </button>
         </div>
+      </section>
+
+      {/* Additional income: money that arrived after the plan was made. Raises this month's money, so every day ahead gets more. */}
+      <section className="mt-6 overflow-hidden rounded-note border border-line" aria-label="Additional income">
+        <button
+          type="button"
+          onClick={() => setIncomeOpen((v) => !v)}
+          aria-expanded={incomeOpen}
+          className="flex min-h-[64px] w-full items-center gap-3 px-4 text-left"
+        >
+          <span className="min-w-0 flex-1">
+            <span className="block text-[16px] font-semibold text-ink">Additional income</span>
+            <span className="block truncate text-[12px] text-soft">
+              {monthIncomes.length > 0 ? `${monthIncomes.length} added this month` : 'Bonus, freelance, a gift'}
+            </span>
+          </span>
+          <span className="num shrink-0 text-[17px] font-semibold text-ink">{monthIncomeTotal > 0 ? `+${inr(monthIncomeTotal)}` : inr(0)}</span>
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+            className={`shrink-0 text-faint transition-transform ${incomeOpen ? 'rotate-180' : ''}`}
+          >
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </button>
+        {incomeOpen && (
+          <div className="border-t border-line bg-tint/50 px-4 pb-4 pt-3">
+            {monthIncomes.length === 0 ? (
+              <p className="rounded-note bg-white px-3 py-3 text-[13px] leading-snug text-soft">
+                Nothing added this month. Money that comes in on top of your plan makes every day ahead a little bigger.
+              </p>
+            ) : (
+              <ul className="divide-y divide-line overflow-hidden rounded-note bg-white">
+                {monthIncomes.map((i) => (
+                  <li key={i.id} className="flex items-center gap-3 px-3 py-2.5">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[14px] font-medium text-ink">{incomeLabel(i)}</p>
+                      <p className="truncate text-[12px] text-faint">
+                        {formatShort(i.date)}
+                        {i.event ? ` · ${i.event}` : ''}
+                      </p>
+                    </div>
+                    <p className="num text-[15px] font-semibold text-ink">+{inr(i.amount)}</p>
+                    <button
+                      type="button"
+                      aria-label={`Remove income ${incomeLabel(i)}`}
+                      onClick={async () => {
+                        await removeIncome(i.id);
+                        toast(`Removed ${inr(i.amount)}. Your daily amount dropped back`);
+                      }}
+                      className="-mr-2 flex h-9 w-8 min-h-0 items-center justify-center text-faint"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <PrimaryButton onClick={() => setAddingIncome(true)} className="mt-3 h-[44px] min-h-0 text-[14px]">
+              + Add income
+            </PrimaryButton>
+          </div>
+        )}
       </section>
 
       {/* Leftovers moved to savings from finished months */}
@@ -719,5 +799,7 @@ export function UserTab({
       )}
 
     </div>
+    {addingIncome && <LogSpend cycle={monthView(cycle)} plan={plan} initialMode="income" onClose={() => setAddingIncome(false)} />}
+    </>
   );
 }

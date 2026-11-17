@@ -319,6 +319,41 @@ alter table public.loans add constraint loans_shape_check check (
   and jsonb_array_length(repayments) <= 200
 ) not valid;
 
+-- ---------- incomes ----------
+-- Extra income received after the plan was made (lib/income.ts). Not a transaction: a dated positive credit to the month's money.
+-- DEPLOY THIS BEFORE THE APP VERSION THAT SYNCS `incomes`: a client pulling a missing table is told it is optional, but pushes fail.
+create table if not exists public.incomes (
+  id uuid primary key,
+  user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  client_updated_at bigint not null,
+  updated_at timestamptz not null default now(),
+  deleted_at timestamptz,
+  amount bigint not null check (amount > 0),
+  source text not null,
+  received_on date not null,
+  event text,
+  payment text,
+  note text,
+  created_at bigint not null
+);
+create index if not exists idx_incomes_user_updated on public.incomes (user_id, updated_at, id);
+alter table public.incomes add column if not exists version bigint not null default 1;
+drop trigger if exists trg_incomes_lww on public.incomes;
+create trigger trg_incomes_lww before update on public.incomes
+  for each row execute function public.stash_lww_guard();
+drop trigger if exists trg_incomes_touch on public.incomes;
+create trigger trg_incomes_touch before insert or update on public.incomes
+  for each row execute function public.stash_touch();
+alter table public.incomes enable row level security;
+revoke all on public.incomes from anon;
+drop policy if exists incomes_own on public.incomes;
+create policy incomes_own on public.incomes for all
+  using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
+alter table public.incomes drop constraint if exists incomes_shape_check;
+alter table public.incomes add constraint incomes_shape_check check (
+  length(source) between 1 and 40 and length(coalesce(note, '')) <= 200 and length(coalesce(event, '')) <= 80
+) not valid;
+
 -- ---------- feature_data ----------
 create table if not exists public.feature_data (
   id uuid primary key,
@@ -468,7 +503,7 @@ create or replace function public.push_changes(p_mutation_id uuid, p_changes jso
 returns jsonb language plpgsql as $$
 declare
   v_uid uuid := auth.uid();
-  v_tables constant text[] := array['plans', 'categories', 'events', 'transactions', 'loans', 'leftover_savings'];
+  v_tables constant text[] := array['plans', 'categories', 'events', 'transactions', 'loans', 'incomes', 'leftover_savings'];
   t text;
   r jsonb;
   v_cur jsonb;
@@ -606,7 +641,7 @@ create or replace function public.purge_deleted_data(p_older_than interval defau
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare
   v_cut timestamptz := now() - p_older_than;
-  v_tx bigint; v_ev bigint; v_cat bigint; v_pl bigint; v_mut bigint; v_lo bigint; v_ln bigint;
+  v_tx bigint; v_ev bigint; v_cat bigint; v_pl bigint; v_mut bigint; v_lo bigint; v_ln bigint; v_in bigint;
 begin
   delete from public.transactions where deleted_at is not null and deleted_at < v_cut;
   get diagnostics v_tx = row_count;
@@ -620,9 +655,11 @@ begin
   get diagnostics v_lo = row_count;
   delete from public.loans where deleted_at is not null and deleted_at < v_cut;
   get diagnostics v_ln = row_count;
+  delete from public.incomes where deleted_at is not null and deleted_at < v_cut;
+  get diagnostics v_in = row_count;
   delete from public.push_mutations where created_at < now() - interval '14 days';
   get diagnostics v_mut = row_count;
-  return jsonb_build_object('loans', v_ln, 'leftover_savings', v_lo, 'transactions', v_tx, 'events', v_ev, 'categories', v_cat, 'plans', v_pl, 'push_mutations', v_mut);
+  return jsonb_build_object('incomes', v_in, 'loans', v_ln, 'leftover_savings', v_lo, 'transactions', v_tx, 'events', v_ev, 'categories', v_cat, 'plans', v_pl, 'push_mutations', v_mut);
 end $$;
 revoke all on function public.purge_deleted_data(interval) from public, anon, authenticated;
 

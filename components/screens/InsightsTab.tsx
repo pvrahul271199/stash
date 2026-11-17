@@ -4,7 +4,8 @@ import { DayChart, type ChartMode } from '../charts/DayChart';
 import { CategoryList, Donut } from '../charts/Donut';
 import { TimeOfDayChart, WeekdayChart } from '../charts/WeekdayTime';
 import { Note } from '../ui/Chip';
-import { dayRowsOf, useSavedFromLeftovers, useAllCycles, useCategories, useCycleEntries, useEvents } from '@/db/queries';
+import { dayRowsOf, useSavedFromLeftovers, useAllCycles, useCategories, useCycleEntries, useEvents, useIncomes } from '@/db/queries';
+import { incomeBetween } from '@/lib/income';
 import type { Entry, Plan } from '@/db/schema';
 import { EditSpendSheet } from './EditSpendSheet';
 import { monthLabel, type DerivedCycle } from '@/lib/period';
@@ -70,6 +71,7 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
   const cats = useCategories();
   const leftovers = useSavedFromLeftovers();
   const events = useEvents();
+  const incomes = useIncomes() ?? [];
 
   // Clear sub-type selection whenever the parent category changes
   useEffect(() => {
@@ -188,6 +190,8 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
       : null;
   const paceLevel: Level | null = paceRatio == null ? null : paceRatio <= 1 ? 'good' : paceRatio <= 1.1 ? 'warn' : 'bad';
 
+  const cycleIncome = incomeBetween(incomes, cycle.monthStart, cycle.monthEnd);
+
   return (
     <div className="flex-1 overflow-y-auto px-6 pb-8 pt-6" style={{ overflowAnchor: 'none' }}>
       <div className="flex items-center justify-between gap-3">
@@ -238,6 +242,7 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
           {Math.round(summary.spentSoFar).toLocaleString(currency.locale)}
         </p>
         <p className="mt-1 text-[14px] text-soft">of {inr(cycle.planAmount)} to live on</p>
+        {cycleIncome > 0 && <p className="num mt-0.5 text-[12px] text-faint">+ {inr(cycleIncome)} income this month, not counted as spent</p>}
         <div
           className="relative mt-5 h-3 rounded-full bg-tint"
           role="progressbar"

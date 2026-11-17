@@ -2,12 +2,12 @@
 import { track, trackOnce } from '@/lib/analytics';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { BackIcon, IconButton, PrimaryButton } from '../ui/Button';
-import { Chip } from '../ui/Chip';
 import { Keypad } from '../ui/Keypad';
 import { CALC_INIT, OP_SYMBOL, calcPress, calcResult, isOp, type CalcState } from '../../lib/calc';
 import { CategoryPicker } from './CategoryPicker';
 import { LendFields, NEW_LEND_DRAFT, type LendDraft } from './LendFields';
 import {
+  addIncome,
   addLoan,
   addSpend,
   addSubcategory,
@@ -28,6 +28,7 @@ import { MAX_NAME } from '@/lib/categories';
 import { dateOfDay, daysBetween, formatShort, formatWithWeekday, todayISO } from '@/lib/dates';
 import { quickChips } from '@/lib/suggestions';
 import { DEFAULT_LOAN_KINDS, LEND_CATEGORY, dueFromChoice, isLoanKind, validateLoan } from '@/lib/lend';
+import { DEFAULT_INCOME_SOURCE, validateIncome } from '@/lib/income';
 import { inr, num } from '@/lib/format';
 import { useCurrency } from '@/lib/currency';
 import { useToast } from '@/store/toast';
@@ -46,6 +47,7 @@ export function LogSpend({
   plan,
   targetDay,
   targetDate,
+  initialMode = 'spend',
   onClose,
 }: {
   cycle: DerivedCycle;
@@ -54,6 +56,8 @@ export function LogSpend({
   targetDay?: number;
   /** Optional specific ISO date (yyyy-mm-dd) to log into from calendar. */
   targetDate?: string;
+  /** Which tab to open on (the User tab opens it on Income). */
+  initialMode?: 'spend' | 'lend' | 'income';
   onClose: () => void;
 }) {
   const [calc, setCalc] = useState<CalcState>(CALC_INIT);
@@ -65,7 +69,7 @@ export function LogSpend({
   const [eventErr, setEventErr] = useState<string | null>(null);
   const [view, setView] = useState<'keypad' | 'picker'>('keypad');
   /** Spend | Lend: Lend asks who / will they pay / by when instead of payment and note, and saves a loan too. */
-  const [mode, setMode] = useState<'spend' | 'lend'>('spend');
+  const [mode, setMode] = useState<'spend' | 'lend' | 'income'>(initialMode);
   const [lend, setLend] = useState<LendDraft>(NEW_LEND_DRAFT);
   const loans = useLoans() ?? [];
   const people = [...new Set(loans.map((l) => l.person).filter(Boolean))].slice(0, 20);
@@ -231,14 +235,46 @@ export function LogSpend({
     try {
       await addLoan(
         cycle,
-        { amount, person: lend.person, kind: lend.kind, holdBack: lend.holdBack, dueDate: dueDate && dueDate < targetIso ? targetIso : dueDate, payment },
+        { amount, person: lend.person, kind: lend.kind, dueDate: dueDate && dueDate < targetIso ? targetIso : dueDate, payment },
         new Date(),
         effectiveDay ?? undefined,
         targetDate,
       );
       navigator.vibrate?.(10);
-      posthog.capture('lend_logged', { kind: lend.kind, has_due_date: dueDate != null, hold_back: lend.holdBack });
+      posthog.capture('lend_logged', { kind: lend.kind, has_due_date: dueDate != null });
       toast(`Tracking ${inr(amount)} lent to ${lend.person.trim() || lend.kind}. See History > Lend`);
+      onClose();
+    } catch {
+      toast('Couldn’t save that. Please try again.', 'warm');
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  }
+
+  /** Income mode's Save: money in. Raises this month's money, so every remaining day gets more. */
+  async function commitIncome() {
+    if (savingRef.current) return;
+    const source = DEFAULT_INCOME_SOURCE;
+    const bad = validateIncome({ amount, source });
+    if (bad) {
+      toast(bad, 'warm');
+      if (amount <= 0) setView('keypad');
+      return;
+    }
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      const remDays = Math.max(1, daysLeft(cycle));
+      await addIncome(cycle, { amount, source, payment, note: note.trim() || null }, effectiveDay ?? undefined, targetDate);
+      navigator.vibrate?.(10);
+      posthog.capture('income_logged', { source, entry_timing: isOutsideActiveCycle ? 'historical' : isOtherDay ? (isFutureDay ? 'future' : 'past') : 'current_day' });
+      const inThisMonth = !isOutsideActiveCycle;
+      toast(
+        inThisMonth
+          ? `Added +${inr(amount)}. Daily is now ${inr((cycle.pool + amount) / remDays)}`
+          : `Added +${inr(amount)} on ${targetDateLabel}`,
+      );
       onClose();
     } catch {
       toast('Couldn’t save that. Please try again.', 'warm');
@@ -277,13 +313,14 @@ export function LogSpend({
           return;
         }
         if (mode === 'lend') void commitLend();
+        else if (mode === 'income') void commitIncome();
         else void commit({ label: 'Sort later' });
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [press, onClose, amount, view, calc.op, mode, lend]);
+  }, [press, onClose, amount, view, calc.op, mode, lend, payment, note]);
 
   const shown = String(amount).length;
   const size = shown <= 5 ? 72 : shown === 6 ? 60 : 52;
@@ -292,7 +329,7 @@ export function LogSpend({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Log a spend"
+      aria-label={mode === 'income' ? 'Add income' : 'Log a spend'}
       className="absolute inset-0 z-40 flex flex-col bg-white px-5"
       style={{ paddingTop: 'calc(var(--safe-top) + 6px)', paddingBottom: 'calc(var(--safe-bottom) + 14px)' }}
     >
@@ -542,17 +579,17 @@ export function LogSpend({
             )}
           </div>
 
-          <div role="tablist" aria-label="Spend or lend" className="mx-auto mt-2 flex w-fit rounded-full bg-tint p-0.5">
-            {(['spend', 'lend'] as const).map((m) => (
+          <div role="tablist" aria-label="Spend, lend or income" className="mx-auto mt-2 flex w-fit rounded-full bg-tint p-0.5">
+            {(['spend', 'lend', 'income'] as const).map((m) => (
               <button
                 key={m}
                 type="button"
                 role="tab"
                 aria-selected={mode === m}
                 onClick={() => setMode(m)}
-                className={`h-7 min-h-0 rounded-full px-5 text-[12px] font-medium transition-colors ${mode === m ? 'bg-ink text-white' : 'text-soft'}`}
+                className={`h-7 min-h-0 rounded-full px-4 text-[12px] font-medium transition-colors ${mode === m ? 'bg-ink text-white' : 'text-soft'}`}
               >
-                {m === 'spend' ? 'Spend' : 'Lend'}
+                {m === 'spend' ? 'Spend' : m === 'lend' ? 'Lend' : 'Income'}
               </button>
             ))}
           </div>
@@ -587,12 +624,14 @@ export function LogSpend({
               )}
             </div>
             <div className="num flex items-baseline justify-center" style={{ fontSize: size, lineHeight: 1.05 }}>
-              <span className="mr-1 text-faint" aria-hidden="true">{currency.symbol}</span>
+              <span className={`mr-1 transition-colors ${mode === 'income' ? '' : 'text-faint'}`} style={mode === 'income' ? { color: '#388E3C' } : undefined} aria-hidden="true">{currency.symbol}</span>
               <span className={amount === 0 ? 'text-faint' : 'text-ink'} aria-label={`Amount ${amount} ${currency.code}`}>
                 {amount === 0 ? '0' : num(amount)}
               </span>
             </div>
 
+            {/* Same height and same top for Spend, Lend and Income, so nothing moves when the tab changes. */}
+            <div className="mt-3 flex h-[184px] w-full flex-col items-center justify-start">
             {mode === 'lend' ? (
               <LendFields
                 draft={lend}
@@ -603,7 +642,7 @@ export function LogSpend({
                 onAddKind={async (name) => (lendCat ? addSubcategory(lendCat.id, name) : 'The Lend category was removed. Add it back in Categories.')}
               />
             ) : (
-            <div className="mt-2 flex w-fit flex-col items-stretch">
+            <div className="flex w-fit flex-col items-stretch">
             <div className="inline-flex rounded-full bg-tint p-0.5" role="group" aria-label="Payment mode">
               {PAYMENT_MODES.map((m) => (
                 <button
@@ -693,8 +732,8 @@ export function LogSpend({
                         setNoteOpen(false);
                       }
                     }}
-                    placeholder="Note"
-                    aria-label="Spend note"
+                    placeholder={mode === 'income' ? 'Where did this come from?' : 'Note'}
+                    aria-label={mode === 'income' ? 'Income note' : 'Spend note'}
                     autoFocus
                     maxLength={60}
                     className="h-6 min-h-0 w-0 min-w-0 flex-1 bg-transparent text-[12px] text-ink placeholder:text-faint"
@@ -721,9 +760,16 @@ export function LogSpend({
             </div>
             </div>
             )}
+            {mode === 'income' && amount > 0 && (
+              <p className="mt-3 max-w-[260px] self-center text-center text-[13px] text-soft">
+                Your {Math.max(1, daysLeft(cycle))} {daysLeft(cycle) === 1 ? 'day' : 'days'} left go from{' '}
+                <span className="num font-semibold text-ink">{inr(todayAllowance(cycle))}</span> to{' '}
+                <span className="num font-semibold text-ink">{inr((cycle.pool + amount) / Math.max(1, daysLeft(cycle)))}</span> a day.
+              </p>
+            )}
 
             {mode === 'spend' && isOtherDay && !isOutsideActiveCycle && (
-              <div className="mt-5 flex flex-col items-center gap-1">
+              <div className="mt-3 flex flex-col items-center gap-1">
                 <div className="inline-flex items-center gap-2 rounded-full border border-line bg-white py-1 pl-1.5 pr-1">
                   <button
                     type="button"
@@ -764,40 +810,45 @@ export function LogSpend({
                 </p>
               </div>
             )}
+            </div>
           </div>
 
+          <div className="mb-2 min-h-[70px]">
           {mode === 'spend' && (
-          <div className="mb-2 flex flex-wrap justify-center gap-1">
+          <div className="flex flex-wrap justify-center gap-1.5">
             {chips.map((c) => (
-              <Chip
+              <button
                 key={`${c.category}::${c.subcategory}`}
+                type="button"
                 onClick={() => commit({ label: c.subcategory, category: c.category, subcategory: c.subcategory })}
-                className="h-7 min-h-0 px-2.5 text-[11px]"
                 title={c.category}
+                className="h-8 min-h-0 rounded-full border border-line bg-white px-3.5 text-[12px] font-medium text-ink transition-colors active:bg-tint"
               >
                 {c.label}
-              </Chip>
+              </button>
             ))}
-            <Chip
-              dashed
+            <button
+              type="button"
               onClick={() => {
                 if (amount <= 0) toast('Enter an amount first', 'warm');
                 else setView('picker');
               }}
-              className="h-7 min-h-0 px-2.5 text-[11px]"
+              className="flex h-8 min-h-0 items-center gap-1 rounded-full border border-line bg-white px-3 text-[12px] font-medium text-ink transition-colors active:bg-tint"
             >
               More
-            </Chip>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+            </button>
           </div>
           )}
+          </div>
 
           <Keypad onKey={press} pendingOp={calc.op} opSelected={calc.digits === ''} calc />
           <PrimaryButton
             disabled={saving}
             className="mt-2 h-[46px] min-h-0 text-[15px]"
-            onClick={() => (mode === 'lend' ? commitLend() : commit({ label: 'Sort later' }))}
+            onClick={() => (mode === 'lend' ? commitLend() : mode === 'income' ? commitIncome() : commit({ label: 'Sort later' }))}
           >
-            {saving ? 'Saving…' : mode === 'lend' ? 'Save lend' : 'Save'}
+            {saving ? 'Saving…' : mode === 'lend' ? 'Save lend' : mode === 'income' ? 'Add income' : 'Save'}
           </PrimaryButton>
         </>
       )}
