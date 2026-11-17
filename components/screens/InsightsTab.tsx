@@ -26,7 +26,7 @@ import {
 } from '@/lib/insights';
 import { compactINR } from '@/lib/history';
 import { dateOfDay, formatShort, formatWithWeekday } from '@/lib/dates';
-import { inr } from '@/lib/format';
+import { inr1, num1 } from '@/lib/format';
 import { useCurrency } from '@/lib/currency';
 import { colors, categoryRamp } from '@/theme/tokens';
 import { useUI } from '@/store/ui';
@@ -239,10 +239,10 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
         </div>
         <p className="num mt-1 text-big text-ink">
           <span className="text-faint">{currency.symbol}{space}</span>
-          {Math.round(summary.spentSoFar).toLocaleString(currency.locale)}
+          {num1(summary.spentSoFar)}
         </p>
-        <p className="mt-1 text-[14px] text-soft">of {inr(cycle.planAmount)} to live on</p>
-        {cycleIncome > 0 && <p className="num mt-0.5 text-[12px] text-faint">+ {inr(cycleIncome)} income this month, not counted as spent</p>}
+        <p className="mt-1 text-[14px] text-soft">of {inr1(cycle.planAmount)} to live on</p>
+        {cycleIncome > 0 && <p className="num mt-0.5 text-[12px] text-faint">+ {inr1(cycleIncome)} income this month, not counted as spent</p>}
         <div
           className="relative mt-5 h-3 rounded-full bg-tint"
           role="progressbar"
@@ -371,7 +371,7 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
                     }`}
                   >
                     <span>{t.name}</span>
-                    <span className="num text-[11px] text-soft">{inr(t.total)}</span>
+                    <span className="num text-[11px] text-soft">{inr1(t.total)}</span>
                   </button>
                 );
               })}
@@ -402,7 +402,7 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
                   }`}
                 >
                   <span>{ev.name}</span>
-                  <span className="num text-[11px] text-soft">{inr(ev.total)}</span>
+                  <span className="num text-[11px] text-soft">{inr1(ev.total)}</span>
                 </button>
               ))}
             </div>
@@ -465,7 +465,7 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
                         {e.payment ? ` · ${e.payment}` : ''}
                       </p>
                     </div>
-                    <p className="num text-[16px] font-semibold text-ink">{inr(e.amount)}</p>
+                    <p className="num text-[16px] font-semibold text-ink">{inr1(e.amount)}</p>
                   </button>
                 </li>
               ))}
@@ -507,7 +507,7 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
                         {ev.pct > 0 ? ` · ${Math.round(ev.pct)}% of spending` : ''}
                       </p>
                     </div>
-                    <p className="num text-[20px] font-semibold text-ink">{inr(ev.total)}</p>
+                    <p className="num text-[20px] font-semibold text-ink">{inr1(ev.total)}</p>
                   </button>
 
                   <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-tint">
@@ -538,7 +538,7 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
                             style={{ background: colorOf[cat.name] ?? colors.ink }}
                           />
                           <span>{cat.name}</span>
-                          <span className="num opacity-80">{inr(cat.total)}</span>
+                          <span className="num opacity-80">{inr1(cat.total)}</span>
                         </button>
                       ))}
                     </div>
@@ -579,7 +579,7 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
                     </div>
                   </div>
                   <div className="text-right">
-                    <p className="num text-[16px] font-semibold text-ink">{inr(p.total)}</p>
+                    <p className="num text-[16px] font-semibold text-ink">{inr1(p.total)}</p>
                     <p className="num text-[12px] text-soft">{Math.round(p.pct)}%</p>
                   </div>
                 </li>
@@ -609,23 +609,23 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
           {frequent ? (
             <Note tone="neutral">
               <span className="font-semibold">{frequent.label}</span> is your most frequent spend: {frequent.count} times,{' '}
-              {inr(frequent.total)} in total.
+              {inr1(frequent.total)} in total.
             </Note>
           ) : (
             <p className="text-body text-soft">Patterns show up once you have a few repeat spends.</p>
           )}
           {leftovers.byMonth.some((l) => l.monthId === cycle.id) && (
             <Note tone="good">
-              <span className="font-semibold">{inr(leftovers.byMonth.find((l) => l.monthId === cycle.id)!.amount)}</span> left over this month was moved to savings.
+              <span className="font-semibold">{inr1(leftovers.byMonth.find((l) => l.monthId === cycle.id)!.amount)}</span> left over this month was moved to savings.
             </Note>
           )}
           {leftovers.total > 0 && (
             <Note tone="good">
-              <span className="font-semibold">{inr(leftovers.total)}</span> saved from leftovers
+              <span className="font-semibold">{inr1(leftovers.total)}</span> saved from leftovers
               {leftovers.months > 1 ? ` across ${leftovers.months} months` : ''}.
             </Note>
           )}
-          {savings > 0 && <Note tone="adjust">{inr(savings)} taken from savings this month.</Note>}
+          {savings > 0 && <Note tone="adjust">{inr1(savings)} taken from savings this month.</Note>}
         </div>
       </Section>
 
@@ -659,7 +659,7 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
                   </p>
                   {e.note && <p className="mt-0.5 truncate text-[12px] text-soft">{e.note}</p>}
                 </div>
-                <p className="num text-[18px] font-semibold text-ink">{inr(e.amount)}</p>
+                <p className="num text-[18px] font-semibold text-ink">{inr1(e.amount)}</p>
               </button>
               </li>
             ))}

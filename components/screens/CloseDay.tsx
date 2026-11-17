@@ -1,5 +1,6 @@
 'use client';
 import { entryLines } from '@/lib/entryDisplay';
+import { roundMoney } from '@/lib/money';
 import { BackIcon, IconButton, PrimaryButton } from '../ui/Button';
 import { removeEntry } from '@/db/queries';
 import { useToast } from '@/store/toast';
@@ -33,7 +34,7 @@ export function CloseDay({
   const { tomorrowAllowance, delta, kind } = closeDay(cycle, spent);
   const daysAfter = Math.max(1, cycle.totalDays - cycle.currentDay);
   const days = `${daysAfter} ${daysAfter === 1 ? 'day' : 'days'}`;
-  const change = inr(Math.abs(Math.round(delta)));
+  const change = inr(Math.abs(roundMoney(delta)));
   const note = allowance <= 0
     ? "This month's spending money is used up."
     : kind === 'onplan'

@@ -6,6 +6,7 @@ import { recordRepayment, reopenLoan, setLoanDue, undoLastRepayment, useLoans, u
 import type { Loan } from '@/db/schema';
 import { addDays, formatShort } from '@/lib/dates';
 import { inr } from '@/lib/format';
+import { cleanAmountInput, roundMoney } from '@/lib/money';
 import { closedLoans, dueText, loanName, loanStatus, openLoans, remaining, repaid, summarize } from '@/lib/lend';
 import { useToast } from '@/store/toast';
 
@@ -36,7 +37,7 @@ export function LendTab() {
     setOpenId(null);
   }
   async function partPaid(l: Loan) {
-    const a = Math.min(Number(partAmt) || 0, remaining(l));
+    const a = Math.min(roundMoney(Number(partAmt) || 0), remaining(l));
     if (a <= 0) {
       toast('Enter what came back', 'warm');
       return;
@@ -142,10 +143,10 @@ export function LendTab() {
               <div className="mt-2 flex gap-2">
                 <input
                   aria-label="Amount received"
-                  inputMode="numeric"
+                  inputMode="decimal"
                   autoFocus
                   value={partAmt}
-                  onChange={(e) => setPartAmt(e.target.value.replace(/\D/g, '').slice(0, 7))}
+                  onChange={(e) => setPartAmt(cleanAmountInput(e.target.value))}
                   placeholder="Amount received"
                   className="num h-11 min-w-0 flex-1 rounded-key border border-line px-3 text-[15px] text-ink placeholder:text-faint"
                 />

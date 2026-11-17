@@ -1,3 +1,4 @@
+import { roundMoney } from './money';
 /** Pure budget logic. All money is integer rupees; round only for display.
  *  Nothing here touches the database, so everything is unit-testable. */
 
@@ -40,7 +41,7 @@ export interface PlanInput {
 }
 
 export function sumItems(items: PlanItem[] | undefined): number {
-  return (items ?? []).reduce((t, i) => t + (Number.isFinite(i.amount) ? Math.max(0, Math.round(i.amount)) : 0), 0);
+  return roundMoney((items ?? []).reduce((t, i) => t + (Number.isFinite(i.amount) ? Math.max(0, roundMoney(i.amount)) : 0), 0));
 }
 
 /* ---------- plan ---------- */
@@ -71,7 +72,7 @@ export function daysLeft(s: Pick<CycleState, 'totalDays' | 'currentDay'>): numbe
 export function todayAllowance(s: CycleState): number {
   const left = daysLeft(s);
   if (left <= 0) return 0;
-  return s.pool / left;
+  return roundMoney(s.pool / left);
 }
 
 export interface SpendLike {
@@ -82,11 +83,11 @@ export interface SpendLike {
 }
 
 export function spentToday(entries: SpendLike[]): number {
-  return entries.reduce((sum, e) => (e.fromSavings || e.outsideBudget ? sum : sum + e.amount), 0);
+  return roundMoney(entries.reduce((sum, e) => (e.fromSavings || e.outsideBudget ? sum : sum + e.amount), 0));
 }
 
 export function leftToday(allowance: number, spent: number): number {
-  return allowance - spent;
+  return roundMoney(allowance - spent);
 }
 
 /** What the Today screen shows: can go negative when you've spent more than today's amount. */
@@ -124,9 +125,9 @@ export interface CloseResult {
 export function closeDay(s: CycleState, spent: number, status: DayRecord['status'] = 'closed'): CloseResult {
   const allowance = todayAllowance(s);
   const record: DayRecord = { day: s.currentDay, allowanceAtStart: allowance, spent, status };
-  const next: CycleState = { ...s, pool: s.pool - spent, currentDay: s.currentDay + 1 };
+  const next: CycleState = { ...s, pool: roundMoney(s.pool - spent), currentDay: s.currentDay + 1 };
   const tomorrow = todayAllowance(next);
-  const delta = tomorrow - allowance;
+  const delta = roundMoney(tomorrow - allowance);
   const kind: CloseKind = Math.abs(delta) < 1 ? 'onplan' : delta > 0 ? 'less' : 'more';
   let message: string;
   if (kind === 'onplan') message = 'Right on plan. Tomorrow looks the same.';
@@ -274,7 +275,7 @@ export function rollupCycle(
   for (let d = 1; d <= lastClosed; d++) {
     const row = perDay.get(d) ?? { spent: 0, poolSpent: 0 };
     const credit = creditOn.get(d) ?? 0;
-    const r = closeDay(state, row.poolSpent - credit, estimated.has(d) ? 'estimated' : 'closed');
+    const r = closeDay(state, roundMoney(row.poolSpent - credit), estimated.has(d) ? 'estimated' : 'closed');
     days.push({ ...r.record, spent: row.spent - credit });
     state = r.state;
   }
@@ -285,5 +286,5 @@ export function rollupCycle(
     if (d > c.currentDay && d <= c.totalDays) pool -= row.poolSpent;
   }
   for (const [d, credit] of creditOn) if (d >= c.currentDay) pool += credit;
-  return { days, pool, fromSavingsTotal };
+  return { days, pool: roundMoney(pool), fromSavingsTotal: roundMoney(fromSavingsTotal) };
 }

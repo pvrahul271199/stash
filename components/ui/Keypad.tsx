@@ -4,10 +4,10 @@ import { BackIcon } from './Button';
 import type { Op } from '../../lib/calc';
 
 // 4 columns: digits on the left, operators down the right edge.
-const KEYS = ['1', '2', '3', '/', '4', '5', '6', '*', '7', '8', '9', '-', '00', '0', 'del', '+'] as const;
+const KEYS = ['1', '2', '3', '/', '4', '5', '6', '*', '7', '8', '9', '-', '.', '0', 'del', '+'] as const;
 const PLAIN_KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '00', '0', 'del'] as const;
 const GLYPH: Record<string, string> = { '/': '÷', '*': '×', '-': '−', '+': '+' };
-const LABEL: Record<string, string> = { '/': 'Divide', '*': 'Multiply', '-': 'Subtract', '+': 'Add', '=': 'Equals', del: 'Delete' };
+const LABEL: Record<string, string> = { '.': 'Decimal point', '/': 'Divide', '*': 'Multiply', '-': 'Subtract', '+': 'Add', '=': 'Equals', del: 'Delete' };
 
 const CompactDeleteIcon = () => (
   <svg
@@ -43,8 +43,7 @@ export function Keypad({
     <div className={`grid ${calc ? 'grid-cols-4' : 'grid-cols-3'} gap-1.5`} role="group" aria-label="Amount keypad">
       {(calc ? KEYS : PLAIN_KEYS).map((key) => {
         const isOpKey = key in GLYPH;
-        // While an operation is pending the spare "00" key becomes "=".
-        const k = key === '00' && pendingOp ? '=' : key;
+        const k = key === '00' && pendingOp ? '=' : key; // plain pad only: "00" becomes "=" (the calc pad has "." instead)
         const active = isOpKey && opSelected && pendingOp === key;
         return (
           <button

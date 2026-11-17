@@ -1,5 +1,5 @@
 'use client';
-import { inr } from '@/lib/format';
+import { inr1 } from '@/lib/format';
 import type { CategoryTotal } from '@/lib/insights';
 
 const C = 110;
@@ -59,7 +59,7 @@ export function Donut({
               role="button"
               tabIndex={0}
               aria-pressed={on}
-              aria-label={`${s.name}, ${Math.round(s.pct)} percent, ${inr(s.total)}`}
+              aria-label={`${s.name}, ${Math.round(s.pct)} percent, ${inr1(s.total)}`}
               onClick={() => onFocus(s.name)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
@@ -76,13 +76,13 @@ export function Donut({
         {sel ? (
           <>
             <span className="text-[13px] font-semibold text-soft">{sel.name}</span>
-            <span className="num text-[26px] text-ink">{inr(sel.total)}</span>
+            <span className="num text-[26px] text-ink">{inr1(sel.total)}</span>
             <span className="text-[12px] text-faint">{Math.round(sel.pct)}% of spending</span>
           </>
         ) : (
           <>
             <span className="text-[13px] font-semibold text-soft">Total</span>
-            <span className="num text-[26px] text-ink">{inr(total)}</span>
+            <span className="num text-[26px] text-ink">{inr1(total)}</span>
             <span className="text-[12px] text-faint">
               {slices.length} {slices.length === 1 ? 'category' : 'categories'}
             </span>
@@ -123,7 +123,7 @@ export function CategoryList({
               <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: colorOf[s.name] }} />
               <span className="flex-1 text-[15px] font-medium text-ink">{s.name}</span>
               <span className="text-[13px] text-faint">{Math.round(s.pct)}%</span>
-              <span className="num w-[84px] text-right text-[17px] text-ink">{inr(s.total)}</span>
+              <span className="num w-[84px] text-right text-[17px] text-ink">{inr1(s.total)}</span>
             </button>
             {on && (
               <ul className="mb-3 ml-5 flex flex-col gap-1.5">
@@ -146,7 +146,7 @@ export function CategoryList({
                           <span className={typeSelected ? 'font-semibold text-ink' : 'text-soft'}>
                             {t.name}
                           </span>
-                          <span className="num font-medium text-ink">{inr(t.total)}</span>
+                          <span className="num font-medium text-ink">{inr1(t.total)}</span>
                         </div>
                         <div className="mt-1 h-1.5 rounded-full bg-tint">
                           <div

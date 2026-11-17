@@ -56,6 +56,7 @@ import { getAuth } from '@/lib/auth';
 import { LEND_CATEGORY, remaining, validateLoan, loanEffects, type LoanKind } from '@/lib/lend';
 import { DEFAULT_INCOME_SOURCE, incomeEffects, validateIncome } from '@/lib/income';
 import { uuidv7 } from '@/lib/uuid';
+import { roundMoney } from '@/lib/money';
 
 /* ---------- helpers ---------- */
 
@@ -523,7 +524,7 @@ async function persistStorage() {
   }
 }
 
-const nonNeg = (n: number) => Math.max(0, Math.round(n));
+const nonNeg = (n: number) => Math.max(0, roundMoney(n));
 
 /**
  * Logging on a day of the first month that is before budgeting began (the month strip shows the whole month) pulls the
@@ -684,7 +685,7 @@ async function buildTxn(
     id: txnId(),
     updatedAt: Date.now(),
     txnDate: entryDate,
-    amount: Math.round(spend.amount),
+    amount: roundMoney(spend.amount),
     label: spend.label,
     type: linkedCat?.name ?? resolved.category,
     categoryId: linkedCat?.id ?? null,
@@ -747,7 +748,7 @@ export async function updateEntry(id: string, patch: SpendUpdate): Promise<Entry
     const next: Txn = {
       ...prev,
       updatedAt: Date.now(),
-      amount: patch.amount != null ? Math.max(1, Math.round(patch.amount)) : prev.amount,
+      amount: patch.amount != null ? Math.max(0.01, roundMoney(patch.amount)) : prev.amount,
       label: patch.label != null ? patch.label.trim() || prev.label : prev.label,
       type: patch.category != null ? (cat?.name ?? patch.category) : prev.type,
       categoryId: patch.category != null ? (cat?.id ?? null) : prev.categoryId,
@@ -791,7 +792,7 @@ export async function addIncome(
   targetDate?: string,
 ): Promise<Income> {
   const db = getDB();
-  const amount = Math.round(input.amount);
+  const amount = roundMoney(input.amount);
   const source = (input.source ?? DEFAULT_INCOME_SOURCE).trim();
   const bad = validateIncome({ amount, source }, MAX_NAME);
   if (bad) throw new Error(bad);
@@ -856,7 +857,7 @@ export async function addLoan(
   targetDate?: string,
 ): Promise<{ loan: Loan; entry: Entry }> {
   const db = getDB();
-  const amount = Math.round(input.amount);
+  const amount = roundMoney(input.amount);
   const person = input.person.trim();
   const kind = input.kind.trim();
   const txn = await buildTxn(
@@ -939,7 +940,7 @@ async function patchLoan(id: string, f: (l: Loan) => Loan | null): Promise<Loan 
 export async function recordRepayment(id: string, amount: number, date: string = todayISO()): Promise<Loan | null> {
   return patchLoan(id, (l) => {
     const owed = remaining(l);
-    const a = Math.min(Math.round(amount), owed);
+    const a = Math.min(roundMoney(amount), owed);
     if (!(a > 0)) return null;
     return { ...l, repayments: [...l.repayments, { id: uuid(), amount: a, date }] };
   });

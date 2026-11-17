@@ -1,5 +1,6 @@
 'use client';
 import { create } from 'zustand';
+import { formatNumber, roundMoney, roundMoney1 } from './money';
 
 export interface CurrencyInfo {
   code: string;
@@ -99,10 +100,11 @@ export function setStoredCurrency(code: string): CurrencyInfo {
 export function formatWithCurrency(
   amount: number,
   currency: CurrencyInfo = useCurrencyStore.getState().currency,
+  places: 1 | 2 = 2,
 ): string {
-  const r = Math.round(amount);
+  const r = places === 1 ? roundMoney1(amount) : roundMoney(amount);
   const sign = r < 0 ? '-' : '';
-  const formatted = Math.abs(r).toLocaleString(currency.locale);
+  const formatted = formatNumber(r, currency.locale, places);
   const space = currency.symbol.length > 1 ? ' ' : '';
   return `${sign}${currency.symbol}${space}${formatted}`;
 }

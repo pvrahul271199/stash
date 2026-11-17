@@ -1,5 +1,6 @@
+import { roundMoney1 } from './money';
 import { dateOfDay } from './dates';
-import { inr } from './format';
+import { inr1 } from './format';
 import {
   biggestSpends,
   buildDays,
@@ -79,7 +80,7 @@ export function buildRecap(cycle: InsightCycle, rows: InsightDayRow[], entries: 
     categories: top,
     busiestDay: busiest ? { date: dateOfDay(cycle.startDate, busiest.day), total: busiest.totalSpent } : null,
     biggest: big ? { label: big.label, category: big.category, amount: big.amount, date: (big as RecapEntry).date } : null,
-    topWeekday: best && withSpend.length >= 2 ? { name: best.name, avg: Math.round(best.avg) } : null,
+    topWeekday: best && withSpend.length >= 2 ? { name: best.name, avg: roundMoney1(best.avg) } : null,
     frequent: freq,
     topEvent: ev && ev.total > 0 ? { name: ev.name, total: ev.total } : null,
   };
@@ -88,7 +89,7 @@ export function buildRecap(cycle: InsightCycle, rows: InsightDayRow[], entries: 
 /** One honest sentence about how the month went against its spending money. */
 export function recapStory(planAmount: number, pool: number): string {
   if (planAmount <= 0) return 'Here is how the month went.';
-  if (pool < 0) return `You went ${inr(-pool)} over your spending money.`;
+  if (pool < 0) return `You went ${inr1(-pool)} over your spending money.`;
   const spentPct = Math.round(((planAmount - pool) / planAmount) * 100);
   if (pool === 0) return 'You used every bit of your spending money.';
   if (spentPct <= 60) return `You spent ${spentPct}% of your spending money and kept the rest.`;

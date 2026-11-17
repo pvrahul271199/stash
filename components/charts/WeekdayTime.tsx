@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { inr } from '@/lib/format';
+import { inr1 } from '@/lib/format';
 import { bucketDetail, weekdayDetail, type TimeBucket, type WeekdayStat } from '@/lib/insights';
 
 export function WeekdayChart({
@@ -33,11 +33,11 @@ export function WeekdayChart({
               key={s.wd}
               onClick={() => setSel(on ? null : s.wd)}
               aria-pressed={on}
-              aria-label={`${s.name}, average ${inr(s.avg)}`}
+              aria-label={`${s.name}, average ${inr1(s.avg)}`}
               className="flex h-full flex-1 flex-col items-center justify-end gap-1"
               style={{ opacity: dim ? 0.3 : 1, transition: 'opacity .15s' }}
             >
-              <span className="num h-[18px] text-[13px] text-ink">{on ? inr(s.avg) : ''}</span>
+              <span className="num h-[18px] text-[13px] text-ink">{on ? inr1(s.avg) : ''}</span>
               <span className="w-full rounded-t-md" style={{ height: `${Math.max((s.avg / max) * 100, s.avg > 0 ? 3 : 1)}px`, background: hotColor && s.avg === max && s.avg > usual * 1.15 ? hotColor : color, maxHeight: 96 }} />
               <span
                 className={`flex h-7 w-7 items-center justify-center rounded-full text-[12px] font-semibold ${
@@ -92,7 +92,7 @@ export function TimeOfDayChart({
                 <span className="h-3 flex-1 rounded-full bg-tint">
                   <span className="block h-3 rounded-full" style={{ width: `${(b.total / max) * 100}%`, background: hotColor && b.total === max && buckets.filter((x) => x.total > 0).length > 1 ? hotColor : color }} />
                 </span>
-                <span className="num w-[72px] text-right text-[16px] text-ink">{inr(b.total)}</span>
+                <span className="num w-[72px] text-right text-[16px] text-ink">{inr1(b.total)}</span>
               </button>
             </li>
           );

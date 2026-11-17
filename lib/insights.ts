@@ -1,6 +1,6 @@
 import { weekdayOfDay } from './dates';
 import { pace, projection, todayAllowance, type CycleState } from './budget';
-import { inr } from './format';
+import { inr1 } from './format';
 
 export type DayStatus = 'closed' | 'estimated' | 'today' | 'future';
 
@@ -266,9 +266,9 @@ export function weekdayStats(days: DayPoint[], startDate: string): { stats: Week
 export function weekdayDetail(s: WeekdayStat, usual: number): string {
   if (s.count === 0) return `No ${s.name.toLowerCase()} closed yet.`;
   const diff = s.avg - usual;
-  const head = `${s.name} average ${inr(s.avg)} over ${s.count} ${s.count === 1 ? 'day' : 'days'}`;
-  if (Math.abs(diff) < 1) return `${head}, about the same as your usual ${inr(usual)}.`;
-  return `${head}, ${inr(Math.abs(diff))} ${diff > 0 ? 'more' : 'less'} than your usual ${inr(usual)}.`;
+  const head = `${s.name} average ${inr1(s.avg)} over ${s.count} ${s.count === 1 ? 'day' : 'days'}`;
+  if (Math.abs(diff) < 1) return `${head}, about the same as your usual ${inr1(usual)}.`;
+  return `${head}, ${inr1(Math.abs(diff))} ${diff > 0 ? 'more' : 'less'} than your usual ${inr1(usual)}.`;
 }
 
 /* ---------- time of day ---------- */
@@ -317,7 +317,7 @@ export function timeBuckets(entries: InsightEntry[], focus: string | null): Time
 
 export function bucketDetail(b: TimeBucket): string {
   if (b.count === 0) return `Nothing logged in the ${b.label.toLowerCase()}.`;
-  const top = b.top.map((t) => `${t.label} (${inr(t.total)})`).join(', ');
+  const top = b.top.map((t) => `${t.label} (${inr1(t.total)})`).join(', ');
   return `${b.count} ${b.count === 1 ? 'spend' : 'spends'}. Mostly ${top}.`;
 }
 

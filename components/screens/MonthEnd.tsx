@@ -8,7 +8,7 @@ import type { Entry, Plan } from '@/db/schema';
 import type { DerivedCycle } from '@/lib/period';
 import { monthEnd } from '@/lib/budget';
 import { formatMonthYear } from '@/lib/dates';
-import { inr } from '@/lib/format';
+import { inr1 } from '@/lib/format';
 import { buildRecap, recapStory } from '@/lib/recap';
 import { categoryRamp } from '@/theme/tokens';
 
@@ -60,7 +60,7 @@ export function MonthEndView({ cycle, plan, entries, onDone }: { cycle: DerivedC
           ) : (
             <>
               <p className="text-[12px] font-medium text-soft">{over ? 'Over your spending money by' : 'Your spending money'}</p>
-              <p className="num mt-0.5 font-display text-[30px] font-semibold leading-tight text-ink">{over ? inr(-cycle.pool) : 'All used'}</p>
+              <p className="num mt-0.5 font-display text-[30px] font-semibold leading-tight text-ink">{over ? inr1(-cycle.pool) : 'All used'}</p>
             </>
           )}
           <div
@@ -72,8 +72,8 @@ export function MonthEndView({ cycle, plan, entries, onDone }: { cycle: DerivedC
             <div className="h-full bg-good/50" style={{ width: `${leftPct}%` }} />
           </div>
           <div className="mt-1.5 flex justify-between text-[11px] text-soft">
-            <span>Spent {inr(spent)}</span>
-            <span>of {inr(cycle.planAmount)}</span>
+            <span>Spent {inr1(spent)}</span>
+            <span>of {inr1(cycle.planAmount)}</span>
           </div>
         </section>
 
@@ -94,13 +94,13 @@ export function MonthEndView({ cycle, plan, entries, onDone }: { cycle: DerivedC
                   {sel ? (
                     <>
                       <span className="max-w-[96px] truncate text-[12px] font-semibold text-soft">{sel.name}</span>
-                      <span className="num text-[20px] leading-tight text-ink">{inr(sel.total)}</span>
+                      <span className="num text-[20px] leading-tight text-ink">{inr1(sel.total)}</span>
                       <span className="text-[11px] text-faint">{sel.pct}% of spending</span>
                     </>
                   ) : (
                     <>
                       <span className="text-[11px] font-medium text-soft">Spent</span>
-                      <span className="num text-[20px] leading-tight text-ink">{inr(recap.totalSpent)}</span>
+                      <span className="num text-[20px] leading-tight text-ink">{inr1(recap.totalSpent)}</span>
                       <span className="text-[11px] text-faint">Tap a slice</span>
                     </>
                   )}
@@ -120,7 +120,7 @@ export function MonthEndView({ cycle, plan, entries, onDone }: { cycle: DerivedC
                         <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: categoryRamp[i % categoryRamp.length] }} aria-hidden="true" />
                         <span className="flex-1 truncate text-[14px] text-ink">{c.name}</span>
                         <span className="num text-[11px] text-faint">{c.pct}%</span>
-                        <span className="num w-[76px] text-right text-[14px] text-ink">{inr(c.total)}</span>
+                        <span className="num w-[76px] text-right text-[14px] text-ink">{inr1(c.total)}</span>
                       </button>
                     </li>
                   );
@@ -130,17 +130,17 @@ export function MonthEndView({ cycle, plan, entries, onDone }: { cycle: DerivedC
                 <ul className="mt-3 flex flex-col gap-1.5 text-[13px] leading-snug text-soft">
                   {recap.topWeekday && (
                     <li>
-                      You spend the most on <b className="font-medium text-ink">{recap.topWeekday.name}</b>, about <span className="num text-ink">{inr(recap.topWeekday.avg)}</span> a day.
+                      You spend the most on <b className="font-medium text-ink">{recap.topWeekday.name}</b>, about <span className="num text-ink">{inr1(recap.topWeekday.avg)}</span> a day.
                     </li>
                   )}
                   {recap.frequent && (
                     <li>
-                      Most repeated: <b className="font-medium text-ink">{recap.frequent.label}</b>, {recap.frequent.count} times for <span className="num text-ink">{inr(recap.frequent.total)}</span>.
+                      Most repeated: <b className="font-medium text-ink">{recap.frequent.label}</b>, {recap.frequent.count} times for <span className="num text-ink">{inr1(recap.frequent.total)}</span>.
                     </li>
                   )}
                   {recap.topEvent && (
                     <li>
-                      Biggest event: <b className="font-medium text-ink">{recap.topEvent.name}</b>, <span className="num text-ink">{inr(recap.topEvent.total)}</span>.
+                      Biggest event: <b className="font-medium text-ink">{recap.topEvent.name}</b>, <span className="num text-ink">{inr1(recap.topEvent.total)}</span>.
                     </li>
                   )}
                 </ul>
@@ -153,12 +153,12 @@ export function MonthEndView({ cycle, plan, entries, onDone }: { cycle: DerivedC
         <dl className="mt-4 divide-y divide-line border-y border-line">
           <div className="flex items-center justify-between py-2.5">
             <dt className="text-[14px] text-soft">Saved and invested first</dt>
-            <dd className="num text-[17px] text-ink">{inr(m.savedFirst)}</dd>
+            <dd className="num text-[17px] text-ink">{inr1(m.savedFirst)}</dd>
           </div>
           {m.fromSavings > 0 && (
             <div className="flex items-center justify-between py-2.5">
               <dt className="text-[14px] text-soft">Taken from savings</dt>
-              <dd className="num text-[17px] text-ink">{inr(m.fromSavings)}</dd>
+              <dd className="num text-[17px] text-ink">{inr1(m.fromSavings)}</dd>
             </div>
           )}
         </dl>

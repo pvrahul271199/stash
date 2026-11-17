@@ -12,7 +12,7 @@ import {
   todayAllowance,
   type CycleState,
 } from '@/lib/budget';
-import { inr } from '@/lib/format';
+import { inr, inr1 } from '@/lib/format';
 
 const plan = { income: 50000, bills: 18000, savings: 10000, monthLength: 30 };
 const fresh = (): CycleState => ({ currentDay: 1, totalDays: plan.monthLength, pool: moneyToLiveOn(plan), fromSavingsTotal: 0 });
@@ -34,7 +34,7 @@ describe('allowance', () => {
     expect(todayAllowance(s)).toBeCloseTo(3000 / 10);
   });
   it('stays negative when the pool is overspent (no clamp, nothing blocks the log)', () => {
-    expect(todayAllowance({ ...fresh(), pool: -50 })).toBe(-50 / 30);
+    expect(todayAllowance({ ...fresh(), pool: -50 })).toBe(-1.67);
     expect(todayAllowance({ ...fresh(), pool: 0 })).toBe(0);
   });
   it('excludes fromSavings from spentToday and shows a negative when over', () => {
@@ -151,7 +151,9 @@ describe('pace and projection', () => {
 describe('format', () => {
   it('uses Indian grouping', () => {
     expect(inr(125000)).toBe('₹1,25,000');
-    expect(inr(733.4)).toBe('₹733');
+    expect(inr(733.4)).toBe('₹733.40');
+    expect(inr(733.456)).toBe('₹733.46');
+    expect(inr1(733.46)).toBe('₹733.5');
   });
 });
 

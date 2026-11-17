@@ -12,7 +12,7 @@ describe('amount calculator', () => {
     expect(calcResult(run(['1', '2', '0', '+', '4', '5']))).toBe(165);
     expect(calcResult(run(['5', '0', '0', '-', '1', '2', '0']))).toBe(380);
     expect(calcResult(run(['2', '5', '0', '*', '3']))).toBe(750);
-    expect(calcResult(run(['1', '0', '0', '0', '/', '3']))).toBe(333);
+    expect(calcResult(run(['1', '0', '0', '0', '/', '3']))).toBe(333.33);
   });
   it('chains left to right and = collapses', () => {
     const s = run(['1', '0', '+', '5', '*', '2', '=']);

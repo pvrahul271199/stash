@@ -4,7 +4,7 @@ import { CloseIcon, IconButton, PrimaryButton } from '../ui/Button';
 import { removeEntry, updateEntry, useCategories, useEvents, useLoanTxnIds } from '@/db/queries';
 import { LEND_CATEGORY } from '@/lib/lend';
 import { PAYMENT_MODES, type Entry } from '@/db/schema';
-import { num } from '@/lib/format';
+import { cleanAmountInput, roundMoney } from '@/lib/money';
 import { useCurrency } from '@/lib/currency';
 import { useToast } from '@/store/toast';
 import posthog from 'posthog-js';
@@ -38,7 +38,7 @@ export function EditSpendSheet({
 
   async function save() {
     if (busy) return;
-    const amt = Number(amountRaw);
+    const amt = roundMoney(Number(amountRaw));
     if (!amt || amt <= 0) {
       toast('Enter a valid amount', 'warm');
       return;
@@ -122,12 +122,9 @@ export function EditSpendSheet({
           <label className="block">
             <span className="text-[12px] font-medium text-soft">Amount ({currency.symbol})</span>
             <input
-              value={amountRaw === '' ? '' : num(Number(amountRaw))}
-              onChange={(e) =>
-                setAmountRaw(e.target.value.replace(/\D/g, '').replace(/^0+(?=\d)/, '').slice(0, 7))
-              }
-              inputMode="numeric"
-              pattern="[0-9]*"
+              value={amountRaw}
+              onChange={(e) => setAmountRaw(cleanAmountInput(e.target.value))}
+              inputMode="decimal"
               aria-label="Edit amount"
               className="num mt-1 h-11 w-full rounded-key border border-line px-3 text-[16px] text-ink"
             />

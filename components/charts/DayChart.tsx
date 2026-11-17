@@ -4,7 +4,7 @@ import { colors } from '@/theme/tokens';
 import { cumulative, projectTotal, type DayPoint } from '@/lib/insights';
 import { dateOfDay, formatLong } from '@/lib/dates';
 import { projection } from '@/lib/budget';
-import { inr } from '@/lib/format';
+import { inr1 } from '@/lib/format';
 
 const W = 332;
 const H = 168;
@@ -128,20 +128,20 @@ function eachTooltip(d: DayPoint, startDate: string, focus: string | null) {
     const diff = d.allowance - d.totalSpent;
     parts.push(
       diff >= 0
-        ? `${inr(diff)} under its ${inr(d.allowance)}.`
-        : `${inr(-diff)} over its ${inr(d.allowance)}.`,
+        ? `${inr1(diff)} under its ${inr1(d.allowance)}.`
+        : `${inr1(-diff)} over its ${inr1(d.allowance)}.`,
     );
   }
   if (d.status === 'estimated') parts.push('A rough estimate.');
   if (!focus) {
-    const cats = d.byCategory.slice(0, 3).map(([c, v]) => `${c} ${inr(v)}`);
+    const cats = d.byCategory.slice(0, 3).map(([c, v]) => `${c} ${inr1(v)}`);
     if (cats.length) parts.push(cats.join(', ') + '.');
   } else {
-    const types = d.byType.map(([t, v]) => `${t} ${inr(v)}`);
+    const types = d.byType.map(([t, v]) => `${t} ${inr1(v)}`);
     parts.push(types.length ? types.join(', ') + '.' : `No ${focus} spends this day.`);
   }
   let text = parts.join(' ');
-  if (d.fromSavings > 0) text = `${text.replace(/\.$/, '')}. Plus ${inr(d.fromSavings)} from savings`;
+  if (d.fromSavings > 0) text = `${text.replace(/\.$/, '')}. Plus ${inr1(d.fromSavings)} from savings`;
   return { title, amount: d.spent, text };
 }
 
@@ -217,7 +217,7 @@ export function DayChart({ days, mode, focus, focusColor, planAmount, startDate,
         tip = {
           title,
           amount: point.value,
-          text: diff >= 0 ? `${inr(diff)} under plan by this day` : `${inr(-diff)} above plan by this day`,
+          text: diff >= 0 ? `${inr1(diff)} under plan by this day` : `${inr1(-diff)} above plan by this day`,
         };
       }
     }
@@ -230,7 +230,7 @@ export function DayChart({ days, mode, focus, focusColor, planAmount, startDate,
       .filter((d) => d.status === 'closed' || d.status === 'estimated')
       .reduce((s, d) => s + d.spent, 0);
     if (closedCount >= 1) {
-      if (focus) note = `At this pace, ${focus} would reach about ${inr((closedSpent / closedCount) * totalDays)} this month.`;
+      if (focus) note = `At this pace, ${focus} would reach about ${inr1((closedSpent / closedCount) * totalDays)} this month.`;
       else note = projection(planAmount, totalDays, closedCount, closedSpent)?.message ?? null;
     }
   }
@@ -243,7 +243,7 @@ export function DayChart({ days, mode, focus, focusColor, planAmount, startDate,
           <>
             <p className="font-semibold text-ink">
               {tip.title}
-              {tip.amount != null && <span className="num ml-2 text-[18px]">{inr(tip.amount)}</span>}
+              {tip.amount != null && <span className="num ml-2 text-[18px]">{inr1(tip.amount)}</span>}
             </p>
             <p>{tip.text}</p>
           </>

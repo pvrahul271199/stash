@@ -1,3 +1,4 @@
+import { roundMoney } from './money';
 import { MAX_NAME } from './categories';
 import type { Credit } from './lend';
 
@@ -23,7 +24,7 @@ export interface IncomeLike {
 
 /** null when fine, else the message to show. */
 export function validateIncome(input: { amount: number; source?: string }, maxName = MAX_NAME): string | null {
-  if (!Number.isFinite(input.amount) || Math.round(input.amount) <= 0) return 'Enter an amount first';
+  if (!Number.isFinite(input.amount) || roundMoney(input.amount) <= 0) return 'Enter an amount first';
   if ((input.source ?? '').trim().length > maxName) return `Keep the name under ${maxName} characters`;
   return null;
 }
@@ -35,5 +36,5 @@ export function incomeEffects(incomes: IncomeLike[]): Credit[] {
 
 /** Total of the live incomes dated within [from, to] (inclusive). */
 export function incomeBetween(incomes: IncomeLike[], from: string, to: string): number {
-  return incomes.filter((i) => i.deletedAt == null && i.date >= from && i.date <= to).reduce((s, i) => s + i.amount, 0);
+  return incomes.filter((i) => i.deletedAt == null && i.date >= from && i.date <= to).reduce((s, i) => roundMoney(s + i.amount), 0);
 }

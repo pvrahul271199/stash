@@ -142,9 +142,9 @@ export function TodayTab({ cycle, plan, onCreateAccount, onHome, onOpenLend }: {
         </p>
 
         <p className="mt-4 text-[15px] text-soft">You can still spend today</p>
-        <HugeNumber value={left} className="mt-1" />
+        <HugeNumber value={left} size={52} className="mt-1" />
 
-        <div className="mt-2 min-h-[40px]">
+        <div className="mt-[clamp(2px,1vw,5px)] min-h-[clamp(18px,6vw,24px)]">
           {used ? (
             <Note tone="adjust">{POOL_USED_UP_MESSAGE}</Note>
           ) : over ? (
@@ -156,7 +156,7 @@ export function TodayTab({ cycle, plan, onCreateAccount, onHome, onOpenLend }: {
           )}
         </div>
 
-        <div className="relative mt-2" ref={stripRef}>
+        <div className="relative mt-[clamp(2px,1vw,5px)]" ref={stripRef}>
           <WeekRow
             days={week}
             startDate={cycle.monthStart}

@@ -1,3 +1,4 @@
+import { roundMoney } from './money';
 import { MAX_NAME } from './categories';
 import { addDays, daysBetween, formatShort } from './dates';
 
@@ -49,10 +50,10 @@ export interface LoanLike {
   deletedAt?: number | null;
 }
 
-export const repaid = (l: Pick<LoanLike, 'repayments'>): number => l.repayments.reduce((s, r) => s + r.amount, 0);
+export const repaid = (l: Pick<LoanLike, 'repayments'>): number => l.repayments.reduce((s, r) => roundMoney(s + r.amount), 0);
 
 /** What is still owed. A written-off loan owes nothing (the money is gone, it is not a credit). */
-export const remaining = (l: LoanLike): number => (l.writtenOff ? 0 : Math.max(0, l.amount - repaid(l)));
+export const remaining = (l: LoanLike): number => (l.writtenOff ? 0 : Math.max(0, roundMoney(l.amount - repaid(l))));
 
 export type LoanStatus = 'settled' | 'overdue' | 'soon' | 'later';
 /** Days ahead that count as "due soon". */
@@ -164,7 +165,7 @@ export function dueFromChoice(choice: DueChoice, today: string): string | null {
 
 /** A gentle error message, or null when the loan input is fine. The name is optional; the type (whom) is not. */
 export function validateLoan(input: { amount: number; person: string; kind: string; dueDate: string | null }, lentOn: string, maxName = MAX_NAME): string | null {
-  if (!(Math.round(input.amount) > 0)) return 'Enter an amount first';
+  if (!(roundMoney(input.amount) > 0)) return 'Enter an amount first';
   if (input.person.trim().length > maxName) return `Keep the name to ${maxName} characters or less.`;
   if (!isLoanKind(input.kind)) return 'Pick who you lent it to (Friends, Family, Coworker, or add your own).';
   if (input.dueDate && input.dueDate < lentOn) return 'The pay-back date is before the day you lent it.';

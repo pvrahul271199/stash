@@ -3,7 +3,7 @@ import { track, trackOnce } from '@/lib/analytics';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { BackIcon, IconButton, PrimaryButton } from '../ui/Button';
 import { Keypad } from '../ui/Keypad';
-import { CALC_INIT, OP_SYMBOL, calcPress, calcResult, isOp, type CalcState } from '../../lib/calc';
+import { CALC_INIT, OP_SYMBOL, calcPress, calcResult, formatTyped, isOp, type CalcState } from '../../lib/calc';
 import { CategoryPicker } from './CategoryPicker';
 import { LendFields, NEW_LEND_DRAFT, type LendDraft } from './LendFields';
 import {
@@ -301,7 +301,7 @@ export function LogSpend({
       const t = e.target as HTMLElement;
       if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA') return;
       const opKey = e.key === 'x' || e.key === 'X' ? '*' : e.key;
-      if (/^\d$/.test(e.key)) press(e.key);
+      if (/^\d$/.test(e.key) || e.key === '.' || e.key === ',') press(e.key === ',' ? '.' : e.key);
       else if (isOp(opKey)) press(opKey);
       else if (e.key === '=' ) press('=');
       else if (e.key === 'Backspace') press('del');
@@ -322,7 +322,7 @@ export function LogSpend({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [press, onClose, amount, view, calc.op, mode, lend, payment, note]);
 
-  const shown = String(amount).length;
+  const shown = (calc.op === null && calc.digits !== '' ? calc.digits : String(amount)).length;
   const size = shown <= 5 ? 72 : shown === 6 ? 60 : 52;
 
   return (
@@ -614,19 +614,19 @@ export function LogSpend({
             >
               {calc.op !== null && calc.acc !== null && (
                 <div className="flex min-w-[44px] flex-col items-stretch">
-                  <span className="calc-pop text-right text-faint">{calc.acc.toLocaleString('en-IN')}</span>
+                  <span className="calc-pop text-right text-faint">{calc.acc.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
                   <span key={calc.op} className="calc-pop flex justify-between gap-1.5 text-soft">
                     <span>{OP_SYMBOL[calc.op]}</span>
-                    <span>{calc.digits ? Number(calc.digits).toLocaleString('en-IN') : ''}</span>
+                    <span>{formatTyped(calc.digits)}</span>
                   </span>
                   <span className="mt-0.5 h-px w-full bg-line" />
                 </div>
               )}
             </div>
             <div className="num flex items-baseline justify-center" style={{ fontSize: size, lineHeight: 1.05 }}>
-              <span className={`mr-1 transition-colors ${mode === 'income' ? '' : 'text-faint'}`} style={mode === 'income' ? { color: '#388E3C' } : undefined} aria-hidden="true">{currency.symbol}</span>
+              <span className="mr-1 text-faint" aria-hidden="true">{mode === 'income' ? '+' : ''}{currency.symbol}</span>
               <span className={amount === 0 ? 'text-faint' : 'text-ink'} aria-label={`Amount ${amount} ${currency.code}`}>
-                {amount === 0 ? '0' : num(amount)}
+                {calc.op === null && calc.digits !== '' ? formatTyped(calc.digits, currency.locale) : amount === 0 ? '0' : num(amount)}
               </span>
             </div>
 

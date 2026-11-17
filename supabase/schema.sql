@@ -873,3 +873,15 @@ begin
 end $$;
 revoke all on function public.submit_feedback(text, text, text, text, text) from public;
 grant execute on function public.submit_feedback(text, text, text, text, text) to anon, authenticated;
+
+-- ---------- decimal amounts (2 places) ----------
+-- Amounts used to be whole units. The app now stores up to 2 decimals (client rounds with roundMoney). Widening
+-- int/bigint -> numeric keeps every existing row as is; PostgREST returns numeric as a JSON number, so sync is unchanged.
+-- DEPLOY THIS BEFORE THE APP VERSION THAT LOGS DECIMALS: an integer column rejects "4.75". Safe to re-run.
+alter table public.transactions     alter column amount  type numeric(14,2);
+alter table public.incomes          alter column amount  type numeric(14,2);
+alter table public.loans            alter column amount  type numeric(14,2);
+alter table public.leftover_savings alter column amount  type numeric(14,2);
+alter table public.plans            alter column income  type numeric(14,2);
+alter table public.plans            alter column bills   type numeric(14,2);
+alter table public.plans            alter column savings type numeric(14,2);

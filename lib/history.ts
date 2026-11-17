@@ -1,5 +1,6 @@
 import { addDays, dateOfDay, daysBetween, formatShort, todayISO } from './dates';
 import { useCurrencyStore } from './currency';
+import { roundMoney1 } from './money';
 
 /** Minimal shapes so this stays pure and testable. */
 export interface HistoryEntry {
@@ -179,22 +180,17 @@ export function compactINR(n: number): string {
   const info = useCurrencyStore.getState().currency;
   const sym = info.symbol;
   const space = sym.length > 1 ? ' ' : '';
-  const r = Math.round(n);
-  if (r < 1000) return `${sym}${space}${r}`;
+  const r = roundMoney1(n); // calendar cells: 1 decimal place
+  const sign = r < 0 ? '-' : '';
+  const a = Math.abs(r);
+  const one = (x: number) => (Number.isInteger(roundMoney1(x)) ? String(roundMoney1(x)) : roundMoney1(x).toFixed(1));
+  if (a < 1000) return `${sign}${sym}${space}${one(a)}`;
   if (info.code === 'INR') {
-    if (r < 100000) {
-      const k = r / 1000;
-      return `${sym}${space}${k >= 10 ? Math.round(k) : Math.round(k * 10) / 10}k`;
-    }
-    const l = r / 100000;
-    return `${sym}${space}${l >= 10 ? Math.round(l) : Math.round(l * 10) / 10}L`;
+    if (a < 100000) return `${sign}${sym}${space}${one(a / 1000)}k`;
+    return `${sign}${sym}${space}${one(a / 100000)}L`;
   }
-  if (r < 1000000) {
-    const k = r / 1000;
-    return `${sym}${space}${k >= 10 ? Math.round(k) : Math.round(k * 10) / 10}k`;
-  }
-  const m = r / 1000000;
-  return `${sym}${space}${m >= 10 ? Math.round(m) : Math.round(m * 10) / 10}M`;
+  if (a < 1000000) return `${sign}${sym}${space}${one(a / 1000)}k`;
+  return `${sign}${sym}${space}${one(a / 1000000)}M`;
 }
 
 /* ---------- search ---------- */

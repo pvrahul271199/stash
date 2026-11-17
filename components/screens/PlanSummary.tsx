@@ -1,5 +1,6 @@
 'use client';
 import { BackIcon, IconButton, PrimaryButton } from '../ui/Button';
+import { roundMoney } from '@/lib/money';
 import { HugeNumber } from '../ui/HugeNumber';
 import { inr } from '@/lib/format';
 import { moneyToLiveOn, type PlanInput } from '@/lib/budget';
@@ -39,7 +40,7 @@ export function PlanSummary({
   // The month is derived from the start day: it ends the day before the next one.
   const period = periodFor(startDay, today);
   const daysRemaining = Math.max(1, daysBetween(from, period.end) + 1);
-  const dailyAmount = Math.max(0, Math.round(remainingPool / daysRemaining));
+  const dailyAmount = Math.max(0, roundMoney(remainingPool / daysRemaining));
   const startIdx = Math.min(period.totalDays - 1, Math.max(0, daysBetween(period.start, from)));
 
   // Where the income goes, as shares of one bar.
