@@ -156,7 +156,7 @@ export function DayChart({ days, mode, focus, focusColor, planAmount, startDate,
   const slot = W / n;
 
   // Selection should not leak between views or focus changes.
-  useEffect(() => setSel(null), [mode, focus]);
+  useEffect(() => setSel(null), [mode, focus, startDate, n]);
 
   // Imperative highlight: only the guide line and bar/dot flags change; the chart layers stay put.
   useEffect(() => {
@@ -203,16 +203,18 @@ export function DayChart({ days, mode, focus, focusColor, planAmount, startDate,
 
   /* tooltip */
   let tip: { title: string; amount: number | null; text: string } | null = null;
-  if (sel != null) {
-    const d = days[sel - 1];
+  // `sel` can briefly point past the end when the month changes (e.g. 31 -> 30 days) before the reset effect runs.
+  const selDay = sel != null && sel >= 1 && sel <= n ? sel : null;
+  if (selDay != null) {
+    const d = days[selDay - 1];
     if (mode === 'each') tip = eachTooltip(d, startDate, focus);
     else {
-      const point = cum.find((p) => p.day === sel);
-      const title = formatLong(dateOfDay(startDate, sel));
+      const point = cum.find((p) => p.day === selDay);
+      const title = formatLong(dateOfDay(startDate, selDay));
       if (!point) tip = { title, amount: null, text: 'Nothing yet. This day is still ahead.' };
       else if (focus) tip = { title, amount: point.value, text: `${focus} so far by this day.` };
       else {
-        const planBy = (planAmount * sel) / totalDays;
+        const planBy = (planAmount * selDay) / totalDays;
         const diff = planBy - point.value;
         tip = {
           title,

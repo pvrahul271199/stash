@@ -84,7 +84,8 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
     const names = cats.map((c) => c.name);
     const colorOf = categoryColorMap(entries, names, categoryRamp);
     const activeFocus = focus && names.includes(focus) ? focus : null;
-    const evList = eventTotals(entries, events ?? [], activeFocus);
+    // only events that have at least one spend logged in them (a defined but unused event is not shown)
+    const evList = eventTotals(entries, events ?? [], activeFocus).filter((e) => e.count > 0);
     const eventNames = evList.map((e) => e.name);
     const activeEvent = focusEvent && eventNames.includes(focusEvent) ? focusEvent : null;
     const eventScopedEntries = activeEvent ? entries.filter((e) => e.event === activeEvent) : entries;
@@ -475,12 +476,9 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
       )}
 
       {/* 4b. By event (with sub-categories breakdown) */}
+      {evList.length > 0 && (
       <Section title="By event" hint="Trips, parties, anything you tagged.">
-        {evList.length === 0 ? (
-          <p className="text-body text-soft">
-            Tap the calendar button on Today to start an event. Spends you log inside it show up here, split by category.
-          </p>
-        ) : (
+        {(
           <ul className="flex flex-col gap-3">
             {evList.map((ev) => {
               const isSelected = activeEvent === ev.name;
@@ -549,6 +547,7 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
           </ul>
         )}
       </Section>
+      )}
 
       {/* 4c. By payment mode */}
       {payments.length > 0 && (
