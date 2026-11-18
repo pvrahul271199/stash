@@ -1,0 +1,8 @@
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "app.chelav",
+        "sha256_cert_fingerprints": ["9D:D7:77:80:75:DF:0D:EF:CC:7C:8E:AA:BE:3F:5C:C1:87:8E:68:5B:5A:E2:28:60:27:B9:C7:F8:19:50:A2:02"]
+      }
+    }]
