@@ -14,6 +14,8 @@ export default function manifest(): MetadataRoute.Manifest {
     dir: 'ltr',
     categories: ['finance', 'productivity'],
     display: 'standalone',
+    display_override: ['standalone', 'minimal-ui'],
+    prefer_related_applications: false,
     orientation: 'portrait',
     background_color: '#FFFFFF',
     theme_color: '#FFFFFF',
