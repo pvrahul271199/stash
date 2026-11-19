@@ -35,9 +35,13 @@ let pushRequests = 0;
 const missingTables = new Set<string>();
 
 function fakeFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  // Only writes are counted: pulls (GET) run concurrently by design, pushes must never overlap.
+  const isWrite = (init?.method ?? 'GET') !== 'GET';
   return (async () => {
-    inFlight++;
-    maxInFlight = Math.max(maxInFlight, inFlight);
+    if (isWrite) {
+      inFlight++;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+    }
     await new Promise((r) => setTimeout(r, 2));
     try {
       const u = new URL(String(input));
@@ -118,7 +122,7 @@ function fakeFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Respon
         .sort((a, b) => a.updated_at.localeCompare(b.updated_at));
       return new Response(JSON.stringify(rows), { status: 200 });
     } finally {
-      inFlight--;
+      if (isWrite) inFlight--;
     }
   })();
 }
@@ -194,7 +198,7 @@ describe('sync engine', () => {
     expect(again.map((c) => c.table)).toEqual(['transactions']);
   });
 
-  it('20 rapid writes give one sync with one request in flight', async () => {
+  it('20 rapid writes give one sync with one write in flight', async () => {
     await createPlan(plan, '2026-10-01');
     await settle();
     calls.length = 0;

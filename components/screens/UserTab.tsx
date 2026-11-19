@@ -40,7 +40,7 @@ import { withLoading } from '@/store/busy';
 import { useToast } from '@/store/toast';
 import { usePWA } from '@/store/pwa';
 import { UpdateButton } from '@/components/pwa/UpdateButton';
-import posthog from 'posthog-js';
+import { captureEvent } from '@/lib/analytics';
 
 const AVATAR_STYLE = {
   bg: '#EEF2FF',
@@ -131,7 +131,7 @@ export function UserTab({
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
-    posthog.capture('spends_exported');
+    captureEvent('spends_exported');
     toast('Exported to CSV');
   }
 

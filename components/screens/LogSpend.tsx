@@ -32,8 +32,9 @@ import { DEFAULT_INCOME_SOURCE, validateIncome } from '@/lib/income';
 import { inr, num } from '@/lib/format';
 import { useCurrency } from '@/lib/currency';
 import { useToast } from '@/store/toast';
-import posthog from 'posthog-js';
+import { captureEvent } from '@/lib/analytics';
 import { EventHint } from '../ui/EventHint';
+import { HugeNumber } from '../ui/HugeNumber';
 
 
 interface Pending {
@@ -180,7 +181,7 @@ export function LogSpend({
         targetDate,
       );
       navigator.vibrate?.(10);
-      posthog.capture('spend_logged', {
+      captureEvent('spend_logged', {
         payment_method: payment,
         entry_timing: isOutsideActiveCycle ? 'historical' : isOtherDay ? (isFutureDay ? 'future' : 'past') : 'current_day',
         from_savings: fromSavings,
@@ -241,7 +242,7 @@ export function LogSpend({
         targetDate,
       );
       navigator.vibrate?.(10);
-      posthog.capture('lend_logged', { kind: lend.kind, has_due_date: dueDate != null });
+      captureEvent('lend_logged', { kind: lend.kind, has_due_date: dueDate != null });
       toast(`Tracking ${inr(amount)} lent to ${lend.person.trim() || lend.kind}. See History > Lend`);
       onClose();
     } catch {
@@ -268,7 +269,7 @@ export function LogSpend({
       const remDays = Math.max(1, daysLeft(cycle));
       await addIncome(cycle, { amount, source, payment, note: note.trim() || null }, effectiveDay ?? undefined, targetDate);
       navigator.vibrate?.(10);
-      posthog.capture('income_logged', { source, entry_timing: isOutsideActiveCycle ? 'historical' : isOtherDay ? (isFutureDay ? 'future' : 'past') : 'current_day' });
+      captureEvent('income_logged', { source, entry_timing: isOutsideActiveCycle ? 'historical' : isOtherDay ? (isFutureDay ? 'future' : 'past') : 'current_day' });
       const inThisMonth = !isOutsideActiveCycle;
       toast(
         inThisMonth
@@ -322,8 +323,6 @@ export function LogSpend({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [press, onClose, amount, view, calc.op, mode, lend, payment, note]);
 
-  const shown = (calc.op === null && calc.digits !== '' ? calc.digits : String(amount)).length;
-  const size = shown <= 5 ? 72 : shown === 6 ? 60 : 52;
 
   return (
     <div
@@ -623,12 +622,15 @@ export function LogSpend({
                 </div>
               )}
             </div>
-            <div className="num flex items-baseline justify-center" style={{ fontSize: size, lineHeight: 1.05 }}>
-              <span className="mr-1 text-faint" aria-hidden="true">{mode === 'income' ? '+' : ''}{currency.symbol}</span>
-              <span className={amount === 0 ? 'text-faint' : 'text-ink'} aria-label={`Amount ${amount} ${currency.code}`}>
-                {calc.op === null && calc.digits !== '' ? formatTyped(calc.digits, currency.locale) : amount === 0 ? '0' : num(amount)}
-              </span>
-            </div>
+            {/* Same size and style as the Today screen's number (HugeNumber, 52px, shrinks only if it must). */}
+            <HugeNumber
+              value={amount}
+              size={52}
+              className="text-center"
+              color={amount === 0 ? 'text-faint' : 'text-ink'}
+              prefix={mode === 'income' ? '+' : ''}
+              text={calc.op === null && calc.digits !== '' ? formatTyped(calc.digits, currency.locale) : amount === 0 ? '0' : num(amount)}
+            />
 
             {/* Same height and same top for Spend, Lend and Income, so nothing moves when the tab changes. */}
             <div className="mt-3 flex h-[184px] w-full flex-col items-center justify-start">

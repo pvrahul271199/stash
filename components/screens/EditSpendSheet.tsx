@@ -7,7 +7,7 @@ import { PAYMENT_MODES, type Entry } from '@/db/schema';
 import { cleanAmountInput, roundMoney } from '@/lib/money';
 import { useCurrency } from '@/lib/currency';
 import { useToast } from '@/store/toast';
-import posthog from 'posthog-js';
+import { captureEvent } from '@/lib/analytics';
 
 export function EditSpendSheet({
   entry,
@@ -55,7 +55,7 @@ export function EditSpendSheet({
         event,
         fromSavings,
       });
-      posthog.capture('spend_updated', {
+      captureEvent('spend_updated', {
         payment_method: payment,
         from_savings: fromSavings,
       });
@@ -74,7 +74,7 @@ export function EditSpendSheet({
         toast('Money came back on this loan. Settle it in History > Lend instead.', 'warm');
         return;
       }
-      posthog.capture('spend_deleted');
+      captureEvent('spend_deleted');
       toast(isLoan ? 'Spend and loan removed' : 'Spend removed');
       onClose();
     } finally {

@@ -46,7 +46,6 @@ import {
 } from '@/lib/period';
 import { resolveLabel } from '@/lib/suggestions';
 import { addDays, dateOfDay, daysBetween, setClosedThrough, subscribeDay, toISO, todayISO } from '@/lib/dates';
-import { DEFAULT_SAMPLE_PLAN, generateSampleSpends } from '@/lib/sample';
 import { buildCSV, type CsvRow } from '@/lib/csv';
 import { MAX_NAME, resolveCategories, validateName, type ResolvedCategory } from '@/lib/categories';
 import { getStoredCurrencyCode } from '@/lib/currency';
@@ -1363,6 +1362,8 @@ export async function fillSample(now: Date = new Date()): Promise<void> {
   if (getActiveDBUid() !== SAMPLE_UID) throw new Error('Sample data only goes into the sample sandbox');
   await ensureSeed();
   const db = getDB();
+  // Loaded only here: the sample generator is not needed on the first page.
+  const { DEFAULT_SAMPLE_PLAN, generateSampleSpends } = await import('@/lib/sample');
   const plan: PlanInput = DEFAULT_SAMPLE_PLAN;
   const today = todayISO(now);
   const startDate = periodFor(1, addDays(periodFor(1, today).start, -1)).start; // the 1st of last month

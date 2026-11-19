@@ -2,7 +2,7 @@
 
 import NextError from 'next/error';
 import { useEffect } from 'react';
-import posthog from 'posthog-js';
+import { captureError } from '@/lib/analytics';
 
 export default function GlobalError({
   error,
@@ -11,7 +11,7 @@ export default function GlobalError({
   reset: () => void;
 }) {
   useEffect(() => {
-    posthog.captureException(error);
+    captureError(error);
   }, [error]);
 
   return (

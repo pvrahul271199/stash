@@ -7,7 +7,7 @@ import { sumItems, type PlanInput, type PlanItem } from '@/lib/budget';
 import { periodFor } from '@/lib/period';
 import { daysBetween, formatLong, todayISO } from '@/lib/dates';
 import { DatePicker } from '../ui/DatePicker';
-import posthog from 'posthog-js';
+import { captureEvent } from '@/lib/analytics';
 
 const BILL_SUGGESTIONS = ['Rent', 'Health EMI', 'Loan EMI', 'Phone & Wi-Fi', 'Electricity'];
 const SAVING_SUGGESTIONS = ['SIP', 'Emergency fund', 'RD / FD', 'Health insurance'];
@@ -225,6 +225,103 @@ function OptionalAmount({
   );
 }
 
+/**
+ * Currency choices in one row that scrolls sideways. It shows a thin scrollbar and fades the right edge while more
+ * choices are hidden; a mouse can drag it (touch scrolls natively). Dragging does not pick a currency.
+ */
+function CurrencyChips({
+  currencies,
+  selected,
+  onSelect,
+}: {
+  currencies: { code: string; symbol: string; name: string }[];
+  selected: string;
+  onSelect: (code: string) => void;
+}) {
+  const row = useRef<HTMLDivElement>(null);
+  const [more, setMore] = useState(false);
+  const drag = useRef<{ x: number; left: number; moved: boolean } | null>(null);
+  const suppressClick = useRef(false);
+
+  const measure = () => {
+    const el = row.current;
+    if (el) setMore(el.scrollWidth - el.scrollLeft - el.clientWidth > 4);
+  };
+  useEffect(() => {
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currencies.length]);
+
+  return (
+    <div className="relative mt-4 -mx-6">
+      <div
+        ref={row}
+        role="radiogroup"
+        aria-label="Currency"
+        onScroll={measure}
+        onPointerDown={(e) => {
+          if (e.pointerType !== 'mouse' || !row.current) return;
+          drag.current = { x: e.clientX, left: row.current.scrollLeft, moved: false };
+        }}
+        onPointerMove={(e) => {
+          const d = drag.current;
+          const el = row.current;
+          if (!d || !el) return;
+          const dx = e.clientX - d.x;
+          if (!d.moved && Math.abs(dx) > 5) {
+            d.moved = true;
+            el.setPointerCapture(e.pointerId);
+          }
+          if (d.moved) el.scrollLeft = d.left - dx;
+        }}
+        onPointerUp={() => {
+          if (drag.current?.moved) suppressClick.current = true;
+          drag.current = null;
+        }}
+        onPointerCancel={() => {
+          drag.current = null;
+        }}
+        onClickCapture={(e) => {
+          if (suppressClick.current) {
+            suppressClick.current = false;
+            e.preventDefault();
+            e.stopPropagation();
+          }
+        }}
+        className="chips-scroll flex cursor-grab touch-pan-x select-none gap-1.5 overflow-x-auto overscroll-x-contain px-6 pb-2 pt-0.5 active:cursor-grabbing"
+      >
+        {currencies.map((c) => {
+          const isSel = c.code === selected;
+          return (
+            <button
+              key={c.code}
+              type="button"
+              role="radio"
+              aria-checked={isSel}
+              aria-label={`${c.name} (${c.code})`}
+              onClick={() => onSelect(c.code)}
+              className={`h-8 min-h-0 shrink-0 rounded-full border px-3 text-[12px] font-semibold transition-colors ${
+                isSel ? 'border-ink bg-ink text-white' : 'border-line bg-white text-ink'
+              }`}
+            >
+              {c.symbol !== c.code ? `${c.symbol} ` : ''}
+              {c.code}
+            </button>
+          );
+        })}
+      </div>
+      {more && (
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-l from-white to-transparent"
+        />
+      )}
+    </div>
+  );
+}
+
 /** Whole setup on one page. Only income is required; bills and savings default to 0 and can be added later. */
 export function Onboarding({
   initial,
@@ -240,7 +337,7 @@ export function Onboarding({
   startDate?: string;
   onStartDateChange?: (iso: string) => void;
 }) {
-  const { currency } = useCurrency();
+  const { currency, setCurrency, currencies } = useCurrency();
   const start = (n?: number) => (n != null && n > 0 ? String(n) : '');
   const [income, setIncome] = useState(start(initial?.income));
   const [billsRaw, setBillsRaw] = useState(start(initial?.bills));
@@ -276,7 +373,7 @@ export function Onboarding({
     if (bills >= inc) return setError(`Bills need to be less than your income (${inr(inc)}).`);
     if (bills + savings >= inc)
       return setError(`Bills and savings together need to be less than your income. You have ${inr(inc - bills)} after bills.`);
-    posthog.capture('onboarding_plan_submitted', { has_bill_items: billItems.length > 0, has_savings_items: savingsItems.length > 0, backdated: from < todayISO() });
+    captureEvent('onboarding_plan_submitted', { has_bill_items: billItems.length > 0, has_savings_items: savingsItems.length > 0, backdated: from < todayISO() });
     onDone({ income: inc, bills, savings, monthLength, periodStartDay: monthStartDay, billItems, savingsItems });
   }
 
@@ -291,6 +388,8 @@ export function Onboarding({
       <div className="mt-3 min-w-0 flex-1 overflow-y-auto overflow-x-hidden pb-4">
         <h1 className="font-sans text-[22px] font-semibold leading-snug text-ink">What lands in your account each month?</h1>
         <p className="mt-1.5 text-[14px] text-soft">Your take-home salary, after tax. That is all we need to start.</p>
+
+        <CurrencyChips currencies={currencies} selected={currency.code} onSelect={setCurrency} />
 
         <label className="mt-4 flex min-w-0 items-baseline gap-2 border-b-2 border-ink pb-1.5">
           <span className="num text-[34px] text-faint" aria-hidden="true">

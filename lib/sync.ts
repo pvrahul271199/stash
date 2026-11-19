@@ -623,13 +623,17 @@ type Cursor = { ts: string; id: string };
 /** Tables the app can live without while the server schema catches up. */
 const OPTIONAL_TABLES = new Set<string>(['leftover_savings', 'loans', 'incomes']);
 
-async function pullTable(
-  db: StashDB,
+/**
+ * Downloads every page of one table newer than its cursor, without writing anything. The pages of one table depend on
+ * each other (keyset paging), but the tables do not, so `pullSince` fetches all tables at once.
+ */
+async function fetchTable(
   owner: string,
   name: TableName,
   cursor: Cursor | null,
-): Promise<{ cursor: Cursor | null }> {
+): Promise<{ batches: Remote[][]; cursor: Cursor | null }> {
   let cur = cursor;
+  const batches: Remote[][] = [];
   // Always ask for this user's rows only. RLS should already enforce it, but the app must never depend on that alone.
   const mine = `&user_id=eq.${encodeURIComponent(owner)}`;
   // first page: plain `updated_at > cursor - overlap`; later pages: the exact (updated_at, id) keyset
@@ -641,12 +645,12 @@ async function pullTable(
     } catch (e) {
       // A table added later (leftover_savings) may not exist on a server whose SQL has not been re-run yet.
       // That must never block the plan and spends from coming down: skip it until the table exists.
-      if (OPTIONAL_TABLES.has(name) && e instanceof SyncError && e.status === 404) return { cursor: cur };
+      if (OPTIONAL_TABLES.has(name) && e instanceof SyncError && e.status === 404) return { batches, cursor: cur };
       throw e;
     }
     const rows = (await res.json()) as Remote[];
     if (rows.length) {
-      await applyRemote(db, { [name]: rows }, owner);
+      batches.push(rows);
       const last = rows[rows.length - 1];
       const next = { ts: last.updated_at as string, id: last.id };
       // the overlap window re-reads old rows first; never let the stored cursor move backwards
@@ -655,16 +659,22 @@ async function pullTable(
     }
     if (rows.length < PAGE) break;
   }
-  return { cursor: cur };
+  return { batches, cursor: cur };
 }
 
-/** Pulls everything newer than the stored per-table cursors. Never clears local data. */
+/**
+ * Pulls everything newer than the stored per-table cursors. Never clears local data.
+ * The seven tables are downloaded at the same time (a new device used to wait seven round trips in a row), then written
+ * to the device one table at a time in `TABLE_ORDER`, as before. Cursors move only after every table is written.
+ */
 export async function pullSince(db: StashDB, owner: string): Promise<void> {
   const meta = await getMeta(db);
   const cursors: Record<string, Cursor | null> = { ...(meta.pullCursors ?? {}) };
-  for (const name of TABLE_ORDER) {
-    const r = await pullTable(db, owner, name, cursors[name] ?? null);
-    cursors[name] = r.cursor;
+  const fetched = await Promise.all(TABLE_ORDER.map((name) => fetchTable(owner, name, cursors[name] ?? null)));
+  for (let i = 0; i < TABLE_ORDER.length; i++) {
+    const name = TABLE_ORDER[i];
+    for (const rows of fetched[i].batches) await applyRemote(db, { [name]: rows }, owner);
+    cursors[name] = fetched[i].cursor;
   }
   // Advance only after every table succeeded.
   await db.meta.update('main', { pullCursors: cursors });

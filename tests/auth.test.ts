@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const signOut = vi.fn(async () => ({ error: null }));
 vi.mock('@/lib/supabaseClient', () => ({
+  warmUpSupabase: () => {},
   getSupabase: () => ({
     auth: {
       onAuthStateChange: vi.fn(),

@@ -1,27 +1,34 @@
 'use client';
 import { initAnalytics, track } from '@/lib/analytics';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { Toast } from './ui/Toast';
 import { SampleNote } from './ui/SampleNote';
 import { BottomPrompt } from './ui/BottomPrompt';
 import { GhostButton, PrimaryButton } from './ui/Button';
 import { TabBar, type Tab } from './ui/TabBar';
 import { Welcome } from './screens/Welcome';
-import { Demo } from './screens/Demo';
-import { GoogleSignInSheet } from './ui/GoogleSignInSheet';
-import { Onboarding } from './screens/Onboarding';
-import { PlanSummary } from './screens/PlanSummary';
 import { TodayTab } from './screens/TodayTab';
-import { MonthEnd } from './screens/MonthEnd';
-import { PlanScreen } from './screens/PlanScreen';
-import { HistoryTab } from './screens/HistoryTab';
-import { InsightsTab } from './screens/InsightsTab';
-import { UserTab } from './screens/UserTab';
 import { PWAManager } from './pwa/PWAManager';
 import { LoadingScreen } from './ui/LoadingScreen';
 import { LogoutDialog } from './ui/LogoutDialog';
-import { ThankYou } from './screens/ThankYou';
 import { flushConsentRecord, hasSyncConsent } from '@/lib/consent';
+
+/*
+ * Screens and sheets that are not on the first paint load on demand, so the first page ships only the loader, Welcome and
+ * Today. Each still renders the same; a short loader (or nothing, for sheets) shows while its code arrives.
+ */
+const screenFallback = () => <LoadingScreen />;
+const Onboarding = dynamic(() => import('./screens/Onboarding').then((m) => m.Onboarding), { ssr: false, loading: screenFallback });
+const PlanSummary = dynamic(() => import('./screens/PlanSummary').then((m) => m.PlanSummary), { ssr: false, loading: screenFallback });
+const MonthEnd = dynamic(() => import('./screens/MonthEnd').then((m) => m.MonthEnd), { ssr: false, loading: screenFallback });
+const PlanScreen = dynamic(() => import('./screens/PlanScreen').then((m) => m.PlanScreen), { ssr: false, loading: screenFallback });
+const HistoryTab = dynamic(() => import('./screens/HistoryTab').then((m) => m.HistoryTab), { ssr: false, loading: screenFallback });
+const InsightsTab = dynamic(() => import('./screens/InsightsTab').then((m) => m.InsightsTab), { ssr: false, loading: screenFallback });
+const UserTab = dynamic(() => import('./screens/UserTab').then((m) => m.UserTab), { ssr: false, loading: screenFallback });
+const ThankYou = dynamic(() => import('./screens/ThankYou').then((m) => m.ThankYou), { ssr: false, loading: screenFallback });
+const Demo = dynamic(() => import('./screens/Demo').then((m) => m.Demo), { ssr: false });
+const GoogleSignInSheet = dynamic(() => import('./ui/GoogleSignInSheet').then((m) => m.GoogleSignInSheet), { ssr: false });
 import { preloadGoogle } from '@/lib/googleSignIn';
 import {
   createPlan,
@@ -40,7 +47,7 @@ import { discardSampleAfterSignIn, enterSampleMode, exitSampleMode, isSampleFill
 import { useUI } from '@/store/ui';
 import { useToast } from '@/store/toast';
 import { useBusy, withLoading } from '@/store/busy';
-import posthog from 'posthog-js';
+import { captureEvent, identifyUser, logInfo, resetIdentity } from '@/lib/analytics';
 
 type Restore = { ok: true } | { ok: false; reason: string };
 
@@ -54,18 +61,25 @@ function describeRestoreError(e: unknown): string {
   return e instanceof Error ? e.message : 'Something unexpected went wrong.';
 }
 
+/** After this long the loader says it is still connecting (the data is fine, the network is slow). */
+const RESTORE_SLOW_MS = 5000;
+/** After this long we give up waiting and offer a retry. The sync keeps running; `onLate` fires if it then succeeds. */
+const RESTORE_GIVE_UP_MS = 20000;
+
 /**
- * The first sync after signing in on a device with nothing yet. Waits up to 15 s (a cold-started Supabase project can take
- * most of that to answer the first request) but never blocks the UI beyond it. On a timeout the sync keeps running, and
- * `onLate` is called if it finishes fine afterwards, so a slow success is not left looking like a failure.
+ * The first sync after signing in on a device with nothing yet. A cold-started Supabase project can take a while to answer,
+ * so `onSlow` after 5 s only changes the message; the failure screen (which offers "set up a plan") appears only after 20 s
+ * or on a real error. A slow success is never left looking like a failure.
  */
-async function restoreFromCloud(onLate: () => void): Promise<Restore> {
+async function restoreFromCloud(onSlow: () => void, onLate: () => void): Promise<Restore> {
   const sync: Promise<Restore> = syncNow().then(
     () => ({ ok: true }),
     (e) => ({ ok: false, reason: describeRestoreError(e) }),
   );
-  const slow = new Promise<Restore>((r) => setTimeout(() => r({ ok: false, reason: 'The cloud is slow to answer right now.' }), 15000));
-  const first = await Promise.race([sync, slow]);
+  const slowTimer = setTimeout(onSlow, RESTORE_SLOW_MS);
+  const giveUp = new Promise<Restore>((r) => setTimeout(() => r({ ok: false, reason: 'The cloud is slow to answer right now.' }), RESTORE_GIVE_UP_MS));
+  const first = await Promise.race([sync, giveUp]);
+  clearTimeout(slowTimer);
   if (!first.ok && first.reason.startsWith('The cloud is slow')) void sync.then((r) => r.ok && onLate());
   return first;
 }
@@ -110,11 +124,11 @@ export function AppShell() {
   useEffect(() => {
     if (auth.status === 'signedIn' && auth.uid) {
       if (identifiedUid.current && identifiedUid.current !== auth.uid) {
-        posthog.reset();
+        resetIdentity();
       }
 
       if (identifiedUid.current !== auth.uid) {
-        posthog.identify(auth.uid, {
+        identifyUser(auth.uid, {
           ...(auth.email ? { email: auth.email } : {}),
           ...(auth.displayName ? { name: auth.displayName } : {}),
           ...(auth.username ? { username: auth.username } : {}),
@@ -126,7 +140,7 @@ export function AppShell() {
     }
 
     if (auth.status === 'guest' && identifiedUid.current) {
-      posthog.reset();
+      resetIdentity();
       identifiedUid.current = null;
     }
   }, [auth]);
@@ -135,6 +149,7 @@ export function AppShell() {
   const [moveOffer, setMoveOffer] = useState<(GuestData & { uid: string }) | null>(null);
   const [sampleIntro, setSampleIntro] = useState(false); // the 3-second "you're exploring sample data" note
   const [restoring, setRestoring] = useState(false);
+  const [restoreSlow, setRestoreSlow] = useState(false);
   const restoredFor = useRef<string | null>(null);
   // Signed-in user whose cloud data could not be checked. While set (and no cycle is on the device) we must not
   // offer onboarding: a new plan made now would become a second cycle next to the one still in the cloud.
@@ -142,11 +157,16 @@ export function AppShell() {
   const [restoreReason, setRestoreReason] = useState<string | null>(null);
   const restoreFor = useCallback(async (uid: string) => {
     setRestoring(true);
+    setRestoreSlow(false);
     setRestoreReason(null);
-    const r = await restoreFromCloud(() => setRestoreFailedFor((cur) => (cur === uid ? null : cur)));
+    const r = await restoreFromCloud(
+      () => setRestoreSlow(true),
+      () => setRestoreFailedFor((cur) => (cur === uid ? null : cur)),
+    );
     setRestoreFailedFor(r.ok ? null : uid);
     setRestoreReason(r.ok ? null : r.reason);
     setRestoring(false);
+    setRestoreSlow(false);
     return r.ok;
   }, []);
 
@@ -211,8 +231,8 @@ export function AppShell() {
     const earliest = periodFor(1, todayISO()).start;
     const date = startDate > todayISO() ? todayISO() : startDate < earliest ? earliest : startDate;
     await createPlan(draft, date);
-    posthog.capture('budget_plan_created');
-    posthog.logger.info('budget plan created', { flow: 'onboarding' });
+    captureEvent('budget_plan_created');
+    logInfo('budget plan created', { flow: 'onboarding' });
     setForceWelcome(false); // a plan now exists: leave the post-logout / post-delete Welcome page
     setStartDate(todayISO());
     setBusy(false);
@@ -223,15 +243,15 @@ export function AppShell() {
   async function handleSample() {
     setForceWelcome(false);
     await withLoading('Loading two sample months…', () => enterSampleMode());
-    posthog.capture('sample_mode_started');
-    posthog.logger.info('sample mode started', { data_source: 'sample' });
+    captureEvent('sample_mode_started');
+    logInfo('sample mode started', { data_source: 'sample' });
     setSheet('none');
     setTab('today');
     setSampleIntro(true);
   }
 
   function leaveSample() {
-    posthog.capture('sample_mode_left');
+    captureEvent('sample_mode_left');
     setSampleIntro(false);
     void withLoading('Leaving the sample…', exitSampleMode).then(() => {
       setDraft(null);
@@ -246,7 +266,7 @@ export function AppShell() {
     setForceWelcome(false);
     const who = getAuth().displayName; // always greet by display name, never by email
     const a = getAuth();
-    posthog.capture('account_authenticated', { is_new_account: a.isNew });
+    captureEvent('account_authenticated', { is_new_account: a.isNew });
     if (a.isNew && a.uid) {
       // a brand-new Google account: never copy this phone's guest data silently, ask first
       const found = await describeGuestData().catch(() => null);
@@ -281,12 +301,12 @@ export function AppShell() {
   const lastScreen = useRef<string | null>(null);
   useEffect(() => {
     if (!screen || screen === lastScreen.current) return;
-    posthog.capture('screen_viewed', { screen, from: lastScreen.current ?? 'none', in_sample: inSample, signed_in: auth.status === 'signedIn' });
+    captureEvent('screen_viewed', { screen, from: lastScreen.current ?? 'none', in_sample: inSample, signed_in: auth.status === 'signedIn' });
     lastScreen.current = screen;
   }, [screen, inSample, auth.status]);
-  useEffect(() => { if (showDemo) posthog.capture('demo_opened'); }, [showDemo]);
-  useEffect(() => { if (signInSheet) posthog.capture('sign_in_sheet_opened'); }, [signInSheet]);
-  useEffect(() => { if (moveOffer) posthog.capture('guest_data_offer_shown', { spends: moveOffer.spends }); }, [moveOffer]);
+  useEffect(() => { if (showDemo) captureEvent('demo_opened'); }, [showDemo]);
+  useEffect(() => { if (signInSheet) captureEvent('sign_in_sheet_opened'); }, [signInSheet]);
+  useEffect(() => { if (moveOffer) captureEvent('guest_data_offer_shown', { spends: moveOffer.spends }); }, [moveOffer]);
 
   let body: React.ReactNode = null;
   if (!ready || !snap) {
@@ -294,7 +314,11 @@ export function AppShell() {
   } else if (farewell) {
     body = <ThankYou onDone={() => setFarewell(false)} />;
   } else if (restoring) {
-    body = <LoadingScreen />;
+    body = (
+      <LoadingScreen
+        message={restoreSlow ? 'Still connecting. Your data is safe, this can take a moment.' : 'Bringing your data back…'}
+      />
+    );
   } else if (flow === 'changePlan') {
     body = (
       <Onboarding
@@ -326,8 +350,8 @@ export function AppShell() {
             await createPlan(draft);
             track('onboarding_completed');
           }
-          posthog.capture('budget_plan_updated');
-          posthog.logger.info('budget plan updated', {
+          captureEvent('budget_plan_updated');
+          logInfo('budget plan updated', {
             plan_state: snap.cycle ? 'existing' : 'new',
           });
           setForceWelcome(false);
@@ -520,7 +544,7 @@ export function AppShell() {
         <LogoutDialog
           onCancel={() => setAskLogout(false)}
           onLogout={() => {
-            posthog.capture('logged_out');
+            captureEvent('logged_out');
             setAskLogout(false);
             void withLoading('Signing out…', () => logOut()).then(() => {
               setDraft(null);
@@ -551,7 +575,7 @@ export function AppShell() {
           body="It was saved here before you signed up. Move it to keep it with your account on every device, or start fresh and leave it out. Starting fresh deletes nothing: it just stays on this phone."
           actionLabel="Move them"
           onAction={() => {
-            posthog.capture('guest_data_moved');
+            captureEvent('guest_data_moved');
             const offer = moveOffer;
             setMoveOffer(null);
             void withLoading('Moving your data…', async () => {
@@ -560,7 +584,7 @@ export function AppShell() {
             }).then(() => toast('Moved into your account'));
           }}
           secondaryLabel="Start fresh"
-          onSecondary={() => { posthog.capture('guest_data_start_fresh'); setMoveOffer(null); }}
+          onSecondary={() => { captureEvent('guest_data_start_fresh'); setMoveOffer(null); }}
           onClose={() => {} /* a real question: tapping outside or pressing Escape must not answer it */}
         />
       )}

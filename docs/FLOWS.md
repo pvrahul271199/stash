@@ -48,6 +48,8 @@ Validation: `isPlanValid` (see ARCHITECTURE §3).
 
 ## 3. Returning user / restore
 
+Boot with a signed-in user: `warmUpSupabase()` (`initAuth`) pings Supabase while the local DB opens, so a cold project is awake by the time the first sync runs. On a device with no local plan, `restoreFromCloud` (`AppShell`) runs `syncNow()`: the loader says "Bringing your data back…", changes to "Still connecting…" after 5 s, and shows the "couldn't reach your saved data" screen only after 20 s or on a real error (never onboarding on its own). Lazy screens (Onboarding, PlanSummary, History, Insights, User, Plan, MonthEnd, ThankYou, Demo, sign-in sheet) load on first use.
+
 `UserScreen` with an existing username: `pull()` as in §2.3. `pull()` clears local plan/cycle/days/entries/events and replaces with remote; sets currency from remote; pushes back. ⚠ F-04, F-06, F-07, F-08.
 
 ## 4. Switch user / sign out
@@ -139,7 +141,7 @@ Tapping the logo on Today sets `forceWelcome` (AppShell) and shows `Welcome`. Gu
 
 ## 17. Currency
 
-`UserTab` → choose from 9 currencies → zustand store + localStorage + `stash:currency-change` event → `scheduleSync(true)`. Only the symbol/locale changes; amounts are **not converted**. ⚠ F-18.
+`UserTab` (or the chip row at the top of `Onboarding`, which shows the same list and sets the symbol the amount fields use) → choose from the currency list → zustand store + localStorage + `stash:currency-change` event → `scheduleSync(true)`. Only the symbol/locale changes; amounts are **not converted**. ⚠ F-18.
 
 ## 18. Merge "accidental" cycle
 

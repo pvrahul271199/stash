@@ -1,7 +1,7 @@
 'use client';
 import { useSyncExternalStore } from 'react';
 import Dexie from 'dexie';
-import { getSupabase } from './supabaseClient';
+import { getSupabase, warmUpSupabase } from './supabaseClient';
 import { dbNameFor, openUserDB } from '@/db/schema';
 import { initDB } from '@/db/migrate';
 
@@ -106,6 +106,7 @@ export function initAuth(): Promise<AuthState> {
   if (booted) return booted;
   booted = (async () => {
     const initial = readPersisted();
+    if (initial.uid) warmUpSupabase(); // a signed-in device will sync: wake the project while the local DB opens
     await initDB();
     await openUserDB(initial.uid ?? 'default');
     setState(initial);

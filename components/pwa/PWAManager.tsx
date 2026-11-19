@@ -21,8 +21,19 @@ export function PWAManager() {
     let updateTimer: ReturnType<typeof setInterval> | undefined;
     if ('serviceWorker' in navigator && process.env.NODE_ENV === 'production') {
       const hadController = !!navigator.serviceWorker.controller;
-      navigator.serviceWorker
-        .register('/sw.js', { scope: '/' })
+      // Register only once the page has loaded and the browser is idle. Registering at mount made a first-time visitor's worker
+      // download the whole site (cache: 'reload') in parallel with the lazy screen chunks the user is waiting for.
+      const registerWhenIdle = (): Promise<ServiceWorkerRegistration> =>
+        new Promise((resolve, reject) => {
+          const go = () => {
+            const run = () => navigator.serviceWorker.register('/sw.js', { scope: '/' }).then(resolve, reject);
+            if ('requestIdleCallback' in window) window.requestIdleCallback(run, { timeout: 8000 });
+            else setTimeout(run, 3000);
+          };
+          if (document.readyState === 'complete') go();
+          else window.addEventListener('load', go, { once: true });
+        });
+      registerWhenIdle()
         .then((reg) => {
           if (cancelled) return;
           if (reg.waiting && navigator.serviceWorker.controller) set({ waiting: reg.waiting });

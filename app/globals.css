@@ -217,3 +217,11 @@ select:focus {
 @keyframes tap-ripple { 0% { transform: scale(0.3); opacity: 0.55; } 70%, 100% { transform: scale(1.5); opacity: 0; } }
 .tap-hand { animation: tap-press 1.6s ease-in-out infinite; }
 .tap-ripple { animation: tap-ripple 1.6s ease-out infinite; }
+
+/* Horizontal chip rows (currency on the first screen): swipe or drag, no scrollbar at all. */
+.chips-scroll {
+  scrollbar-width: none;
+}
+.chips-scroll::-webkit-scrollbar {
+  display: none;
+}
