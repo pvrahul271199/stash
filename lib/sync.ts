@@ -1,5 +1,5 @@
 import Dexie from 'dexie';
-import { getDB, getActiveDBUid, dbNameFor, GUEST_UID, nextRev, withoutRevStamp, type CategoryRow, type Income, type LeftoverSaving, type Loan, type Plan, type StashDB, type StashEvent, type SyncBase, type SyncFailure, type Txn } from '@/db/schema';
+import { getDB, getActiveDBUid, dbNameFor, GUEST_UID, nextRev, withoutRevStamp, type CategoryRow, type Income, type LeftoverSaving, type MonthRecap, type Loan, type Plan, type StashDB, type StashEvent, type SyncBase, type SyncFailure, type Txn } from '@/db/schema';
 import { getAuth, getAccessToken } from './auth';
 import { getSupabase, supabaseEnv } from './supabaseClient';
 import { decodeBase64Username, encodeUsernameToBase64 } from './user';
@@ -257,6 +257,21 @@ export const MAPPERS = {
       createdAt: Number(r.created_at),
     }),
   },
+  month_recaps: {
+    local: 'monthRecaps' as const,
+    toRemote: (m: MonthRecap) => ({
+      ...common(m),
+      month_id: m.monthId,
+      seen_at: m.seenAt,
+    }),
+    toLocal: (r: Remote): MonthRecap => ({
+      id: r.id,
+      updatedAt: r.client_updated_at,
+      deletedAt: ms(r.deleted_at),
+      monthId: r.month_id as string,
+      seenAt: Number(r.seen_at),
+    }),
+  },
 };
 
 type TableName = keyof typeof MAPPERS;
@@ -264,7 +279,7 @@ type TableName = keyof typeof MAPPERS;
  * Parents first: transactions reference categories and events (events.id is a real FK remotely).
  * `cycles` is not synced any more: months are derived from plans + transactions (lib/period.ts, E-4).
  */
-export const TABLE_ORDER: TableName[] = ['plans', 'categories', 'events', 'transactions', 'loans', 'incomes', 'leftover_savings'];
+export const TABLE_ORDER: TableName[] = ['plans', 'categories', 'events', 'transactions', 'loans', 'incomes', 'leftover_savings', 'month_recaps'];
 
 export type RemoteRows = Partial<Record<TableName, Remote[]>>;
 
@@ -567,7 +582,7 @@ async function scanDirty(db: StashDB, cutoff: number): Promise<{ refs: Ref[]; ma
   const seen = new Set<string>();
   // One read transaction over every table: a write that already took its rev has either committed
   // (and is seen) or is still running (and this read waits for it), so no lower rev can appear later.
-  await db.transaction('r', [db.plans, db.cats, db.evts, db.transactions, db.loans, db.incomes, db.leftovers], async () => {
+  await db.transaction('r', [db.plans, db.cats, db.evts, db.transactions, db.loans, db.incomes, db.leftovers, db.monthRecaps], async () => {
     for (const name of TABLE_ORDER) {
       const table = db[MAPPERS[name].local] as unknown as Dexie.Table<{ id: string; updatedAt: number; localRev?: number }, string>;
       const dirty = await table.where('localRev').above(sinceRev).toArray();
@@ -621,7 +636,7 @@ export async function pushDirty(db: StashDB): Promise<number> {
 type Cursor = { ts: string; id: string };
 
 /** Tables the app can live without while the server schema catches up. */
-const OPTIONAL_TABLES = new Set<string>(['leftover_savings', 'loans', 'incomes']);
+const OPTIONAL_TABLES = new Set<string>(['leftover_savings', 'loans', 'incomes', 'month_recaps']);
 
 /**
  * Downloads every page of one table newer than its cursor, without writing anything. The pages of one table depend on
@@ -696,7 +711,7 @@ export async function applyRemote(db: StashDB, rows: RemoteRows, owner: string |
   const { dedupeCategories, migrateToPeriods } = await import('@/db/queries');
   await db.transaction(
     'rw',
-    [db.plans, db.transactions, db.cats, db.evts, db.loans, db.incomes, db.leftovers, db.meta, db.syncBase],
+    [db.plans, db.transactions, db.cats, db.evts, db.loans, db.incomes, db.leftovers, db.monthRecaps, db.meta, db.syncBase],
     async () => {
       for (const name of TABLE_ORDER) {
         const list = rows[name];

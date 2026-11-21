@@ -18,6 +18,7 @@ import { EditSpendSheet } from './EditSpendSheet';
 import { LogSpend } from './LogSpend';
 import { incomeBetween, incomeLabel } from '@/lib/income';
 import { LendTab } from './LendTab';
+import { MonthRecapButton } from './MonthRecaps';
 import { TitleTabs } from '../ui/TitleTabs';
 import {
   buildMonthCalendar,
@@ -160,7 +161,7 @@ export function HistoryTab({ activeCycle, plan, initialTab = 'spends' }: { activ
   }
 
   return (
-    <div className="flex-1 overflow-y-auto px-6 pb-8 pt-6">
+    <div className="flex flex-1 flex-col overflow-y-auto px-6 pb-8 pt-6 [&>*]:shrink-0">
       {titleTabs}
 
       {/* Search bar across all days and cycles */}
@@ -682,6 +683,7 @@ export function HistoryTab({ activeCycle, plan, initialTab = 'spends' }: { activ
           </section>
           </div>
           )}
+          {plan && <MonthRecapButton plan={plan} monthPrefix={monthPrefix} />}
         </>
       )}
 

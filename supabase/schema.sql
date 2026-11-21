@@ -267,6 +267,38 @@ do $$ begin
   end if;
 end $$;
 
+-- ---------- month_recaps ----------
+-- A finished month whose recap the user already saw (one row per user per month). month_id is the derived period id,
+-- e.g. p:2026-10-01:31. Synced so the month-end recap is shown once per account, not once per device or login.
+-- DEPLOY THIS BEFORE THE APP VERSION THAT SYNCS `month_recaps`: a client pulling a missing table is told it is optional, but pushes fail.
+create table if not exists public.month_recaps (
+  id uuid primary key,
+  user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  client_updated_at bigint not null,
+  updated_at timestamptz not null default now(),
+  deleted_at timestamptz,
+  month_id text not null,
+  seen_at bigint not null
+);
+create index if not exists idx_month_recaps_user_updated on public.month_recaps (user_id, updated_at);
+alter table public.month_recaps add column if not exists version bigint not null default 1;
+drop trigger if exists trg_month_recaps_lww on public.month_recaps;
+create trigger trg_month_recaps_lww before update on public.month_recaps
+  for each row execute function public.stash_lww_guard();
+drop trigger if exists trg_month_recaps_touch on public.month_recaps;
+create trigger trg_month_recaps_touch before insert or update on public.month_recaps
+  for each row execute function public.stash_touch();
+alter table public.month_recaps enable row level security;
+revoke all on public.month_recaps from anon;
+drop policy if exists month_recaps_own on public.month_recaps;
+create policy month_recaps_own on public.month_recaps for all
+  using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'month_recaps_size_check') then
+    alter table public.month_recaps add constraint month_recaps_size_check check (length(month_id) <= 64) not valid;
+  end if;
+end $$;
+
 -- ---------- loans ----------
 -- Money the user lent to someone (docs/ENHANCEMENTS.md E-LEND). The money that left the wallet is an ordinary row in
 -- `transactions` (category Lend); txn_id links to it WITHOUT a foreign key (a soft-deleted or purged spend must not block
@@ -503,7 +535,7 @@ create or replace function public.push_changes(p_mutation_id uuid, p_changes jso
 returns jsonb language plpgsql as $$
 declare
   v_uid uuid := auth.uid();
-  v_tables constant text[] := array['plans', 'categories', 'events', 'transactions', 'loans', 'incomes', 'leftover_savings'];
+  v_tables constant text[] := array['plans', 'categories', 'events', 'transactions', 'loans', 'incomes', 'leftover_savings', 'month_recaps'];
   t text;
   r jsonb;
   v_cur jsonb;
@@ -641,7 +673,7 @@ create or replace function public.purge_deleted_data(p_older_than interval defau
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare
   v_cut timestamptz := now() - p_older_than;
-  v_tx bigint; v_ev bigint; v_cat bigint; v_pl bigint; v_mut bigint; v_lo bigint; v_ln bigint; v_in bigint;
+  v_tx bigint; v_ev bigint; v_cat bigint; v_pl bigint; v_mut bigint; v_lo bigint; v_ln bigint; v_in bigint; v_mr bigint;
 begin
   delete from public.transactions where deleted_at is not null and deleted_at < v_cut;
   get diagnostics v_tx = row_count;
@@ -657,9 +689,11 @@ begin
   get diagnostics v_ln = row_count;
   delete from public.incomes where deleted_at is not null and deleted_at < v_cut;
   get diagnostics v_in = row_count;
+  delete from public.month_recaps where deleted_at is not null and deleted_at < v_cut;
+  get diagnostics v_mr = row_count;
   delete from public.push_mutations where created_at < now() - interval '14 days';
   get diagnostics v_mut = row_count;
-  return jsonb_build_object('incomes', v_in, 'loans', v_ln, 'leftover_savings', v_lo, 'transactions', v_tx, 'events', v_ev, 'categories', v_cat, 'plans', v_pl, 'push_mutations', v_mut);
+  return jsonb_build_object('month_recaps', v_mr, 'incomes', v_in, 'loans', v_ln, 'leftover_savings', v_lo, 'transactions', v_tx, 'events', v_ev, 'categories', v_cat, 'plans', v_pl, 'push_mutations', v_mut);
 end $$;
 revoke all on function public.purge_deleted_data(interval) from public, anon, authenticated;
 

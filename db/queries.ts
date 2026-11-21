@@ -223,7 +223,7 @@ export interface Snapshot {
   previous: DerivedCycle | undefined;
   /** Whether the month-end summary of `previous` was already seen on this device. */
   previousSeen: boolean;
-  /** Finished months the user logged on the last day of, not yet seen on this device, oldest first. */
+  /** Last month, when the user logged on its last day and has not seen its recap yet (at most one). */
   pending: DerivedCycle[];
 }
 
@@ -234,19 +234,16 @@ export async function loadSnapshot(db: StashDB, today: string): Promise<Snapshot
   // tracking started mid-month). It must exist (tracking had started) and have spends, or there is nothing to summarise.
   const earlier = cycle ? await cycleFor(db, addDays(cycle.monthStart, -1), today) : undefined;
   const previous = earlier && (earlier.fromSavingsTotal > 0 || earlier.days.some((d) => d.spent > 0)) ? earlier : undefined;
-  const previousSeen = !previous || (meta?.monthSummarySeen ?? []).includes(previous.id);
-  // The month-end screen has one rule: the user logged something on a month's LAST day and the month has since turned over.
-  // It is a recap (spent, saved first, left over), shown once. Nothing else gates it: not "close the day", not whether the plan
-  // was budgeted, not the device's clock marker, not whether money is left. Seen months never come back.
-  const seen = new Set(meta?.monthSummarySeen ?? []);
+  const previousSeen = !previous || (meta?.monthSummarySeen ?? []).includes(previous.id) || (await db.monthRecaps.where('monthId').equals(previous.id).toArray()).some(alive);
+  // The month-end screen has one rule: the user logged something on the LAST day of the month that has just ended (last month),
+  // and has not seen that recap yet. Nothing else gates it: not "close the day", not whether money is left. Older months are
+  // never pushed at the user (they live in History > Month recaps). "Seen" is the synced `monthRecaps` table (plus the old
+  // per-device meta list), so a login, a new device or a reinstall does not bring a recap back.
+  const seen = new Set([...(meta?.monthSummarySeen ?? []), ...(await db.monthRecaps.toArray()).filter(alive).map((r) => r.monthId)]);
   const pending: DerivedCycle[] = [];
-  if (cycle) {
-    for (const c of await allCycles(db, today)) {
-      if (c.monthEnd >= today || seen.has(c.id)) continue;
-      const onLastDay = (await db.transactions.where('txnDate').equals(c.monthEnd).toArray()).some(alive);
-      if (onLastDay) pending.push(c);
-    }
-    pending.reverse(); // oldest first
+  if (cycle && earlier && !seen.has(earlier.id)) {
+    const onLastDay = (await db.transactions.where('txnDate').equals(earlier.monthEnd).toArray()).some(alive);
+    if (onLastDay) pending.push(earlier);
   }
   return { plan, cycle, previous, previousSeen, pending };
 }
@@ -1044,11 +1041,33 @@ export function useSavedFromLeftovers() {
   return useLiveQuery(async () => leftoverTotals(await getDB().leftovers.toArray()), [], NO_LEFTOVERS) ?? NO_LEFTOVERS;
 }
 
-/** Hides the month-end summary of a finished month on this device. */
+/** Marks a finished month's recap as seen. Synced (`monthRecaps`), so it stays seen on every device and after a login. */
 export async function dismissMonthSummary(cycleId: string): Promise<void> {
   const db = getDB();
-  const seen = (await db.meta.get('main'))?.monthSummarySeen ?? [];
-  if (!seen.includes(cycleId)) await db.meta.update('main', { monthSummarySeen: [...seen, cycleId] });
+  const now = Date.now();
+  await db.transaction('rw', [db.monthRecaps, db.meta], async () => {
+    const rows = await db.monthRecaps.where('monthId').equals(cycleId).toArray();
+    const live = rows.find(alive);
+    if (live) return;
+    const dead = rows[0];
+    if (dead) await db.monthRecaps.update(dead.id, { deletedAt: null, seenAt: now, updatedAt: now });
+    else await db.monthRecaps.add({ id: uuid(), monthId: cycleId, seenAt: now, updatedAt: now });
+  });
+  requestSync();
+}
+
+/** Finished months (newest first) that can be looked back on in History: any past month with something logged. */
+export function usePastMonthRecaps(): { cycle: DerivedCycle; seen: boolean }[] | undefined {
+  const today = useToday();
+  return useLiveQuery(async () => {
+    const db = getDB();
+    const [cycles, meta, rows] = await Promise.all([allCycles(db, today), db.meta.get('main'), db.monthRecaps.toArray()]);
+    const seen = new Set([...(meta?.monthSummarySeen ?? []), ...rows.filter(alive).map((r) => r.monthId)]);
+    return cycles
+      .filter((c) => c.monthEnd < today && (c.fromSavingsTotal > 0 || c.days.some((d) => d.spent > 0)))
+      .sort((a, b) => b.monthStart.localeCompare(a.monthStart))
+      .map((cycle) => ({ cycle, seen: seen.has(cycle.id) }));
+  }, [today]);
 }
 
 /* ---------- categories ----------
@@ -1475,12 +1494,13 @@ export async function deleteAllData(): Promise<void> {
   const now = Date.now();
   await db.transaction(
     'rw',
-    [db.plans, db.transactions, db.cats, db.evts, db.leftovers, db.loans, db.incomes, db.meta],
+    [db.plans, db.transactions, db.cats, db.evts, db.leftovers, db.loans, db.incomes, db.monthRecaps, db.meta],
     async () => {
       const tombstone = { deletedAt: now, updatedAt: now };
       await db.leftovers.toCollection().modify(tombstone);
       await db.loans.toCollection().modify(tombstone);
       await db.incomes.toCollection().modify(tombstone);
+      await db.monthRecaps.toCollection().modify(tombstone);
       await db.transactions.toCollection().modify(tombstone);
       await db.plans.toCollection().modify(tombstone);
       await db.cats.toCollection().modify(tombstone);
