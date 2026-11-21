@@ -161,7 +161,7 @@ export function HistoryTab({ activeCycle, plan, initialTab = 'spends' }: { activ
   }
 
   return (
-    <div className="flex flex-1 flex-col overflow-y-auto px-6 pb-8 pt-6 [&>*]:shrink-0">
+    <div className="no-scrollbar flex flex-1 flex-col overflow-y-auto px-6 pb-8 pt-6 [&>*]:shrink-0">
       {titleTabs}
 
       {/* Search bar across all days and cycles */}
