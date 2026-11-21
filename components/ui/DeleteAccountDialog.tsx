@@ -9,7 +9,7 @@ export function DeleteAccountDialog({ onDone, onCancel }: { onDone: () => void; 
   const [error, setError] = useState<string | null>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
-    cancelRef.current?.focus();
+    cancelRef.current?.focus({ preventScroll: true }); // no scroll jump when the dialog opens
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && !busy && onCancel();
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);

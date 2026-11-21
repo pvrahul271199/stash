@@ -64,7 +64,7 @@ export function GoogleSignInSheet({
       acceptSyncConsent('google'); // before sign-in so the first sync is not held back by the consent gate
       const res = await signInWithGoogleToken(idToken, nonce);
       if (!mounted.current) return;
-      setBusy(false);
+      if (!res.ok) setBusy(false); // on success stay "Signing in…" until the sheet closes
       if (res.ok) {
         void flushConsentRecord();
         cb.current.onSignedIn();

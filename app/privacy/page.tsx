@@ -62,7 +62,10 @@ export default function PrivacyPage() {
           <li>Export all your spends as a CSV file at any time (User tab).</li>
           <li>Correct your plan and spends at any time inside the app.</li>
           <li>Log out to stop backing up. Your data stays in your account until you delete it.</li>
-          <li>Withdraw consent and erase everything with &ldquo;Delete my account&rdquo; (User tab).</li>
+          <li>
+            Withdraw consent and erase everything with &ldquo;Delete my account&rdquo; (User tab). Steps are on the{' '}
+            <a href="/delete-account/" className="underline">delete account page</a>.
+          </li>
           <li>Ask us a question or raise a complaint using the contact below.</li>
         </ul>
       </LegalSection>

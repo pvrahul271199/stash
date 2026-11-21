@@ -700,9 +700,7 @@ export function UserTab({
       {/* Account & Device Actions */}
       <section className="mt-6 flex flex-col gap-2" aria-label="Account management">
         <SecondaryButton onClick={doExport}>Export all spends to CSV</SecondaryButton>
-        {auth.status === 'signedIn' ? (
-          <SecondaryButton onClick={onSwitchUser}>Log out</SecondaryButton>
-        ) : (
+        {auth.status !== 'signedIn' && (
           <SecondaryButton onClick={onLogIn} className="flex flex-col items-center justify-center leading-tight">
             <span>Sign up or log in with Google</span>
             <span className="text-[11px] font-normal text-faint">Guest data is not backed up</span>
@@ -726,6 +724,7 @@ export function UserTab({
             Delete my account
           </button>
         )}
+        {auth.status === 'signedIn' && <SecondaryButton onClick={onSwitchUser}>Log out</SecondaryButton>}
         <GhostButton onClick={() => {
             setFeedbackOpen(true);
             track('feedback_opened');

@@ -12,7 +12,7 @@ export function LogoutDialog({ onLogout, onCancel }: { onLogout: () => void; onC
   const [unsynced, setUnsynced] = useState<number | null>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
-    cancelRef.current?.focus();
+    cancelRef.current?.focus({ preventScroll: true }); // no scroll jump when the dialog opens
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onCancel();
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);

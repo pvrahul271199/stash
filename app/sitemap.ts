@@ -10,6 +10,7 @@ const PAGES: { path: string; lastModified: string }[] = [
   { path: '/about/', lastModified: '2026-11-08' },
   { path: '/privacy/', lastModified: '2026-11-06' },
   { path: '/terms/', lastModified: '2026-11-06' },
+  { path: '/delete-account/', lastModified: '2026-11-21' },
 ];
 
 export default function sitemap(): MetadataRoute.Sitemap {
