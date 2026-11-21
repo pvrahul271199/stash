@@ -5,7 +5,8 @@ import { BackIcon, IconButton, PrimaryButton } from '../ui/Button';
 import { removeEntry } from '@/db/queries';
 import { useToast } from '@/store/toast';
 import type { Entry } from '@/db/schema';
-import { inr, num } from '@/lib/format';
+import { inr } from '@/lib/format';
+import { HugeNumber } from '../ui/HugeNumber';
 import { closeDay, spentToday, todayAllowance, type CycleState } from '@/lib/budget';
 
 /**
@@ -35,9 +36,7 @@ export function CloseDay({
   const daysAfter = Math.max(1, cycle.totalDays - cycle.currentDay);
   const days = `${daysAfter} ${daysAfter === 1 ? 'day' : 'days'}`;
   const change = inr(Math.abs(roundMoney(delta)));
-  const note = allowance <= 0
-    ? "This month's spending money is used up."
-    : kind === 'onplan'
+  const note = kind === 'onplan'
       ? 'Right on plan. Tomorrow stays the same.'
       : kind === 'less'
         ? `Kept ${inr(allowance - spent)} today, so each of the next ${days} gets a bit more.`
@@ -59,11 +58,8 @@ export function CloseDay({
       <div className="flex-1 overflow-y-auto">
         <p className="mt-2 text-[14px] text-soft">Spent today</p>
         <div className="flex items-baseline gap-2">
-          <p className="num text-[44px] leading-[1.05] text-ink">
-            <span className="text-faint">₹</span>
-            {num(spent)}
-          </p>
-          <p className="num text-[14px] text-faint">of {inr(allowance)}</p>
+          <HugeNumber value={spent} size={44} className="min-w-0 shrink" />
+          <p className="num shrink-0 text-[14px] text-faint">of {inr(allowance)}</p>
         </div>
         <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-tint" role="img" aria-label={`${pct}% of today's amount`}>
           <div className={`h-full rounded-full ${over ? 'bg-warm' : 'bg-good'}`} style={{ width: `${pct}%` }} />
@@ -93,7 +89,7 @@ export function CloseDay({
                   </svg>
                 </>
               )}
-              <p className="num text-[34px] leading-none text-ink">{inr(tomorrowAllowance)}</p>
+              <HugeNumber value={tomorrowAllowance} size={34} className="min-w-0 shrink" />
             </div>
             <p className="mt-3 text-[13px] leading-snug text-soft">{note}</p>
           </div>

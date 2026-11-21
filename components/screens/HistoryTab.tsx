@@ -524,7 +524,7 @@ export function HistoryTab({ activeCycle, plan, initialTab = 'spends' }: { activ
                               : 'text-faint'
                           }`}
                         >
-                          {spent === 0 && (stat?.lent ?? 0) > 0 ? `${compactINR(stat!.lent)} lent` : hasData || isToday ? compactINR(spent) : cell.isCurrentMonth ? '—' : ''}
+                          {(hasData && !(spent === 0 && (stat?.lent ?? 0) > 0)) || isToday ? compactINR(spent) : cell.isCurrentMonth ? '—' : ''}
                         </span>
                       </button>
                     );

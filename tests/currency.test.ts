@@ -56,7 +56,7 @@ describe('Multi-currency engine', () => {
     expect(formatWithCurrency(12500, SUPPORTED_CURRENCIES.find((c) => c.code === 'SAR')!)).toBe('SAR 12,500');
     setStoredCurrency('OMR');
     expect(inr(2500)).toBe('OMR 2,500');
-    expect(compactINR(1500000)).toBe('OMR 1.5M');
+    expect(compactINR(1500000)).toBe('O 1.5M');
   });
 
   it('is backward compatible: saved codes still resolve, unknown or lowercase codes fall back safely', () => {

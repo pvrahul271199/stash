@@ -4,7 +4,6 @@ import { track } from '@/lib/analytics';
 import { captureEvent } from '@/lib/analytics';
 import { useEffect, useRef, useState } from 'react';
 import { PrimaryButton, SecondaryButton } from '../ui/Button';
-import { Note } from '../ui/Chip';
 import { useToast } from '@/store/toast';
 import { Logo } from '../ui/Logo';
 import { HugeNumber } from '../ui/HugeNumber';
@@ -23,7 +22,6 @@ import { loanName, loanStatus, openLoans, remaining as loanRemaining } from '@/l
 import type { Entry, Plan } from '@/db/schema';
 import { monthView, type DerivedCycle } from '@/lib/period';
 import {
-  POOL_USED_UP_MESSAGE,
   daysLeft,
   displayLeft,
   overMessage,
@@ -88,7 +86,6 @@ export function TodayTab({ cycle, plan, onCreateAccount, onHome, onOpenLend }: {
   const left = displayLeft(allowance, spent);
   const n = daysLeft(state);
   const over = overMessage(allowance, spent, state);
-  const used = state.pool <= 0;
 
   // The strip shows the whole month (1..30/31). Days before tracking began are muted but can still be logged into.
   const month = monthView(cycle);
@@ -145,9 +142,7 @@ export function TodayTab({ cycle, plan, onCreateAccount, onHome, onOpenLend }: {
         <HugeNumber value={left} size={52} className="mt-1" />
 
         <div className="mt-[clamp(2px,1vw,5px)] min-h-[clamp(18px,6vw,24px)]">
-          {used ? (
-            <Note tone="adjust">{POOL_USED_UP_MESSAGE}</Note>
-          ) : over ? (
+          {over ? (
             <p className="text-[13px] font-medium leading-snug tracking-[0.01em] text-warm">{over}</p>
           ) : (
             <p className="text-[15px] text-good">

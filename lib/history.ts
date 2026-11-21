@@ -178,8 +178,9 @@ export function dayTotalsByDate(
 /** Compact currency label (e.g. "₹1.2k" or "$1.2k") that fits inside a calendar cell. */
 export function compactINR(n: number): string {
   const info = useCurrencyStore.getState().currency;
-  const sym = info.symbol;
-  const space = sym.length > 1 ? ' ' : '';
+  // 3-letter symbols (AED, OMR…) take too much room in a cell: first letter only, still followed by a space.
+  const sym = info.symbol.length >= 3 ? info.symbol[0] : info.symbol;
+  const space = info.symbol.length > 1 ? ' ' : '';
   const r = roundMoney1(n); // calendar cells: 1 decimal place
   const sign = r < 0 ? '-' : '';
   const a = Math.abs(r);

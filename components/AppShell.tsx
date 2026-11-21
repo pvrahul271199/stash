@@ -27,6 +27,7 @@ const HistoryTab = dynamic(() => import('./screens/HistoryTab').then((m) => m.Hi
 const InsightsTab = dynamic(() => import('./screens/InsightsTab').then((m) => m.InsightsTab), { ssr: false, loading: screenFallback });
 const UserTab = dynamic(() => import('./screens/UserTab').then((m) => m.UserTab), { ssr: false, loading: screenFallback });
 const ThankYou = dynamic(() => import('./screens/ThankYou').then((m) => m.ThankYou), { ssr: false, loading: screenFallback });
+const HowItWorksTour = dynamic(() => import('./screens/HowItWorks').then((m) => m.HowItWorksTour), { ssr: false });
 const Demo = dynamic(() => import('./screens/Demo').then((m) => m.Demo), { ssr: false });
 const GoogleSignInSheet = dynamic(() => import('./ui/GoogleSignInSheet').then((m) => m.GoogleSignInSheet), { ssr: false });
 import { preloadGoogle } from '@/lib/googleSignIn';
@@ -555,7 +556,8 @@ export function AppShell() {
           }}
         />
       )}
-      {showDemo && <Demo onClose={() => setShowDemo(false)} />}
+      {/* Guests get the real-screens tour (it borrows the sample sandbox); a signed-in account cannot, so it keeps the drawn one. */}
+      {showDemo && (auth.status === 'signedIn' ? <Demo onClose={() => setShowDemo(false)} /> : <HowItWorksTour onClose={() => setShowDemo(false)} />)}
       {signInSheet && (
         <GoogleSignInSheet
           onClose={() => setSignInSheet(false)}

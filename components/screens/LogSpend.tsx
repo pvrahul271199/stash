@@ -594,10 +594,11 @@ export function LogSpend({
           </div>
 
           <div
-            className="flex flex-1 flex-col items-center justify-center"
+            className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto"
             aria-live="polite"
             onClick={() => eventMenuOpen && setEventMenuOpen(false)}
           >
+            <div className="my-auto flex w-full flex-col items-center">
             {isOutsideActiveCycle ? (
               <span className="mb-1.5 inline-flex items-center gap-1.5 rounded-full bg-tint px-3 py-0.5 text-[11px] font-medium text-ink">
                 {targetDateLabel} · Historical date
@@ -813,9 +814,10 @@ export function LogSpend({
               </div>
             )}
             </div>
+            </div>
           </div>
 
-          <div className="mb-2 min-h-[70px]">
+          <div className="mb-2 min-h-[70px] shrink-0">
           {mode === 'spend' && (
           <div className="flex flex-wrap justify-center gap-1.5">
             {chips.map((c) => (
@@ -847,7 +849,7 @@ export function LogSpend({
           <Keypad onKey={press} pendingOp={calc.op} opSelected={calc.digits === ''} calc />
           <PrimaryButton
             disabled={saving}
-            className="mt-2 h-[46px] min-h-0 text-[15px]"
+            className="mt-2 h-[46px] min-h-0 shrink-0 text-[15px]"
             onClick={() => (mode === 'lend' ? commitLend() : mode === 'income' ? commitIncome() : commit({ label: 'Sort later' }))}
           >
             {saving ? 'Saving…' : mode === 'lend' ? 'Save lend' : mode === 'income' ? 'Add income' : 'Save'}
