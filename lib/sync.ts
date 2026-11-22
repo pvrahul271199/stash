@@ -339,6 +339,9 @@ async function authed(path: string, init: RequestInit): Promise<Response> {
   return res;
 }
 
+/** Authenticated PostgREST call with the one-shot token refresh. Used by lib/groups.ts (shared group data is not synced). */
+export const authedFetch = authed;
+
 /* ---------- merge ---------- */
 
 /** Bookkeeping columns: never merged field-by-field and never compared when looking for local edits. */

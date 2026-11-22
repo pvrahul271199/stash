@@ -173,6 +173,12 @@ select:focus {
 /* Calculator tape lines ease in when an operator is chosen. */
 @keyframes calc-pop { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 .calc-pop { animation: calc-pop 0.22s cubic-bezier(0.22, 1, 0.36, 1); }
+/* Splits sheets and full-screen cards: fade the backdrop, slide the panel up a little. */
+@keyframes splits-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes splits-up { from { transform: translateY(24px); opacity: 0.6; } to { transform: none; opacity: 1; } }
+.splits-fade { animation: splits-fade 0.2s ease-out; }
+.splits-up { animation: splits-up 0.28s cubic-bezier(0.22, 1, 0.36, 1); }
+@media (prefers-reduced-motion: reduce) { .splits-fade, .splits-up { animation: none; } }
 /* Content rises into place (staggered with animation-delay); bars grow up from their base. */
 @keyframes stash-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
 .stash-rise { opacity: 0; animation: stash-rise 0.55s cubic-bezier(0.22, 1, 0.36, 1) forwards; }

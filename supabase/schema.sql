@@ -919,3 +919,318 @@ alter table public.leftover_savings alter column amount  type numeric(14,2);
 alter table public.plans            alter column income  type numeric(14,2);
 alter table public.plans            alter column bills   type numeric(14,2);
 alter table public.plans            alter column savings type numeric(14,2);
+
+-- ---------- splits: shared group expenses ----------
+-- DIFFERENT FROM EVERY TABLE ABOVE: these rows belong to a GROUP, not to one user, so they are NOT synced through
+-- push_changes / lib/sync.ts and the client's "drop rows owned by someone else" rule (F-38) does not apply to them.
+-- Access is by membership: a user can read a group's rows only if they are in group_members, and nobody writes the
+-- tables directly (no insert/update/delete grant): every write is a security definer function below that checks who is
+-- calling. Splits never touch the user's own budget (plans/transactions).
+-- DEPLOY THIS BEFORE THE APP VERSION WITH THE Splits TAB.
+create table if not exists public.group_rooms (
+  id uuid primary key default gen_random_uuid(),
+  name text not null check (char_length(btrim(name)) between 1 and 60),
+  currency text not null default 'INR' check (char_length(currency) between 1 and 8),
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  link_code text not null unique,
+  invitation_expired boolean not null default false,   -- true = invites closed
+  invite_expires_at timestamptz,                       -- hard expiry of the link (null = none)
+  deleted_at timestamptz
+);
+
+create table if not exists public.group_members (
+  group_id uuid not null references public.group_rooms(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  display_name text not null default 'Member',        -- snapshot at join, so old items keep a readable name
+  joined_at timestamptz not null default now(),
+  primary key (group_id, user_id)
+);
+create index if not exists idx_group_members_user on public.group_members (user_id);
+
+-- type GROUPTRANSACTION. user_share = {"<uid>": amount, ...}; the shares add up to total (checked in add_group_item).
+create table if not exists public.group_transactions (
+  id uuid primary key default gen_random_uuid(),
+  group_id uuid not null references public.group_rooms(id) on delete cascade,
+  created_by uuid,
+  created_at timestamptz not null default now(),
+  paid_by uuid not null,
+  total numeric(14,2) not null check (total > 0),
+  item_type text not null check (char_length(item_type) between 1 and 30),
+  item_subtype text check (char_length(item_subtype) <= 30),
+  notes text check (char_length(notes) <= 200),
+  currency text not null,
+  user_share jsonb not null check (jsonb_typeof(user_share) = 'object'),
+  deleted_at timestamptz
+);
+create index if not exists idx_group_tx_group on public.group_transactions (group_id, created_at desc);
+
+-- A payment between two members ("Settle"): from_user paid to_user. Counted in the balances, never in the item total.
+create table if not exists public.group_settlements (
+  id uuid primary key default gen_random_uuid(),
+  group_id uuid not null references public.group_rooms(id) on delete cascade,
+  from_user uuid not null,
+  to_user uuid not null,
+  amount numeric(14,2) not null check (amount > 0),
+  created_by uuid,
+  created_at timestamptz not null default now(),
+  deleted_at timestamptz,
+  check (from_user <> to_user)
+);
+create index if not exists idx_group_settle_group on public.group_settlements (group_id, created_at desc);
+
+-- membership test used by the policies (security definer, so the policy on group_members does not recurse into itself)
+create or replace function public.is_group_member(p_group uuid)
+returns boolean language sql security definer stable set search_path = public as $$
+  select exists (select 1 from public.group_members where group_id = p_group and user_id = auth.uid());
+$$;
+revoke all on function public.is_group_member(uuid) from public, anon;
+grant execute on function public.is_group_member(uuid) to authenticated;
+
+alter table public.group_rooms enable row level security;
+alter table public.group_members enable row level security;
+alter table public.group_transactions enable row level security;
+alter table public.group_settlements enable row level security;
+revoke all on public.group_rooms, public.group_members, public.group_transactions, public.group_settlements from anon, authenticated;
+grant select on public.group_rooms, public.group_members, public.group_transactions, public.group_settlements to authenticated;
+drop policy if exists group_rooms_read on public.group_rooms;
+create policy group_rooms_read on public.group_rooms for select using (public.is_group_member(id));
+drop policy if exists group_members_read on public.group_members;
+create policy group_members_read on public.group_members for select using (public.is_group_member(group_id));
+drop policy if exists group_tx_read on public.group_transactions;
+create policy group_tx_read on public.group_transactions for select using (public.is_group_member(group_id));
+drop policy if exists group_settle_read on public.group_settlements;
+create policy group_settle_read on public.group_settlements for select using (public.is_group_member(group_id));
+
+create or replace function public.stash_display_name(p_uid uuid)
+returns text language sql security definer stable set search_path = public as $$
+  select coalesce(nullif(btrim(p.display_name), ''), nullif(split_part(coalesce(p.email, ''), '@', 1), ''), 'Member')
+  from (select 1) x left join public.profiles p on p.id = p_uid;
+$$;
+revoke all on function public.stash_display_name(uuid) from public, anon, authenticated;
+
+-- create_group: makes the room, adds the caller, returns {id, link_code}. The link is valid for 7 days.
+create or replace function public.create_group(p_name text, p_currency text default 'INR')
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare v_uid uuid := auth.uid(); v_id uuid; v_code text;
+begin
+  if v_uid is null then raise exception 'not authenticated' using errcode = '28000'; end if;
+  if p_name is null or char_length(btrim(p_name)) not between 1 and 60 then raise exception 'bad name' using errcode = '22023'; end if;
+  if (select count(*) from public.group_rooms where created_by = v_uid and created_at > now() - interval '1 day') >= 20 then
+    raise exception 'too many groups' using errcode = '54000';
+  end if;
+  v_code := substr(replace(gen_random_uuid()::text, '-', ''), 1, 12);
+  insert into public.group_rooms (name, currency, created_by, link_code, invite_expires_at)
+  values (btrim(p_name), coalesce(nullif(btrim(p_currency), ''), 'INR'), v_uid, v_code, now() + interval '7 days')
+  returning id into v_id;
+  insert into public.group_members (group_id, user_id, display_name) values (v_id, v_uid, public.stash_display_name(v_uid));
+  return jsonb_build_object('id', v_id, 'link_code', v_code);
+end $$;
+revoke all on function public.create_group(text, text) from public, anon;
+grant execute on function public.create_group(text, text) to authenticated;
+
+-- group_preview: what the invite page shows BEFORE signing in. Only name, creator's first name, member count, state.
+create or replace function public.group_preview(p_code text)
+returns jsonb language plpgsql security definer stable set search_path = public as $$
+declare r public.group_rooms%rowtype;
+begin
+  select * into r from public.group_rooms where link_code = p_code and deleted_at is null;
+  if not found then return jsonb_build_object('status', 'missing'); end if;
+  return jsonb_build_object(
+    'status', case when r.invitation_expired then 'closed'
+                   when r.invite_expires_at is not null and r.invite_expires_at < now() then 'expired' else 'open' end,
+    'name', r.name,
+    'creator', split_part(public.stash_display_name(r.created_by), ' ', 1),
+    'members', (select count(*) from public.group_members where group_id = r.id));
+end $$;
+revoke all on function public.group_preview(text) from public;
+grant execute on function public.group_preview(text) to anon, authenticated;
+
+-- join_group: idempotent. A member who is already in can always get back in; a new person needs an open, unexpired invite.
+create or replace function public.join_group(p_code text)
+returns uuid language plpgsql security definer set search_path = public as $$
+declare v_uid uuid := auth.uid(); r public.group_rooms%rowtype;
+begin
+  if v_uid is null then raise exception 'not authenticated' using errcode = '28000'; end if;
+  select * into r from public.group_rooms where link_code = p_code and deleted_at is null;
+  if not found then raise exception 'group not found' using errcode = 'P0002'; end if;
+  if exists (select 1 from public.group_members where group_id = r.id and user_id = v_uid) then return r.id; end if;
+  if r.invitation_expired then raise exception 'invites are closed' using errcode = '42501'; end if;
+  if r.invite_expires_at is not null and r.invite_expires_at < now() then raise exception 'invite expired' using errcode = '42501'; end if;
+  if (select count(*) from public.group_members where group_id = r.id) >= 30 then raise exception 'group is full' using errcode = '54000'; end if;
+  insert into public.group_members (group_id, user_id, display_name) values (r.id, v_uid, public.stash_display_name(v_uid));
+  return r.id;
+end $$;
+revoke all on function public.join_group(text) from public, anon;
+grant execute on function public.join_group(text) to authenticated;
+
+-- set_group_invites: creator only. Reopening rotates the code (the old link stops working) and restarts the 7 days.
+create or replace function public.set_group_invites(p_group uuid, p_open boolean)
+returns text language plpgsql security definer set search_path = public as $$
+declare v_uid uuid := auth.uid(); v_code text;
+begin
+  if not exists (select 1 from public.group_rooms where id = p_group and created_by = v_uid and deleted_at is null) then
+    raise exception 'only the creator can do this' using errcode = '42501';
+  end if;
+  if p_open then
+    v_code := substr(replace(gen_random_uuid()::text, '-', ''), 1, 12);
+    update public.group_rooms set invitation_expired = false, link_code = v_code, invite_expires_at = now() + interval '7 days' where id = p_group;
+  else
+    update public.group_rooms set invitation_expired = true where id = p_group returning link_code into v_code;
+  end if;
+  return v_code;
+end $$;
+revoke all on function public.set_group_invites(uuid, boolean) from public, anon;
+grant execute on function public.set_group_invites(uuid, boolean) to authenticated;
+
+-- add_group_item: caller must be a member; payer and every share key must be members; shares > 0 and add up to total.
+create or replace function public.add_group_item(
+  p_group uuid, p_total numeric, p_paid_by uuid, p_type text, p_subtype text, p_notes text, p_shares jsonb)
+returns uuid language plpgsql security definer set search_path = public as $$
+declare v_uid uuid := auth.uid(); v_id uuid; v_cur text; k text; v numeric; v_sum numeric := 0; v_n int := 0;
+begin
+  if v_uid is null then raise exception 'not authenticated' using errcode = '28000'; end if;
+  select currency into v_cur from public.group_rooms where id = p_group and deleted_at is null;
+  if v_cur is null or not public.is_group_member(p_group) then raise exception 'not a member' using errcode = '42501'; end if;
+  if p_total is null or p_total <= 0 or p_total <> round(p_total, 2) then raise exception 'bad total' using errcode = '22023'; end if;
+  if not exists (select 1 from public.group_members where group_id = p_group and user_id = p_paid_by) then raise exception 'payer is not a member' using errcode = '22023'; end if;
+  if p_shares is null or jsonb_typeof(p_shares) <> 'object' then raise exception 'bad shares' using errcode = '22023'; end if;
+  for k, v in select key, value::numeric from jsonb_each_text(p_shares) loop
+    if v <= 0 or v <> round(v, 2) then raise exception 'bad share' using errcode = '22023'; end if;
+    if not exists (select 1 from public.group_members where group_id = p_group and user_id = k::uuid) then raise exception 'share for a non-member' using errcode = '22023'; end if;
+    v_sum := v_sum + v; v_n := v_n + 1;
+  end loop;
+  if v_n = 0 or v_sum <> p_total then raise exception 'shares must add up to the total' using errcode = '22023'; end if;
+  if (select count(*) from public.group_transactions where group_id = p_group and deleted_at is null) >= 2000 then raise exception 'group is full' using errcode = '54000'; end if;
+  insert into public.group_transactions (group_id, created_by, paid_by, total, item_type, item_subtype, notes, currency, user_share)
+  values (p_group, v_uid, p_paid_by, p_total, left(btrim(p_type), 30), nullif(left(btrim(coalesce(p_subtype, '')), 30), ''),
+          nullif(left(btrim(coalesce(p_notes, '')), 200), ''), v_cur, p_shares)
+  returning id into v_id;
+  return v_id;
+end $$;
+revoke all on function public.add_group_item(uuid, numeric, uuid, text, text, text, jsonb) from public, anon;
+grant execute on function public.add_group_item(uuid, numeric, uuid, text, text, text, jsonb) to authenticated;
+
+-- delete_group_item / delete_group_settlement: soft delete, by whoever created it or by the group's creator.
+create or replace function public.delete_group_item(p_id uuid)
+returns void language plpgsql security definer set search_path = public as $$
+declare v_uid uuid := auth.uid(); t public.group_transactions%rowtype;
+begin
+  select * into t from public.group_transactions where id = p_id and deleted_at is null;
+  if not found or not public.is_group_member(t.group_id) then raise exception 'not found' using errcode = 'P0002'; end if;
+  if t.created_by is distinct from v_uid and not exists (select 1 from public.group_rooms where id = t.group_id and created_by = v_uid) then
+    raise exception 'only who added it or the group creator can remove it' using errcode = '42501';
+  end if;
+  update public.group_transactions set deleted_at = now() where id = p_id;
+end $$;
+revoke all on function public.delete_group_item(uuid) from public, anon;
+grant execute on function public.delete_group_item(uuid) to authenticated;
+
+-- add_group_settlement: either side of the payment (or the creator) records it.
+create or replace function public.add_group_settlement(p_group uuid, p_from uuid, p_to uuid, p_amount numeric)
+returns uuid language plpgsql security definer set search_path = public as $$
+declare v_uid uuid := auth.uid(); v_id uuid;
+begin
+  if v_uid is null or not public.is_group_member(p_group) then raise exception 'not a member' using errcode = '42501'; end if;
+  if p_from = p_to or p_amount is null or p_amount <= 0 or p_amount <> round(p_amount, 2) then raise exception 'bad settlement' using errcode = '22023'; end if;
+  if not exists (select 1 from public.group_members where group_id = p_group and user_id = p_from)
+     or not exists (select 1 from public.group_members where group_id = p_group and user_id = p_to) then
+    raise exception 'both must be members' using errcode = '22023';
+  end if;
+  insert into public.group_settlements (group_id, from_user, to_user, amount, created_by) values (p_group, p_from, p_to, p_amount, v_uid) returning id into v_id;
+  return v_id;
+end $$;
+revoke all on function public.add_group_settlement(uuid, uuid, uuid, numeric) from public, anon;
+grant execute on function public.add_group_settlement(uuid, uuid, uuid, numeric) to authenticated;
+
+create or replace function public.delete_group_settlement(p_id uuid)
+returns void language plpgsql security definer set search_path = public as $$
+declare v_uid uuid := auth.uid(); s public.group_settlements%rowtype;
+begin
+  select * into s from public.group_settlements where id = p_id and deleted_at is null;
+  if not found or not public.is_group_member(s.group_id) then raise exception 'not found' using errcode = 'P0002'; end if;
+  if s.created_by is distinct from v_uid and not exists (select 1 from public.group_rooms where id = s.group_id and created_by = v_uid) then
+    raise exception 'only who recorded it or the group creator can undo it' using errcode = '42501';
+  end if;
+  update public.group_settlements set deleted_at = now() where id = p_id;
+end $$;
+revoke all on function public.delete_group_settlement(uuid) from public, anon;
+grant execute on function public.delete_group_settlement(uuid) to authenticated;
+
+-- group_member_balance: what the group owes this member (positive) or what they owe it (negative), settlements included.
+-- Same maths as lib/split.ts: paid - share, then a payment they made (+) or received (-).
+create or replace function public.group_member_balance(p_group uuid, p_user uuid)
+returns numeric language sql security definer stable set search_path = public as $$
+  select coalesce((select sum(total) from public.group_transactions where group_id = p_group and paid_by = p_user and deleted_at is null), 0)
+       - coalesce((select sum((user_share ->> p_user::text)::numeric) from public.group_transactions where group_id = p_group and deleted_at is null and user_share ? p_user::text), 0)
+       + coalesce((select sum(amount) from public.group_settlements where group_id = p_group and from_user = p_user and deleted_at is null), 0)
+       - coalesce((select sum(amount) from public.group_settlements where group_id = p_group and to_user = p_user and deleted_at is null), 0);
+$$;
+revoke all on function public.group_member_balance(uuid, uuid) from public, anon, authenticated;
+
+-- leave_group: removes the caller, but only when they are settled up, and never the creator (who deletes the group instead).
+-- Their old items keep their id and name snapshot, so the others' balances stay right.
+create or replace function public.leave_group(p_group uuid)
+returns void language plpgsql security definer set search_path = public as $$
+declare v_uid uuid := auth.uid();
+begin
+  if exists (select 1 from public.group_rooms where id = p_group and created_by = v_uid) then
+    raise exception 'the creator cannot leave: delete the group once everything is settled' using errcode = '42501';
+  end if;
+  if public.group_member_balance(p_group, v_uid) <> 0 then
+    raise exception 'settle up before leaving the group' using errcode = '42501';
+  end if;
+  delete from public.group_members where group_id = p_group and user_id = v_uid;
+end $$;
+revoke all on function public.leave_group(uuid) from public, anon;
+grant execute on function public.leave_group(uuid) to authenticated;
+
+-- delete_group: creator only, and only once nobody owes anything (every member's balance is zero). Takes the items and settlements with it.
+create or replace function public.delete_group(p_group uuid)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if not exists (select 1 from public.group_rooms where id = p_group and created_by = auth.uid()) then
+    raise exception 'only the creator can delete the group' using errcode = '42501';
+  end if;
+  if exists (select 1 from public.group_members m where m.group_id = p_group and public.group_member_balance(p_group, m.user_id) <> 0) then
+    raise exception 'settle up everyone before deleting the group' using errcode = '42501';
+  end if;
+  delete from public.group_rooms where id = p_group;
+end $$;
+revoke all on function public.delete_group(uuid) from public, anon;
+grant execute on function public.delete_group(uuid) to authenticated;
+
+-- edit_group_item: same checks as add_group_item; only who added the item or the group's creator may change it.
+-- Run this block after the splits block above (safe to re-run).
+create or replace function public.edit_group_item(
+  p_id uuid, p_total numeric, p_paid_by uuid, p_type text, p_subtype text, p_notes text, p_shares jsonb)
+returns void language plpgsql security definer set search_path = public as $$
+declare v_uid uuid := auth.uid(); t public.group_transactions%rowtype; k text; v numeric; v_sum numeric := 0; v_n int := 0;
+begin
+  select * into t from public.group_transactions where id = p_id and deleted_at is null;
+  if not found or v_uid is null or not public.is_group_member(t.group_id) then raise exception 'not found' using errcode = 'P0002'; end if;
+  if t.created_by is distinct from v_uid and not exists (select 1 from public.group_rooms where id = t.group_id and created_by = v_uid) then
+    raise exception 'only who added it or the group creator can edit it' using errcode = '42501';
+  end if;
+  if p_total is null or p_total <= 0 or p_total <> round(p_total, 2) then raise exception 'bad total' using errcode = '22023'; end if;
+  if not exists (select 1 from public.group_members where group_id = t.group_id and user_id = p_paid_by) and p_paid_by <> t.paid_by then
+    raise exception 'payer is not a member' using errcode = '22023';
+  end if;
+  if p_shares is null or jsonb_typeof(p_shares) <> 'object' then raise exception 'bad shares' using errcode = '22023'; end if;
+  for k, v in select key, value::numeric from jsonb_each_text(p_shares) loop
+    if v <= 0 or v <> round(v, 2) then raise exception 'bad share' using errcode = '22023'; end if;
+    -- a member who has left may still be on the item being edited; nobody new outside the group may be added
+    if not exists (select 1 from public.group_members where group_id = t.group_id and user_id = k::uuid) and not (t.user_share ? k) then
+      raise exception 'share for a non-member' using errcode = '22023';
+    end if;
+    v_sum := v_sum + v; v_n := v_n + 1;
+  end loop;
+  if v_n = 0 or v_sum <> p_total then raise exception 'shares must add up to the total' using errcode = '22023'; end if;
+  update public.group_transactions
+     set total = p_total, paid_by = p_paid_by, item_type = left(btrim(p_type), 30),
+         item_subtype = nullif(left(btrim(coalesce(p_subtype, '')), 30), ''),
+         notes = nullif(left(btrim(coalesce(p_notes, '')), 200), ''), user_share = p_shares
+   where id = p_id;
+end $$;
+revoke all on function public.edit_group_item(uuid, numeric, uuid, text, text, text, jsonb) from public, anon;
+grant execute on function public.edit_group_item(uuid, numeric, uuid, text, text, text, jsonb) to authenticated;

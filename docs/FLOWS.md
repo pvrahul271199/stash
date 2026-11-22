@@ -182,3 +182,13 @@ On the plan summary screen a new cycle can start today or up to 3 days back (`Pl
 
 ### Demo
 Welcome screen has "See how it works" -> `components/screens/Demo.tsx`: chapters Basics, Events, History, Insights. Every chapter uses a fixed-unit canvas with a curvy arrow plus a short friendly label in the display font; the arrow tip always stops short of the component it points at (no overlay dots; a small pager under the canvas jumps between tips). Insights uses the same sample month as "explore with sample data" (real category totals for the donut, `projection()` for projected spending). No DB writes. Note tones (`ui/Chip.tsx`) use the indigo palette only.
+
+
+## Splits flows
+
+1. **Create**: Splits tab > New group (sheet) > `createGroup` > invite card (QR + link, `InviteTicket`).
+2. **Invite / join**: link `/join/?code=X` > `JoinRedirect` saves the code (`savePendingJoin`) and opens `/` > `AppShell` shows `JoinGroupSheet` (preview via `group_preview`, works signed out) > *Join the group* > guests go through `GoogleSignInSheet`, then `join_group` runs automatically > the Splits tab opens that group (if the person has no plan yet they are told to set up Chelav first).
+3. **Close invites**: creator only, `set_group_invites(false)`; reopen makes a new link.
+4. **Add item**: group > Add item (keypad screen): amount, type/sub-type, note, payer, who shares, equal or uneven (`Split unevenly` sheet must add up to the total) > `add_group_item`.
+5. **Settle**: To settle > *Settle* > confirm sheet > `add_group_settlement`; Undo deletes it. The graph shows *Simplified* vs *As logged*.
+6. **Leave / delete**: `leave_group` (items you added stay) / `delete_group` (creator).

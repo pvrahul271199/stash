@@ -138,3 +138,8 @@ Replaces "whole-row last-write-wins on the client clock" and "one PostgREST requ
 - New SW waits; `PWAManager` shows a "Reload" toast that posts `SKIP_WAITING`.
 - Desktop shows a 380×780 phone frame (CSS); ≤420px or standalone fills the screen.
 
+
+
+## Splits: shared, online-only data
+
+Every other table is single-owner (`user_id = auth.uid()`, synced by `lib/sync.ts`, foreign rows dropped by F-38). Group data has several owners, so Splits is a separate path: tables `group_rooms`, `group_members`, `group_transactions` (`user_share` jsonb {uid: amount}), `group_settlements`; RLS lets a user read a group only if they are in `group_members` (`is_group_member`, security definer, so the policy does not recurse); nobody can write the tables directly. Writes are RPCs that check the caller: `create_group`, `group_preview` (anon, name + creator first name + count only), `join_group` (idempotent; needs an open, unexpired invite), `set_group_invites` (creator; reopening rotates the code and restarts 7 days), `add_group_item` (shares > 0 and add up to the total, payer and sharers are members), `delete_group_item`, `add_group_settlement`, `delete_group_settlement`, `leave_group`, `delete_group`. The client (`lib/groups.ts`) reads with the user's token and keeps one shared load in a zustand store; nothing is cached in Dexie and the store is cleared on sign-out. Maths is pure in `lib/split.ts` (equal split with leftover paise to the first members, balances, `applySettlements`, `simplifyDebts`, `rawDebts`).

@@ -5,7 +5,7 @@ import dynamic from 'next/dynamic';
 import { Toast } from './ui/Toast';
 import { SampleNote } from './ui/SampleNote';
 import { BottomPrompt } from './ui/BottomPrompt';
-import { GhostButton, PrimaryButton } from './ui/Button';
+import { GhostButton, PrimaryButton, SecondaryButton } from './ui/Button';
 import { TabBar, type Tab } from './ui/TabBar';
 import { Welcome } from './screens/Welcome';
 import { TodayTab } from './screens/TodayTab';
@@ -25,12 +25,15 @@ const MonthEnd = dynamic(() => import('./screens/MonthEnd').then((m) => m.MonthE
 const PlanScreen = dynamic(() => import('./screens/PlanScreen').then((m) => m.PlanScreen), { ssr: false, loading: screenFallback });
 const HistoryTab = dynamic(() => import('./screens/HistoryTab').then((m) => m.HistoryTab), { ssr: false, loading: screenFallback });
 const InsightsTab = dynamic(() => import('./screens/InsightsTab').then((m) => m.InsightsTab), { ssr: false, loading: screenFallback });
+const SplitsTab = dynamic(() => import('./screens/SplitsTab').then((m) => m.SplitsTab), { ssr: false, loading: screenFallback });
+const JoinGroupSheet = dynamic(() => import('./splits/JoinGroupSheet').then((m) => m.JoinGroupSheet), { ssr: false });
 const UserTab = dynamic(() => import('./screens/UserTab').then((m) => m.UserTab), { ssr: false, loading: screenFallback });
 const ThankYou = dynamic(() => import('./screens/ThankYou').then((m) => m.ThankYou), { ssr: false, loading: screenFallback });
 const HowItWorksTour = dynamic(() => import('./screens/HowItWorks').then((m) => m.HowItWorksTour), { ssr: false });
 const Demo = dynamic(() => import('./screens/Demo').then((m) => m.Demo), { ssr: false });
 const GoogleSignInSheet = dynamic(() => import('./ui/GoogleSignInSheet').then((m) => m.GoogleSignInSheet), { ssr: false });
 import { preloadGoogle } from '@/lib/googleSignIn';
+import { clearPendingJoin, getSplitsOnly, readPendingJoin, setSplitsOnlyFlag, useSplitsStore } from '@/lib/groups';
 import {
   createPlan,
   dismissMonthSummary,
@@ -112,7 +115,13 @@ export function AppShell() {
   const [signInSheet, setSignInSheet] = useState(false);
   const openSignIn = () => setSignInSheet(true);
   const [consented, setConsented] = useState(() => hasSyncConsent());
+  // An invite link (/join/?code=...) leaves its code here; the invitation sheet shows on top of whatever screen is up.
+  const [joinCode, setJoinCode] = useState<string | null>(null);
+  // A new person who joined a group by link lands in Splits alone, with no budget yet; they can set one up whenever they like.
+  const [splitsOnly, setSplitsOnlyState] = useState(false);
+  const setSplitsOnly = (on: boolean) => { setSplitsOnlyState(on); setSplitsOnlyFlag(on); };
   useEffect(() => initAnalytics(), []);
+  useEffect(() => { setJoinCode(readPendingJoin()); setSplitsOnlyState(getSplitsOnly()); }, []);
 
   // Guests may open the sign-in screen soon: fetch Google's script in idle time so its button appears instantly.
   useEffect(() => {
@@ -140,6 +149,7 @@ export function AppShell() {
       return;
     }
 
+    if (auth.status === 'guest') { useSplitsStore.getState().clear(); setSplitsOnlyState(false); setSplitsOnlyFlag(false); } // shared group data never stays on a signed-out device
     if (auth.status === 'guest' && identifiedUid.current) {
       resetIdentity();
       identifiedUid.current = null;
@@ -170,6 +180,12 @@ export function AppShell() {
     setRestoreSlow(false);
     return r.ok;
   }, []);
+
+  // The account turned out to have a budget already (restored from the cloud): leave the Splits-only page, stay on Splits.
+  useEffect(() => {
+    if (splitsOnly && snap?.cycle) { setSplitsOnly(false); setTab('splits'); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [splitsOnly, snap?.cycle]);
 
   // Returning user on a fresh device/reload with nothing local yet: pull before deciding what to show.
   const hasCycle = snap ? !!snap.cycle : null;
@@ -320,6 +336,16 @@ export function AppShell() {
         message={restoreSlow ? 'Still connecting. Your data is safe, this can take a moment.' : 'Bringing your data back…'}
       />
     );
+  } else if (splitsOnly && auth.status === 'signedIn' && !snap.cycle && flow === 'welcome') {
+    body = (
+      <>
+        <div className="flex min-h-0 flex-1 flex-col"><SplitsTab onSignIn={openSignIn} /></div>
+        <div className="shrink-0 border-t border-line bg-white px-5 pt-3" style={{ paddingBottom: 'calc(var(--safe-bottom) + 12px)' }}>
+          <SecondaryButton onClick={() => setSplitsOnly(false)}>Set up my own budget</SecondaryButton>
+          <GhostButton className="mt-1" onClick={() => setAskLogout(true)}>Sign out</GhostButton>
+        </div>
+      </>
+    );
   } else if (flow === 'changePlan') {
     body = (
       <Onboarding
@@ -377,6 +403,7 @@ export function AppShell() {
               {tab === 'today' && <TodayTab cycle={snap.cycle} plan={snap.plan} onOpenLend={() => { setHistoryTab('lend'); setTab('history'); }} onHome={() => setForceWelcome(true)} onCreateAccount={() => {
                   openSignIn();
                 }} />}
+              {tab === 'splits' && <SplitsTab onSignIn={openSignIn} sample={inSample} />}
               {tab === 'history' && <HistoryTab activeCycle={snap.cycle} plan={snap.plan} initialTab={historyTab} />}
               {tab === 'insights' && <InsightsTab cycle={snap.cycle} plan={snap.plan} />}
               {tab === 'user' && (
@@ -564,6 +591,21 @@ export function AppShell() {
           onSignedIn={() => {
             setSignInSheet(false);
             void handleAuthDone();
+          }}
+        />
+      )}
+      {joinCode && ready && (
+        <JoinGroupSheet
+          code={joinCode}
+          onSignIn={openSignIn}
+          onClose={() => { clearPendingJoin(); setJoinCode(null); }}
+          onJoined={(id) => {
+            clearPendingJoin();
+            setJoinCode(null);
+            useSplitsStore.getState().setFocus(id);
+            void useSplitsStore.getState().refresh();
+            if (snap?.cycle) { setTab('splits'); toast('You joined the group'); }
+            else { setForceWelcome(false); setFlow('welcome'); setSplitsOnly(true); toast('You joined the group'); }
           }}
         />
       )}

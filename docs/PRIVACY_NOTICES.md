@@ -64,3 +64,8 @@ account when signed in via `posthog.identify`. Everyone is asked again (`CONSENT
 **Where.** In your account on our cloud database provider (Supabase). Without an account, everything stays on this phone.
 
 **Your choices.** Export a CSV any time. Log out to stop syncing. “Delete my account” in Settings permanently erases your account and everything in it from the cloud. Items you delete are removed from the cloud within 30 days.
+
+
+## Pending: Splits
+
+Splits shares a person's display name (first name on the invite page), the items they paid or share, and payments between members with the other members of a group they join. Group data is kept until the group is deleted or the account is deleted (member rows cascade; items keep an id and a name snapshot). This is new processing: add it to the next notice version and bump `CONSENT_VERSION` when it ships.

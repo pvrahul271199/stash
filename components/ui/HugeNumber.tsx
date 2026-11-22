@@ -29,6 +29,7 @@ export function HugeNumber({
   const [scale, setScale] = useState(1);
   const text = (textOverride ?? num(value)).replace('-', '−'); // a real minus sign for negatives
   const space = currency.symbol.length > 1 ? ' ' : '';
+
   // Long symbols (OMR, AED...) would otherwise dwarf the amount: the longer the symbol, the smaller it is drawn.
   const symbolSize = currency.symbol.length >= 3 ? '0.42em' : currency.symbol.length === 2 ? '0.62em' : '0.80em';
 
