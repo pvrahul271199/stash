@@ -43,7 +43,15 @@ export function friendlyError(e: unknown): string {
   return e instanceof Error ? e.message : 'Something went wrong.';
 }
 
-const json = async <T>(path: string, init: RequestInit = {}): Promise<T> => (await authedFetch(path, init)).json() as Promise<T>;
+/**
+ * Functions that return nothing (delete_group, leave_group, delete_group_item, edit_group_item, ...) answer with an EMPTY body.
+ * Calling .json() on that throws (Safari: "The string did not match the expected pattern"), although the server had already
+ * done the work. So read the text and parse only when there is some.
+ */
+const json = async <T>(path: string, init: RequestInit = {}): Promise<T> => {
+  const text = await (await authedFetch(path, init)).text();
+  return (text.trim() ? JSON.parse(text) : null) as T;
+};
 const rpc = <T>(fn: string, args: Record<string, unknown>) => json<T>(`rpc/${fn}`, { method: 'POST', body: JSON.stringify(args) });
 
 export async function loadGroups(): Promise<GroupData[]> {
