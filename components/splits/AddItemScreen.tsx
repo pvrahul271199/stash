@@ -1,15 +1,16 @@
 'use client';
 import { useState } from 'react';
 import { Keypad } from '@/components/ui/Keypad';
-import { CloseIcon, IconButton, PrimaryButton, SecondaryButton } from '@/components/ui/Button';
+import { CloseIcon, IconButton, PrimaryButton } from '@/components/ui/Button';
 import { addItem, editItem, friendlyError, useSplitsStore, type GroupData } from '@/lib/groups';
 import { ITEM_TYPES, equalShares, unassigned, validateShares, type GroupItem } from '@/lib/split';
 import { useToast } from '@/store/toast';
-import { Person, Sheet, nameOf, useMoney } from './parts';
+import { Digits, Person, nameOf, useMoney } from './parts';
 
 /**
- * The logging screen for a group item: amount on the keypad, type, note, who paid, who shares (equally or unevenly).
- * Pass `item` to edit an existing one: every field starts filled in and Save replaces it.
+ * The logging screen for a group item, all on ONE page: the amount (grouped digits, newest pops in), type, note and who paid
+ * stay put at the top, the list of people scrolls in the middle (tick who shares, equal or uneven right in the list), and the
+ * keypad with "Add item" is pinned at the bottom. Pass `item` to edit an existing one: every field starts filled in.
  */
 export function AddItemScreen({ data, me, onClose, item }: { data: GroupData; me: string; onClose: () => void; item?: GroupItem }) {
   const { room, members } = data;
@@ -32,7 +33,6 @@ export function AddItemScreen({ data, me, onClose, item }: { data: GroupData; me
   const [inc, setInc] = useState<string[]>(item ? Object.keys(item.shares) : ids);
   const [uneven, setUneven] = useState(wasUneven);
   const [custom, setCustom] = useState<Record<string, string>>(item && wasUneven ? Object.fromEntries(Object.entries(item.shares).map(([k, v]) => [k, String(v)])) : {});
-  const [sheet, setSheet] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const total = Number(amt || 0);
@@ -50,6 +50,11 @@ export function AddItemScreen({ data, me, onClose, item }: { data: GroupData; me
     });
   const toggle = (id: string) => setInc((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
 
+  const caption = !total ? 'Type the amount'
+    : !inc.length ? 'Pick at least one person'
+    : uneven ? (left === 0 ? 'Custom split · all assigned' : `${money(Math.abs(left))} ${left > 0 ? 'left to assign' : 'over'}`)
+    : inc.length === 1 ? `All on ${nameOf(members, inc[0], me)}` : `${money(shares[inc[0]] ?? 0)} each · ${inc.length} people`;
+
   async function submit() {
     setBusy(true);
     try {
@@ -63,67 +68,67 @@ export function AddItemScreen({ data, me, onClose, item }: { data: GroupData; me
 
   return (
     <div className="splits-fade absolute inset-0 z-30 flex flex-col bg-white" role="dialog" aria-label={editing ? 'Edit item' : 'Add item'}>
-      <header className="flex items-center gap-1 px-3 pb-1 pt-5">
+      <header className="flex items-center gap-1 px-3 pt-4">
         <IconButton label="Close" onClick={onClose}><CloseIcon /></IconButton>
-        <div className="flex-1 px-1"><h1 className="font-display text-[20px] font-semibold text-ink">{editing ? 'Edit item' : 'Add item'}</h1><p className="text-[12px] text-soft">{room.name}</p></div>
+        <div className="flex-1 px-1"><h1 className="font-display text-[18px] font-semibold text-ink">{editing ? 'Edit item' : 'Add item'}</h1><p className="text-[12px] text-soft">{room.name}</p></div>
       </header>
+
       <div className="pt-1 text-center">
-        <div className="num flex items-baseline justify-center text-[52px] leading-none"><span className="mr-1 text-faint">{money(0).replace(/[\d.,\s]+$/, '')}</span><span className={total ? 'text-ink' : 'text-faint'}>{amt || '0'}</span></div>
+        <Digits amt={amt} code={room.currency} size={56} />
+        <p key={caption} className="splits-fade num mt-1.5 text-[12px] text-soft">{caption}</p>
       </div>
-      <div className="mt-3 space-y-3 px-5">
+
+      {/* everything between the amount and the keypad scrolls: type, note, then who shares */}
+      <div className="mt-2 min-h-0 flex-1 overflow-y-auto px-5 pb-2" aria-label="Item details">
         <div className="no-scrollbar flex gap-2 overflow-x-auto">
           {Object.keys(ITEM_TYPES).map((t) => (
             <button key={t} onClick={() => { setType(t); setSub(ITEM_TYPES[t][0] ?? ''); }} aria-pressed={type === t}
-              className={`h-9 min-h-0 shrink-0 rounded-full border px-4 text-[13px] font-medium ${type === t ? 'border-ink bg-ink text-white' : 'border-line text-soft'}`}>{t}</button>))}
+              className={`h-8 min-h-0 shrink-0 rounded-full border px-3.5 text-[13px] font-medium transition-colors ${type === t ? 'border-ink bg-ink text-white' : 'border-line text-soft'}`}>{t}</button>))}
         </div>
         {ITEM_TYPES[type].length > 0 && (
-          <div className="no-scrollbar flex gap-2 overflow-x-auto">
+          <div className="no-scrollbar mt-2 flex gap-1.5 overflow-x-auto">
             {ITEM_TYPES[type].map((s) => (
               <button key={s} onClick={() => setSub(s)} aria-pressed={sub === s}
-                className={`h-8 min-h-0 shrink-0 rounded-full border bg-white px-3 text-[12px] font-medium ${sub === s ? 'border-ink text-ink' : 'border-line text-soft'}`}>{s}</button>))}
+                className={`h-7 min-h-0 shrink-0 rounded-full px-3 text-[12px] ${sub === s ? 'bg-tint font-semibold text-ink' : 'text-soft'}`}>{s}</button>))}
           </div>)}
         <input value={note} onChange={(e) => setNote(e.target.value)} maxLength={200} placeholder="Add a note" aria-label="Note"
-          className="h-10 w-full border-b border-line bg-transparent text-[14px] text-ink outline-none placeholder:text-faint focus:border-ink" />
-        <div className="no-scrollbar flex items-center gap-1.5 overflow-x-auto">
-          <span className="shrink-0 text-[12px] text-soft">Paid by</span>
-          {members.map((m) => (
-            <button key={m.id} onClick={() => setPayer(m.id)} aria-pressed={payer === m.id}
-              className={`h-7 min-h-0 shrink-0 rounded-full px-3 text-[12px] font-medium ${payer === m.id ? 'bg-ink text-white' : 'border border-line bg-white text-soft'}`}>{nameOf(members, m.id, me)}</button>))}
-        </div>
-        <div className="flex items-center justify-between">
-          <div className="flex gap-2.5">
-            {members.map((m) => { const on = inc.includes(m.id); return (
-              <button key={m.id} onClick={() => toggle(m.id)} aria-pressed={on} aria-label={`${on ? 'Remove' : 'Include'} ${m.name}`} className={on ? '' : 'opacity-30'}>
-                <span className={`block rounded-full p-0.5 ${on ? 'ring-2 ring-ink' : ''}`}><Person members={members} id={m.id} size={30} /></span>
-              </button>); })}
+          className="mt-2 h-9 min-h-0 w-full border-b border-line bg-transparent text-[14px] text-ink outline-none placeholder:text-faint focus:border-ink" />
+        <div className="flex items-center justify-between pt-2">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-faint">Split between</p>
+          <div role="tablist" className="flex rounded-full bg-tint p-0.5">
+            {([false, true] as const).map((u) => (
+              <button key={String(u)} role="tab" aria-selected={uneven === u} onClick={() => setUneven(u)}
+                className={`h-7 min-h-0 rounded-full px-3 text-[12px] font-medium ${uneven === u ? 'bg-ink text-white' : 'text-soft'}`}>{u ? 'Unevenly' : 'Equally'}</button>))}
           </div>
-          <button onClick={() => setSheet(true)} className="text-[12px] font-semibold text-ink underline underline-offset-4">{uneven ? 'Edit split' : 'Split unevenly'}</button>
         </div>
-        <p className="num text-center text-[12px] text-soft">
-          {uneven ? (left === 0 ? 'Custom split · fully assigned' : `Custom split · ${money(left)} ${left > 0 ? 'left to assign' : 'over'}`)
-            : inc.length ? `Equal · ${money(shares[inc[0]] ?? 0)} each · ${inc.length} ${inc.length === 1 ? 'person' : 'people'}` : 'Pick at least one person'}
-        </p>
+        {members.map((m) => {
+          const on = inc.includes(m.id);
+          return (
+            <div key={m.id} className="flex items-center gap-3 border-b border-line py-2">
+              <button onClick={() => toggle(m.id)} aria-pressed={on} aria-label={`${on ? 'Remove' : 'Include'} ${m.name}`}
+                className={`flex h-6 w-6 min-h-0 shrink-0 items-center justify-center rounded-full border-2 text-[12px] ${on ? 'border-ink bg-ink text-white' : 'border-line'}`}>{on ? '✓' : ''}</button>
+              <Person members={members} id={m.id} size={28} />
+              <span className="min-w-0 flex-1">
+                <span className={`block truncate text-[14px] ${on ? 'text-ink' : 'text-faint'}`}>{nameOf(members, m.id, me)}</span>
+                <button onClick={() => setPayer(m.id)} aria-pressed={payer === m.id}
+                  className={`min-h-0 text-[11px] ${payer === m.id ? 'font-semibold text-ink' : 'text-faint underline underline-offset-2'}`}>{payer === m.id ? 'Paid' : 'Set as payer'}</button>
+              </span>
+              {uneven && on ? (
+                <input inputMode="decimal" value={custom[m.id] ?? ''} aria-label={`${nameOf(members, m.id, me)} share`} placeholder="0"
+                  onChange={(e) => setCustom({ ...custom, [m.id]: e.target.value.replace(',', '.').replace(/[^\d.]/g, '') })}
+                  className="num h-9 min-h-0 w-24 rounded-[10px] bg-tint px-3 text-right text-[14px] text-ink outline-none focus:ring-1 focus:ring-ink" />
+              ) : (
+                <span className={`num text-[14px] ${on ? 'text-ink' : 'text-faint'}`}>{on ? money(shares[m.id] ?? 0) : '—'}</span>
+              )}
+            </div>
+          );
+        })}
       </div>
-      <div className="mt-auto">
-        <div className="px-5 pb-2"><PrimaryButton disabled={!!err || busy} onClick={() => void submit()}>{busy ? 'Adding…' : 'Add item'}</PrimaryButton></div>
+
+      <div className="border-t border-line bg-white px-4 pb-3 pt-2">
+        <PrimaryButton disabled={!!err || busy} onClick={() => void submit()} className="mb-2 !h-[50px]">{busy ? 'Saving…' : editing ? 'Save changes' : 'Add item'}</PrimaryButton>
         <Keypad onKey={press} />
       </div>
-      {sheet && (
-        <Sheet title="Split unevenly" onClose={() => setSheet(false)} full>
-          <p className="num -mt-1 text-[13px] text-soft">of {money(total)}</p>
-          {inc.map((id) => (
-            <div key={id} className="flex items-center gap-3 border-b border-line py-2">
-              <Person members={members} id={id} size={28} /><span className="flex-1 text-[14px] text-ink">{nameOf(members, id, me)}</span>
-              <input inputMode="decimal" value={custom[id] ?? ''} aria-label={`${nameOf(members, id, me)} share`}
-                onChange={(e) => setCustom({ ...custom, [id]: e.target.value.replace(',', '.').replace(/[^\d.]/g, '') })} placeholder="0"
-                className="num h-9 w-24 rounded-[10px] border border-line bg-white px-3 text-right text-[14px] text-ink outline-none focus:ring-1 focus:ring-ink" />
-            </div>))}
-          <p className={`num mt-2 text-right text-[12px] ${left === 0 ? 'text-faint' : 'text-warm'}`}>{left === 0 ? 'Fully assigned' : left > 0 ? `${money(left)} left to assign` : `${money(-left)} over`}</p>
-          <div className="mt-4 flex gap-2">
-            <SecondaryButton className="!h-12 !text-[14px]" onClick={() => { setUneven(false); setSheet(false); }}>Split equally</SecondaryButton>
-            <PrimaryButton className="!h-12 !text-[14px]" disabled={left !== 0 || !!validateShares(total, shares)} onClick={() => { setUneven(true); setSheet(false); }}>Done</PrimaryButton>
-          </div>
-        </Sheet>)}
     </div>
   );
 }

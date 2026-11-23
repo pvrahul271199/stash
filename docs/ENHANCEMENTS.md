@@ -1,6 +1,6 @@
 # Enhancements (proposed, not built)
 
-Status: E-1 rejected (see below). E-2 and E-3 are not built.
+Status: E-1 rejected (see below). E-2, E-3 and E-SPLIT-BUDGET are not built.
 
 ## E-1 · Log first, set up later (reduce signup/onboarding drop-off)
 
@@ -284,3 +284,28 @@ Decisions taken as in the plan above; "Remind me" was dropped (the Today card is
 - Repayments are embedded JSON: two devices recording *different* repayments at the same moment can lose one (last write wins on that field). Use a child table if that matters.
 - **Budget rule changed after the first build**: lending is not spending. The lend and repayments no longer touch the budget; only a write-off does (see ARCHITECTURE section 3). This replaces defaults 1 and 2 of the plan above ("a lend lowers the month, a repayment adds back").
 - Write-off date is always today (`writeOffLoan` takes a date, the UI does not offer one yet).
+
+## E-SPLIT-BUDGET: let group bills feed the daily amount (proposed 2026-11-23, not built)
+
+Why: Splits never touches the pool today (by design), so a shared bill is wrong either way. Paying ₹4,800 for a hotel
+logged as a spend drops today's amount by ₹4,800 although ₹3,600 comes back; a dinner a friend paid for (your share ₹420)
+is real spending the budget never sees. Splitwise has no daily amount and budget apps treat the bill as fully spent, so
+only Chelav, which has both, can show a daily amount that is right. This is the differentiator.
+
+Rules:
+1. **You paid:** only your share counts as spending (on the item's day). The rest is "money out, coming back", the same
+   path as Lend: debited on the day, credited when each person settles (`loanEffects` style credits into
+   `buildCycle` / `rollupCycle`).
+2. **Someone else paid:** your share is spending on the item's day.
+3. **You settle:** nothing changes for the pool (the share was already counted); only the "coming back" line shrinks.
+4. Today shows one quiet line, e.g. "₹3,600 coming back from Goa trip".
+
+Decisions to take before building:
+- Per-group switch, on by default (a "Flat rent" group would double count if rent is already a plan bill).
+- Offline: group data lives on the server. Keep a small local, derived copy of *my* share per item and per settlement
+  (Dexie, new version, never synced by `lib/sync.ts`) so the daily amount never waits for the network; refresh it from
+  `useSplits`.
+- Only groups whose currency equals the display currency count (no conversion exists; currency is a label).
+- Item edits/deletes by others must update the local copy on the next refresh.
+
+Runner-up (smaller): a nudge with a UPI pay link for what you owe ("You owe Kiran ₹1,152. Pay now?").

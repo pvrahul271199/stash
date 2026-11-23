@@ -179,6 +179,20 @@ select:focus {
 .splits-fade { animation: splits-fade 0.2s ease-out; }
 .splits-up { animation: splits-up 0.28s cubic-bezier(0.22, 1, 0.36, 1); }
 @media (prefers-reduced-motion: reduce) { .splits-fade, .splits-up { animation: none; } }
+/* Splits flowing background: three soft blobs drift slowly over a pastel base (colours set inline per group, see FlowBg). */
+@keyframes flow-a { 0% { transform: translate3d(-12%, -8%, 0) scale(1); } 50% { transform: translate3d(14%, 10%, 0) scale(1.18); } 100% { transform: translate3d(-12%, -8%, 0) scale(1); } }
+@keyframes flow-b { 0% { transform: translate3d(14%, 6%, 0) scale(1.1); } 50% { transform: translate3d(-14%, -10%, 0) scale(0.92); } 100% { transform: translate3d(14%, 6%, 0) scale(1.1); } }
+@keyframes flow-c { 0% { transform: translate3d(0, 14%, 0) scale(0.95); } 50% { transform: translate3d(8%, -14%, 0) scale(1.15); } 100% { transform: translate3d(0, 14%, 0) scale(0.95); } }
+.flow-a { animation: flow-a 16s ease-in-out infinite; }
+.flow-b { animation: flow-b 20s ease-in-out infinite; }
+.flow-c { animation: flow-c 24s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .flow-a, .flow-b, .flow-c { animation: none; } }
+/* Two-sided card (Splits summary): both faces share one grid cell, the back is pre-turned 180deg, backfaces are hidden. */
+.flip-face { backface-visibility: hidden; -webkit-backface-visibility: hidden; grid-area: 1 / 1; }
+.flip-back { transform: rotateY(180deg); }
+/* A typed digit pops in once (calc-pop is the same idea for the calculator). */
+@keyframes digit-pop { from { opacity: 0; transform: translateY(8px) scale(0.9); } to { opacity: 1; transform: none; } }
+.digit-pop { display: inline-block; animation: digit-pop 0.18s cubic-bezier(0.22, 1, 0.36, 1); }
 /* Content rises into place (staggered with animation-delay); bars grow up from their base. */
 @keyframes stash-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
 .stash-rise { opacity: 0; animation: stash-rise 0.55s cubic-bezier(0.22, 1, 0.36, 1) forwards; }

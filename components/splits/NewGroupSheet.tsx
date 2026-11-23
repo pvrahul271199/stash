@@ -1,17 +1,29 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { PrimaryButton } from '@/components/ui/Button';
-import { SUPPORTED_CURRENCIES, useCurrencyStore } from '@/lib/currency';
+import { useAuth } from '@/lib/auth';
+import { SUPPORTED_CURRENCIES } from '@/lib/currency';
 import { createGroup, friendlyError, useSplitsStore } from '@/lib/groups';
+import { avatarHue, initials } from '@/lib/split';
 import { useToast } from '@/store/toast';
-import { Eyebrow, Sheet } from './parts';
+import { FlowBg, Sheet, currencyInfo } from './parts';
 
+/** Groups are shared by people in different places, so a new group starts in US dollars; the creator can pick another. */
+export const DEFAULT_GROUP_CURRENCY = 'USD';
+
+/**
+ * New group: a live preview card sits above the fields. Its background flows and takes a different palette for every
+ * name you type (same palette the group keeps everywhere else); you are already in it, shown as the first member.
+ */
 export function NewGroupSheet({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }) {
   const toast = useToast((s) => s.show);
+  const auth = useAuth();
   const refresh = useSplitsStore((s) => s.refresh);
   const [name, setName] = useState('');
-  const [cur, setCur] = useState(useCurrencyStore.getState().currency.code);
+  const [cur, setCur] = useState(DEFAULT_GROUP_CURRENCY);
   const [busy, setBusy] = useState(false);
+  const me = auth.displayName || 'You';
+  const info = currencyInfo(cur);
   // Focus after the sheet has slid in, without scrolling: a bare autoFocus made the whole app jump while the keyboard opened.
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => { const t = setTimeout(() => input.current?.focus({ preventScroll: true }), 320); return () => clearTimeout(t); }, []);
@@ -25,17 +37,29 @@ export function NewGroupSheet({ onClose, onCreated }: { onClose: () => void; onC
     } catch (e) { toast(friendlyError(e), 'warm'); setBusy(false); }
   }
   return (
-    <Sheet title="New group" onClose={onClose}>
-      <input ref={input} value={name} onChange={(e) => setName(e.target.value)} maxLength={60} placeholder="Group name" aria-label="Group name"
-        className="font-display mt-2 h-14 w-full border-b border-line bg-transparent text-[24px] font-semibold text-ink outline-none placeholder:text-faint focus:border-ink" />
-      <div className="mt-5"><Eyebrow>Currency</Eyebrow>
-        <div className="no-scrollbar mt-2 flex gap-2 overflow-x-auto">
-          {SUPPORTED_CURRENCIES.map((c) => (
-            <button key={c.code} onClick={() => setCur(c.code)} aria-pressed={cur === c.code}
-              className={`h-9 min-h-0 shrink-0 rounded-full border px-4 text-[13px] font-medium ${cur === c.code ? 'border-ink bg-ink text-white' : 'border-line text-soft'}`}>{c.code}</button>))}
+    <Sheet onClose={onClose}>
+      <div className="relative mt-1 overflow-hidden rounded-[24px] p-5">
+        <FlowBg seed={name.trim() || 'new'} />
+        <div className="relative">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-soft">New group</span>
+            <span className="num rounded-full bg-white/60 px-2.5 py-0.5 text-[12px] text-soft">{info.symbol} {info.code}</span>
+          </div>
+          <p className={`font-display mt-7 truncate text-[28px] font-semibold leading-tight ${name.trim() ? 'text-ink' : 'text-ink/25'}`}>{name.trim() || 'Your group'}</p>
+          <div className="mt-3 flex items-center gap-2 text-[12px] text-soft">
+            <span aria-hidden="true" className="flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-semibold text-white ring-2 ring-white" style={{ background: avatarHue(0) }}>{initials(me)}</span>
+            You are in · just you for now
+          </div>
         </div>
       </div>
-      <div className="mt-6"><PrimaryButton disabled={!name.trim() || busy} onClick={() => void create()}>{busy ? 'Creating…' : 'Create group'}</PrimaryButton></div>
+      <input ref={input} value={name} onChange={(e) => setName(e.target.value)} maxLength={60} placeholder="Group name" aria-label="Group name"
+        className="mt-3 h-12 w-full border-b border-line bg-transparent text-[17px] text-ink outline-none placeholder:text-faint focus:border-ink" />
+      <div className="no-scrollbar mt-3 flex gap-2 overflow-x-auto" role="group" aria-label="Currency">
+        {SUPPORTED_CURRENCIES.map((c) => (
+          <button key={c.code} onClick={() => setCur(c.code)} aria-pressed={cur === c.code}
+            className={`h-9 min-h-0 shrink-0 rounded-full border px-4 text-[13px] font-medium ${cur === c.code ? 'border-ink bg-ink text-white' : 'border-line text-soft'}`}>{c.code}</button>))}
+      </div>
+      <div className="mt-5"><PrimaryButton disabled={!name.trim() || busy} onClick={() => void create()}>{busy ? 'Creating…' : 'Create group'}</PrimaryButton></div>
     </Sheet>
   );
 }

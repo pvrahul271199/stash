@@ -186,9 +186,9 @@ Welcome screen has "See how it works" -> `components/screens/Demo.tsx`: chapters
 
 ## Splits flows
 
-1. **Create**: Splits tab > New group (sheet) > `createGroup` > invite card (QR + link, `InviteTicket`).
+1. **Create**: Splits tab > New group (sheet: live card on a flowing background that changes with the name, you shown as the first member, currency defaults to USD) > `createGroup` > invite card (QR + link, `InviteTicket`).
 2. **Invite / join**: link `/join/?code=X` > `JoinRedirect` saves the code (`savePendingJoin`) and opens `/` > `AppShell` shows `JoinGroupSheet` (preview via `group_preview`, works signed out) > *Join the group* > guests go through `GoogleSignInSheet`, then `join_group` runs automatically > the Splits tab opens that group (if the person has no plan yet they are told to set up Chelav first).
 3. **Close invites**: creator only, `set_group_invites(false)`; reopen makes a new link.
-4. **Add item**: group > Add item (keypad screen): amount, type/sub-type, note, payer, who shares, equal or uneven (`Split unevenly` sheet must add up to the total) > `add_group_item`.
-5. **Settle**: To settle > *Settle* > confirm sheet > `add_group_settlement`; Undo deletes it. The graph shows *Simplified* vs *As logged*.
+4. **Add item**: group > Add item, one page: amount (grouped digits) on top, keypad + button pinned at the bottom, and a scrolling middle with type/sub-type, note, and the people list (tick who shares, *Set as payer*, *Equally | Unevenly* with a field per person; uneven shares must add up to the total) > `add_group_item`.
+5. **Settle**: the group header shows only the payments YOU are part of as chips (you pay or you receive); tapping one opens the confirm sheet. Other people's payments are never offered (UI rule; the server also lets the creator record any) > `add_group_settlement`; Undo deletes it. The graph shows *Simplified* vs *As logged*.
 6. **Leave / delete**: `leave_group` (items you added stay) / `delete_group` (creator).

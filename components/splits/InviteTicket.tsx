@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { CloseIcon, IconButton, SecondaryButton } from '@/components/ui/Button';
 import { friendlyError, inviteUrl, setInvites, useSplitsStore, type GroupData } from '@/lib/groups';
 import { useToast } from '@/store/toast';
-import { Eyebrow, PersonStack } from './parts';
+import { Eyebrow, FlowBg, PersonStack } from './parts';
 import { QR } from './QR';
 
 /** Invite card: group name, scannable QR, the link, Copy / Share, and (creator only) Close / Reopen invites. */
@@ -37,18 +37,20 @@ export function InviteTicket({ data, me, onClose }: { data: GroupData; me?: stri
 
   return (
     <div className="splits-fade absolute inset-0 z-30 flex flex-col overflow-y-auto bg-white" role="dialog" aria-label="Invite">
-      <header className="flex items-center justify-between px-3 pt-5"><span className="w-11" /><Eyebrow>Invite</Eyebrow><IconButton label="Close" onClick={onClose}><CloseIcon /></IconButton></header>
-      <div className="flex-1 px-6 pb-6 pt-4">
-        <div className="overflow-hidden rounded-[28px] border border-line bg-white shadow-[0_10px_30px_rgba(30,27,75,0.06)]">
-          <div className="px-6 pb-6 pt-7 text-center" style={{ background: 'linear-gradient(160deg, #EFEAFB 0%, #FBF1E6 100%)' }}>
+      <FlowBg seed={room.name} />
+      <header className="relative flex items-center justify-between px-3 pt-5"><span className="w-11" /><Eyebrow>Invite</Eyebrow><IconButton label="Close" onClick={onClose}><CloseIcon /></IconButton></header>
+      <div className="relative flex-1 px-6 pb-6 pt-4">
+        <div className="overflow-hidden rounded-[28px] border border-white/70 bg-white shadow-[0_14px_40px_rgba(30,27,75,0.10)]">
+          <div className="relative px-6 pb-6 pt-7 text-center">
+            <FlowBg seed={room.name} />
+            <div className="relative">
             <p className="text-[12px] text-soft">You are invited to</p>
             <h2 className="font-display mt-1 text-[30px] font-semibold leading-tight text-ink">{room.name}</h2>
             <div className="mt-4 flex items-center justify-center gap-2"><PersonStack members={members} size={28} /><span className="text-[12px] text-soft">{members.length} {members.length === 1 ? 'person' : 'people'}</span></div>
+            </div>
           </div>
           <div className="relative">
             <div className="border-t border-dashed border-line" />
-            <span className="absolute -left-3 -top-3 h-6 w-6 rounded-full border border-line bg-white" />
-            <span className="absolute -right-3 -top-3 h-6 w-6 rounded-full border border-line bg-white" />
           </div>
           <div className="flex flex-col items-center px-6 pb-6 pt-6">
             <div className={`rounded-[18px] border border-line p-3 transition-opacity ${open ? '' : 'opacity-20'}`}><QR text={url} /></div>

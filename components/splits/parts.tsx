@@ -4,11 +4,64 @@ import { SUPPORTED_CURRENCIES, formatWithCurrency } from '@/lib/currency';
 import { avatarHue, initials, type GroupMember } from '@/lib/split';
 import { CloseIcon, IconButton } from '@/components/ui/Button';
 
+/**
+ * Flowing pastel background, different for every group: the group's name picks one of these palettes, and three soft
+ * blobs in it drift slowly. Pure decoration (aria-hidden, no layout), place it as the first child of a `relative` box.
+ * Keep text over it dark (ink): every palette stays light enough for that.
+ */
+export const FLOW_PALETTES: readonly (readonly [string, string, string, string])[] = [
+  ['#F4F0FD', '#DCD2F7', '#FBE3D0', '#CFE3F6'], // lavender, peach, sky
+  ['#EEF8F5', '#CDEBE3', '#E4DAF7', '#FBEBCB'], // mint, lilac, sand
+  ['#FDF1F3', '#F8D3DC', '#DCD6F7', '#FCE6C9'], // rose, lilac, apricot
+  ['#EFF5FC', '#CFE1F5', '#D7F0E6', '#EBDDF7'], // sky, mint, lilac
+  ['#FDF6EC', '#F9DDBA', '#F6D3DE', '#D6E8F5'], // cream, apricot, rose, sky
+  ['#F3F8EC', '#DDEBC6', '#CDE9EA', '#F5DDEB'], // sage, aqua, pink
+];
+export const paletteFor = (seed: string): readonly [string, string, string, string] => {
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
+  return FLOW_PALETTES[h % FLOW_PALETTES.length];
+};
+
+export function FlowBg({ seed, className = '' }: { seed: string; className?: string }) {
+  const [base, a, b, c] = paletteFor(seed || 'group');
+  const blob = 'absolute h-[75%] w-[75%] rounded-full blur-3xl will-change-transform';
+  return (
+    <div aria-hidden="true" className={`pointer-events-none absolute inset-0 overflow-hidden ${className}`} style={{ background: base }}>
+      <span className={`${blob} flow-a -left-[15%] -top-[20%]`} style={{ background: a, opacity: 0.9 }} />
+      <span className={`${blob} flow-b -right-[20%] top-[5%]`} style={{ background: b, opacity: 0.8 }} />
+      <span className={`${blob} flow-c -bottom-[25%] left-[10%]`} style={{ background: c, opacity: 0.85 }} />
+    </div>
+  );
+}
+
+/** Amount typed on the keypad, grouped the Indian way as it grows (1,24,500); the newest digit pops in. */
+export const groupedDigits = (amt: string, locale = 'en-IN'): string => {
+  if (!amt) return '0';
+  const [i, d] = amt.split('.');
+  const int = Number(i || 0).toLocaleString(locale);
+  return d === undefined ? int : `${int}.${d}`;
+};
+export function Digits({ amt, code, size = 60 }: { amt: string; code: string; size?: number }) {
+  const info = currencyInfo(code);
+  const symbol = info.symbol, text = groupedDigits(amt, info.locale);
+  return (
+    <div className="num flex items-baseline justify-center leading-none" style={{ fontSize: size }} aria-live="polite">
+      <span className="mr-1 text-faint" style={{ fontSize: size * 0.62 }}>{symbol}</span>
+      {text.split('').map((ch, i) => (
+        <span key={`${i}-${text.length}`} className={`${amt ? 'text-ink' : 'text-faint'} ${ch === ',' ? 'opacity-40' : ''} ${i === text.length - 1 && amt ? 'digit-pop' : ''}`}>{ch}</span>
+      ))}
+    </div>
+  );
+}
+
 /** Money in the GROUP's currency (a group can differ from the user's own display currency). */
 export function useMoney(code: string): (n: number) => string {
   const info = SUPPORTED_CURRENCIES.find((c) => c.code === code) ?? SUPPORTED_CURRENCIES[0];
   return (n: number) => formatWithCurrency(Math.abs(n), info);
 }
+
+export const currencyInfo = (code: string) => SUPPORTED_CURRENCIES.find((c) => c.code === code) ?? SUPPORTED_CURRENCIES[0];
 
 export const Eyebrow = ({ children }: { children: ReactNode }) => (
   <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-faint">{children}</p>
