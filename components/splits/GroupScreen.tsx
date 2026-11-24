@@ -122,8 +122,8 @@ export function GroupScreen({ data, me, onBack }: { data: GroupData; me: string;
                         <div key={id} className="flex items-center gap-2 py-1 text-[12px]"><Person members={members} id={id} size={20} /><span className="flex-1 text-soft">{nameOf(members, id, me)}</span><span className="num text-ink">{money(s)}</span></div>))}
                       {canDelete && (
                         <div className="mt-2 flex gap-4">
-                          <button onClick={() => setEditing(it)} className="text-[12px] font-semibold text-ink underline underline-offset-4">Edit item</button>
-                          <button disabled={busy} onClick={() => void run(() => deleteItem(it.id), 'Item removed')} className="text-[12px] font-medium text-warm underline underline-offset-4">Delete item</button>
+                          <button onClick={() => setEditing(it)} className="h-8 min-h-0 rounded-full border border-line bg-white px-3.5 text-[12px] font-semibold text-ink active:bg-tint">Edit item</button>
+                          <button disabled={busy} onClick={() => void run(() => deleteItem(it.id), 'Item removed')} className="h-8 min-h-0 rounded-full border border-line bg-white px-3.5 text-[12px] font-medium text-warm active:bg-tint">Delete item</button>
                         </div>)}
                     </div>)}
                 </div>);
@@ -133,7 +133,7 @@ export function GroupScreen({ data, me, onBack }: { data: GroupData; me: string;
               <div key={s.id} className="flex items-center gap-3 border-b border-line py-2.5 text-[12px] text-soft">
                 <span className="flex-1">{nameOf(members, s.from, me)} paid {nameOf(members, s.to, me)} {money(s.amount)} {'·'} {relTime(Date.parse(s.createdAt))}</span>
                 {(s.from === me || s.to === me) && (
-                  <button disabled={busy} onClick={() => void run(() => deleteSettlement(s.id), 'Payment undone')} className="min-h-0 font-medium text-ink underline underline-offset-4">Undo</button>)}
+                  <button disabled={busy} onClick={() => void run(() => deleteSettlement(s.id), 'Payment undone')} className="h-7 min-h-0 rounded-full border border-line bg-white px-3 text-[12px] font-semibold text-ink active:bg-tint">Undo</button>)}
               </div>))}
           </>)}
 
@@ -148,7 +148,7 @@ export function GroupScreen({ data, me, onBack }: { data: GroupData; me: string;
               </div>); })}
             <div className="mt-8 flex flex-col items-center">
               <button disabled={!canClose} onClick={() => setConfirm(creator ? 'delete' : 'leave')}
-                className="min-h-[44px] text-[13px] font-medium text-soft underline underline-offset-4 disabled:no-underline disabled:opacity-40">
+                className="h-10 min-h-0 rounded-full border border-line bg-white px-5 text-[13px] font-medium text-soft active:bg-tint disabled:opacity-40">
                 {creator ? 'Delete this group' : 'Leave this group'}
               </button>
               {!canClose && (

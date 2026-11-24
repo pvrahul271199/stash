@@ -166,7 +166,7 @@ export function SplitsTab({ onSignIn, sample }: { onSignIn: () => void; sample?:
         {error && (
           <div className="rounded-[18px] border border-line bg-white p-4 text-center" role="alert">
             <p className="text-[13px] text-soft">{error}</p>
-            <button onClick={() => void refresh()} className="mt-2 min-h-[44px] text-[13px] font-semibold text-ink underline underline-offset-4">Try again</button>
+            <button onClick={() => void refresh()} className="mt-3 h-10 min-h-0 rounded-full bg-ink px-5 text-[13px] font-semibold text-white">Try again</button>
           </div>)}
         {groups && groups.length === 0 && !error && <EmptyGroups />}
       </div>
