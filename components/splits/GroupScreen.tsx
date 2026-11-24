@@ -10,6 +10,7 @@ import { useToast } from '@/store/toast';
 import { AddItemScreen } from './AddItemScreen';
 import { DebtGraph } from './DebtGraph';
 import { InviteTicket } from './InviteTicket';
+import { ShareStatusSheet } from './ShareStatusSheet';
 import { FlowBg, Person, PersonStack, Sheet, Signed, nameOf, relTime, useMoney } from './parts';
 
 const TABS = ['Items', 'People', 'Graph'] as const;
@@ -25,7 +26,7 @@ export function GroupScreen({ data, me, onBack }: { data: GroupData; me: string;
   const money = useMoney(room.currency);
   const toast = useToast((s) => s.show);
   const refresh = useSplitsStore((s) => s.refresh);
-  const [overlay, setOverlay] = useState<null | 'add' | 'invite'>(null);
+  const [overlay, setOverlay] = useState<null | 'add' | 'invite' | 'share'>(null);
   const [settle, setSettle] = useState<Debt | null>(null);
   const [editing, setEditing] = useState<GroupItem | null>(null);
   const [openItem, setOpenItem] = useState<string | null>(null);
@@ -65,6 +66,10 @@ export function GroupScreen({ data, me, onBack }: { data: GroupData; me: string;
           <button onClick={() => setOverlay('invite')} aria-label="Invite people" className="flex h-9 min-h-0 items-center gap-1.5 rounded-full bg-white/70 px-3 text-[12px] font-semibold text-ink">
             <PersonStack members={members} size={18} max={3} />{members.length}
           </button>
+          {items.length > 0 && (
+            <button onClick={() => setOverlay('share')} aria-label="Share status" className="flex h-9 min-h-0 w-9 items-center justify-center rounded-full bg-white/70 text-ink">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 15V4M8 8l4-4 4 4M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5" /></svg>
+            </button>)}
         </header>
         <div className="relative px-6 pt-3 text-center">
           <p className="text-[12px] text-soft">{position > 0 ? 'The group owes you' : position < 0 ? 'You owe the group' : items.length ? 'You are square' : 'Nothing yet'}</p>
@@ -188,6 +193,7 @@ export function GroupScreen({ data, me, onBack }: { data: GroupData; me: string;
           </div>
         </Sheet>)}
       {overlay === 'invite' && <InviteTicket data={data} me={me} onClose={() => setOverlay(null)} />}
+      {overlay === 'share' && <ShareStatusSheet data={data} debts={debts} preferred={me} onClose={() => setOverlay(null)} />}
       {overlay === 'add' && <AddItemScreen data={data} me={me} onClose={() => setOverlay(null)} />}
       {editing && <AddItemScreen key={editing.id} data={data} me={me} item={editing} onClose={() => setEditing(null)} />}
       {confirm && (
