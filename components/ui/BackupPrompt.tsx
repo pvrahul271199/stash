@@ -38,7 +38,7 @@ function snooze() {
 export function BackupPrompt({ onCreate }: { onCreate: () => void }) {
   const auth = useAuth();
   const inSample = useSampleMode();
-  const loggedDays = useLoggedDays();
+  const loggedDays = useLoggedDays(auth.status === 'guest' && !inSample);
   const [open, setOpen] = useState(false);
   // sample data is not the visitor's month, so there is nothing to back up
   const eligible = !inSample && shouldNudge(auth.status === 'guest', loggedDays, readSnooze(), Date.now());

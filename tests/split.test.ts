@@ -83,3 +83,15 @@ describe('chains and settlements', () => {
     expect(rawDebts(items)).toEqual([{ from: 'A', to: 'B', amount: 150 }]);
   });
 });
+
+describe('checkPartPayment', () => {
+  it('accepts up to what is owed, rounds to 2 decimals, and says why not otherwise', async () => {
+    const { checkPartPayment } = await import('@/lib/split');
+    expect(checkPartPayment('500', 1000)).toEqual({ amount: 500 });
+    expect(checkPartPayment('1000', 1000)).toEqual({ amount: 1000 });
+    expect(checkPartPayment('10.005', 1000)).toEqual({ amount: 10.01 });
+    expect(checkPartPayment('1000.01', 1000)).toEqual({ error: 'too_much' });
+    expect(checkPartPayment('', 1000)).toEqual({ error: 'empty' });
+    expect(checkPartPayment('0', 1000)).toEqual({ error: 'empty' });
+  });
+});

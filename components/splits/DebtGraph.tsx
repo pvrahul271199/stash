@@ -14,17 +14,25 @@ const INK = '#1E1B4B', WARM = '#B45309', GOOD = '#0F766E', FAINT = '#A5A29C', LI
  * direction, so it always sits exactly on the end of the line.
  */
 export function DebtGraph({
-  members, simplified, raw, me, money,
-}: { members: GroupMember[]; simplified: Debt[]; raw: Debt[]; me: string; money: (n: number) => string }) {
-  const [view, setView] = useState<'simplified' | 'raw'>('simplified');
+  members, simplified, raw, me, money, compact = false, view: viewProp, onView,
+}: {
+  members: GroupMember[]; simplified: Debt[]; raw: Debt[]; me: string; money: (n: number) => string; compact?: boolean;
+  /** Optional: let the parent own the Simplified / As logged choice, so the enlarged copy opens on the same view. */
+  view?: 'simplified' | 'raw'; onView?: (v: 'simplified' | 'raw') => void;
+}) {
+  const [own, setOwn] = useState<'simplified' | 'raw'>('simplified');
+  const view = viewProp ?? own;
+  const setView = (v: 'simplified' | 'raw') => { setOwn(v); onView?.(v); };
   const [sel, setSel] = useState<string | null>(null);
   const debts = view === 'simplified' ? simplified : raw;
   const ids = [...new Set([...simplified, ...raw].flatMap((d) => [d.from, d.to]))];
   const nm = (id: string) => (id === me ? 'You' : members.find((m) => m.id === id)?.name ?? 'Former member');
 
   // spacious canvas: generous radius, extra room above and below for the labels
-  const W = 350, R = 23, two = ids.length <= 2;
-  const H = two ? 230 : 372, CY = two ? 112 : 186, RX = two ? 0 : 124, RY = two ? 70 : 118;
+  // `compact` = a smaller drawing (fewer units in the same width), not a shrunken picture, so names and amounts stay readable
+  const W = compact ? 300 : 350, R = compact ? 18 : 23, two = ids.length <= 2;
+  const H = compact ? (two ? 210 : 280) : (two ? 230 : 372), CY = compact ? (two ? 104 : 138) : (two ? 112 : 186);
+  const RX = two ? 0 : compact ? 92 : 124, RY = compact ? (two ? 56 : 86) : (two ? 70 : 118);
   const order = ids.includes(me) ? [...ids.filter((i) => i !== me), me] : ids;
   const pos = new Map(order.map((id, i) => {
     const n = order.length;
@@ -40,9 +48,7 @@ export function DebtGraph({
     net.set(d.from, (net.get(d.from) ?? 0) - d.amount);
   }
   const max = Math.max(...debts.map((d) => d.amount), 1);
-  const saved = raw.length - simplified.length;
   const label = debts.map((d) => `${nm(d.from)} pays ${nm(d.to)} ${money(d.amount)}`).join('. ');
-  const dropped = ids.filter((id) => !simplified.some((d) => d.from === id || d.to === id));
 
   return (
     <div>
@@ -58,12 +64,12 @@ export function DebtGraph({
       {debts.length === 0 ? (
         <p className="py-10 text-center text-[13px] text-faint">Nothing to pay.</p>
       ) : (
-        <svg key={view} role="img" aria-label={label} viewBox={`0 0 ${W} ${H}`} className="mt-1 w-full">
+        <svg key={view} role="img" aria-label={label} viewBox={`0 0 ${W} ${H}`} className="mt-1 block w-full">
           {debts.map((d, i) => {
             const a = pos.get(d.from)!, b = pos.get(d.to)!;
             const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1, ux = dx / len, uy = dy / len, nx = -uy, ny = ux;
-            const w = 1.8 + 3.6 * (d.amount / max);                 // body thickness
-            const hl = 11 + w * 1.3, hw = 5 + w * 0.9;               // head length / half width, both grow with the body
+            const w = 1.1 + 1.5 * (d.amount / max);                 // body thickness (slim)
+            const hl = 8 + w * 1.2, hw = 3.5 + w * 0.8;               // head length / half width, both grow with the body
             const tipX = b.x - ux * (R + 4), tipY = b.y - uy * (R + 4);
             const baseX = tipX - ux * hl, baseY = tipY - uy * hl;   // the head's flat back: the body stops exactly here
             const sx = a.x + ux * (R + 4), sy = a.y + uy * (R + 4);
@@ -88,7 +94,7 @@ export function DebtGraph({
               <g key={id} onClick={() => setSel(sel === id ? null : id)} style={{ cursor: 'pointer', transition: 'opacity .25s' }} opacity={follows ? 1 : 0.35}>
                 {sel === id && <circle cx={p.x} cy={p.y} r={R + 6} fill="none" stroke={INK} strokeOpacity="0.25" />}
                 <circle cx={p.x} cy={p.y} r={R} fill={avatarHue(idx)} stroke="#fff" strokeWidth="3" />
-                <text x={p.x} y={p.y + 5} textAnchor="middle" fontSize="13" fontWeight="600" fill="#fff">{initials(nm(id))}</text>
+                <text x={p.x} y={p.y + 5} textAnchor="middle" fontSize={compact ? 11 : 13} fontWeight="600" fill="#fff">{initials(nm(id))}</text>
                 <text x={p.x} y={above ? p.y - R - 16 : p.y + R + 15} textAnchor="middle" fontSize="11.5" fontWeight="600" fill={INK}>{id === me ? 'You' : nm(id).split(' ')[0]}</text>
                 <text x={p.x} y={above ? p.y - R - 4 : p.y + R + 28} textAnchor="middle" fontSize="10.5" fill={n < 0 ? WARM : n > 0 ? GOOD : FAINT} className="num">{n === 0 ? 'even' : `${n > 0 ? '+' : '−'}${money(n)}`}</text>
               </g>
@@ -96,14 +102,6 @@ export function DebtGraph({
           })}
         </svg>
       )}
-      <p className="mt-1 text-center text-[11px] text-faint">Tap a person to follow their money. A thicker arrow is a bigger payment.</p>
-      <p className="mt-2 text-center text-[12px] leading-snug text-soft">
-        {view === 'simplified'
-          ? dropped.length
-            ? `${dropped.map((id) => nm(id).split(' ')[0]).join(' and ')} ${dropped.length === 1 ? 'owes and is owed' : 'owe and are owed'} the same, so ${dropped.length === 1 ? 'drops' : 'drop'} out. ${raw.length} ${raw.length === 1 ? 'payment' : 'payments'} became ${simplified.length}.`
-            : saved > 0 ? `${raw.length} payments became ${simplified.length}.` : 'These are the fewest payments that settle everyone.'
-          : 'Each pair on its own, straight from the items.'}
-      </p>
     </div>
   );
 }

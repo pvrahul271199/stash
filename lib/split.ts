@@ -183,3 +183,13 @@ export const MOCK_ITEMS: GroupItem[] = [
   { id: 'i3', total: 900, paidBy: 'u3', shares: equalShares(900, ['u1', 'u3', 'u4']), type: 'Travel', subtype: 'Fuel', createdBy: 'u3', createdAt: 3 },
   { id: 'i4', total: 340, paidBy: 'u4', shares: equalShares(340, ['u2', 'u4']), type: 'Food', subtype: 'Drinks', notes: 'Beach shack', createdBy: 'u4', createdAt: 4 },
 ];
+
+export type PartPaymentError = 'empty' | 'too_much';
+
+/** A payment toward a debt: more than 0 and at most what is owed (max 2 decimals). Returns the rounded amount or why not. */
+export function checkPartPayment(raw: string, owed: number): { amount: number } | { error: PartPaymentError } {
+  const n = roundMoney(Number(raw));
+  if (!raw || !Number.isFinite(n) || n <= 0) return { error: 'empty' };
+  if (n > owed) return { error: 'too_much' };
+  return { amount: n };
+}

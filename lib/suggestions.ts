@@ -95,3 +95,27 @@ export function quickChips(
   }
   return out;
 }
+
+/* ---------- pinned log-screen types ("Category::Type" keys) ---------- */
+
+const pinKey = (category: string, type: string) => `${category}::${type}`.toLowerCase();
+
+/** Case-insensitive, like `quickChips`: a pin is still a pin if the name's case differs. */
+export const isPinned = (keys: string[], category: string, type: string): boolean => keys.some((k) => k.toLowerCase() === pinKey(category, type));
+
+export type PinResult = 'pinned' | 'unpinned' | 'full';
+
+/** Pins or unpins one type. Pinning past `max` is refused (`full`): the log screen shows at most `max` chips, so an extra pin would just vanish. */
+export function togglePin(keys: string[], category: string, type: string, max = MAX_QUICK_CHIPS): { keys: string[]; result: PinResult } {
+  if (isPinned(keys, category, type)) return { keys: keys.filter((k) => k.toLowerCase() !== pinKey(category, type)), result: 'unpinned' };
+  if (keys.length >= max) return { keys, result: 'full' };
+  return { keys: [...keys, `${category}::${type}`], result: 'pinned' };
+}
+
+/** Pins follow a renamed category. */
+export const renamePinnedCategory = (keys: string[], from: string, to: string): string[] =>
+  keys.map((k) => (k.toLowerCase().startsWith(`${from.toLowerCase()}::`) ? `${to}${k.slice(from.length)}` : k));
+
+/** Drops pins of a removed type (or of a whole category when `type` is omitted). */
+export const dropPinned = (keys: string[], category: string, type?: string): string[] =>
+  keys.filter((k) => (type == null ? !k.toLowerCase().startsWith(`${category.toLowerCase()}::`) : k.toLowerCase() !== pinKey(category, type)));

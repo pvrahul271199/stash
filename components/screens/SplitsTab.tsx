@@ -107,17 +107,17 @@ export function SplitsTab({ onSignIn, sample }: { onSignIn: () => void; sample?:
           <div className="grid transition-transform duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] [transform-style:preserve-3d] motion-reduce:duration-0" style={{ transform: details ? 'rotateY(180deg)' : 'none' }}>
             {/* front: the total */}
             <div className="flip-face flex flex-col overflow-hidden rounded-[26px] border border-line bg-white shadow-[0_12px_32px_rgba(30,27,75,0.09)]" aria-hidden={details} inert={details}>
-              <button onClick={() => setDetails(true)} aria-label="Show who you get from and who you owe" className="block w-full flex-1 px-6 pb-4 pt-5 text-left active:bg-tint/50">
+              <button onClick={() => setDetails(true)} aria-label="Show who you get from and who you owe" className="block w-full flex-1 px-5 pb-3 pt-4 text-left active:bg-tint/50">
                 <span className="flex items-center justify-between">
-                  <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-faint">Across all groups</span>
-                  <span className="rounded-full bg-tint px-2.5 py-1 text-[11px] font-medium text-soft">{pending ? `${pending} to settle` : 'Nothing to settle'}</span>
+                  <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-faint">Across all groups</span>
+                  <span className="rounded-full bg-tint px-2.5 py-0.5 text-[10px] font-medium text-soft">{pending ? `${pending} to settle` : 'Nothing to settle'}</span>
                 </span>
-                <span className={`num mt-3 block text-[48px] leading-none ${overall < 0 ? 'text-warm' : 'text-ink'}`}>
+                <span className={`num mt-2 block text-[34px] leading-none ${overall < 0 ? 'text-warm' : 'text-ink'}`}>
                   {overall === 0 ? '' : overall > 0 ? '+' : '−'}{formatWithCurrency(Math.abs(overall), info)}
                 </span>
-                <span className="mt-1.5 block text-[13px] text-soft">{overall === 0 ? (owed || owe ? 'You get and owe the same' : 'You are all square') : overall > 0 ? 'More is owed to you than you owe' : 'You owe more than you are owed'}</span>
+                <span className="mt-1 block text-[12px] text-soft">{overall === 0 ? (owed || owe ? 'You get and owe the same' : 'You are all square') : overall > 0 ? 'More is owed to you than you owe' : 'You owe more than you are owed'}</span>
                 {(owed > 0 || owe > 0) && (
-                  <span className="mt-5 flex h-1.5 gap-0.5 overflow-hidden rounded-full bg-tint" role="img" aria-label={`You get ${fmt(owed)}, you owe ${fmt(owe)}`}>
+                  <span className="mt-4 flex h-1 gap-0.5 overflow-hidden rounded-full bg-tint" role="img" aria-label={`You get ${fmt(owed)}, you owe ${fmt(owe)}`}>
                     <span className="rounded-full bg-ink" style={{ width: `${(owed / (owed + owe)) * 100}%` }} />
                     <span className="rounded-full bg-warm" style={{ width: `${(owe / (owed + owe)) * 100}%` }} />
                   </span>)}
@@ -140,7 +140,7 @@ export function SplitsTab({ onSignIn, sample }: { onSignIn: () => void; sample?:
                     <div key={label} className="border-b border-line px-6 py-3 last:border-0">
                       <div className="flex items-center justify-between">
                         <p className="flex items-center gap-1.5 text-[12px] font-medium text-soft"><span className={`h-1.5 w-1.5 rounded-full ${dot}`} />{label}</p>
-                        <p className={`num text-[20px] ${tone}`}>{fmt(total)}</p>
+                        <p className={`num text-[16px] ${tone}`}>{fmt(total)}</p>
                       </div>
                       {list.length === 0 && <p className="pt-1.5 text-[12px] text-faint">{label === 'You get' ? 'Nobody owes you right now.' : 'You do not owe anyone right now.'}</p>}
                       {list.map(({ d, r }) => {

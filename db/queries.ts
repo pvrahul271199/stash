@@ -44,7 +44,7 @@ import {
   trackingForPeriod,
   type DerivedCycle,
 } from '@/lib/period';
-import { resolveLabel } from '@/lib/suggestions';
+import { dropPinned, renamePinnedCategory, resolveLabel, togglePin, type PinResult } from '@/lib/suggestions';
 import { addDays, dateOfDay, daysBetween, setClosedThrough, subscribeDay, toISO, todayISO } from '@/lib/dates';
 import { buildCSV, type CsvRow } from '@/lib/csv';
 import { MAX_NAME, resolveCategories, validateName, type ResolvedCategory } from '@/lib/categories';
@@ -297,16 +297,27 @@ export function useQuickTypes(): string[] {
 }
 
 /** Pin or unpin a type on the log screen. Returns true when it is now pinned. */
-export async function toggleQuickType(category: string, type: string): Promise<boolean> {
+export async function toggleQuickType(category: string, type: string): Promise<PinResult> {
   const db = getDB();
-  const key = typeKey(category, type);
-  let pinned = false;
+  let result: PinResult = 'unpinned';
   await db.transaction('rw', db.meta, async () => {
-    const cur = (await db.meta.get('main'))?.quickTypes ?? [];
-    pinned = !cur.includes(key);
-    await db.meta.update('main', { quickTypes: pinned ? [...cur, key] : cur.filter((k) => k !== key) });
+    const meta = await db.meta.get('main');
+    const t = togglePin(meta?.quickTypes ?? [], category, type);
+    result = t.result;
+    if (t.result === 'full') return;
+    // `update` does nothing when the meta row is missing, which silently lost the pin: create the row then
+    if (meta) await db.meta.update('main', { quickTypes: t.keys });
+    else await db.meta.put({ id: 'main', lastUsedLabel: null, schemaVersion: SCHEMA_VERSION, quickTypes: t.keys });
   });
-  return pinned;
+  return result;
+}
+
+/** Keeps the pinned list tidy when a category/type is renamed (`to` set) or removed (`to` omitted). Run inside a transaction on `meta`. */
+async function updatePins(db: StashDB, fn: (keys: string[]) => string[]): Promise<void> {
+  const cur = (await db.meta.get('main'))?.quickTypes;
+  if (!cur?.length) return;
+  const next = fn(cur);
+  if (next.length !== cur.length || next.some((k, i) => k !== cur[i])) await db.meta.update('main', { quickTypes: next });
 }
 
 /**
@@ -320,13 +331,14 @@ export function useUsedTypes(): Record<string, { name: string; count: number }[]
       const db = getDB();
       const names = await loadLinkNames(db);
       const by = new Map<string, Map<string, number>>();
-      await db.transactions.each((t) => {
-        if (t.deletedAt != null || !t.subtype) return;
+      // toArray (one bulk read) is ~10x faster than a per-row cursor (.each), and this re-runs after every save
+      for (const t of await db.transactions.toArray()) {
+        if (t.deletedAt != null || !t.subtype) continue;
         const cat = catNameOf(t, names);
         const m = by.get(cat) ?? new Map<string, number>();
         m.set(t.subtype, (m.get(t.subtype) ?? 0) + 1);
         by.set(cat, m);
-      });
+      }
       const out: Record<string, { name: string; count: number }[]> = {};
       for (const [cat, m] of by) out[cat] = [...m].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count);
       return out;
@@ -344,14 +356,14 @@ export async function adoptUsedTypes(): Promise<number> {
   const db = getDB();
   const [cats, names] = await Promise.all([loadCategories(db), loadLinkNames(db)]);
   const missing = new Map<string, Set<string>>();
-  await db.transactions.each((t) => {
-    if (t.deletedAt != null || !t.subtype) return;
+  for (const t of await db.transactions.toArray()) {
+    if (t.deletedAt != null || !t.subtype) continue;
     const c = cats.find((x) => x.name.toLowerCase() === catNameOf(t, names).toLowerCase());
-    if (!c || c.subcategories.some((s) => s.toLowerCase() === t.subtype!.toLowerCase())) return;
+    if (!c || c.subcategories.some((s) => s.toLowerCase() === t.subtype!.toLowerCase())) continue;
     const set = missing.get(c.id) ?? new Set<string>();
     set.add(t.subtype);
     missing.set(c.id, set);
-  });
+  }
   let added = 0;
   for (const [id, set] of missing) {
     for (const name of set) if ((await addSubcategory(id, name)) === null) added++;
@@ -460,11 +472,11 @@ export function useCategoryCounts(): Record<string, number> {
       const counts: Record<string, number> = {};
       const db = getDB();
       const names = await loadLinkNames(db);
-      await db.transactions.each((t) => {
-        if (t.deletedAt != null) return;
+      for (const t of await db.transactions.toArray()) {
+        if (t.deletedAt != null) continue;
         const name = catNameOf(t, names);
         counts[name] = (counts[name] ?? 0) + 1;
-      });
+      }
       return counts;
     }, []) ?? {}
   );
@@ -477,11 +489,11 @@ export function useEventCounts(): Record<string, number> {
       const counts: Record<string, number> = {};
       const db = getDB();
       const names = await loadLinkNames(db);
-      await db.transactions.each((t) => {
-        if (t.deletedAt != null) return;
+      for (const t of await db.transactions.toArray()) {
+        if (t.deletedAt != null) continue;
         const ev = eventNameOf(t, names)?.trim();
         if (ev) counts[ev] = (counts[ev] ?? 0) + 1;
-      });
+      }
       return counts;
     }, []) ?? {}
   );
@@ -590,10 +602,11 @@ export async function updateActivePlan(p: PlanInput): Promise<void> {
 
 /** Real (not rough-total) spends logged so far; drives the "back up your month" prompt. */
 /** On how many different days the person has logged a (real) spend. */
-export function useLoggedDays(): number {
+export function useLoggedDays(enabled = true): number {
+  // `enabled` false (only guests are nudged to back up): skip the full read that otherwise re-runs after every save
   return useLiveQuery(
-    async () => new Set((await getDB().transactions.toArray()).filter((t) => alive(t) && !t.isEstimate).map((t) => t.txnDate)).size,
-    [],
+    async () => (enabled ? new Set((await getDB().transactions.toArray()).filter((t) => alive(t) && !t.isEstimate).map((t) => t.txnDate)).size : 0),
+    [enabled],
     0,
   );
 }
@@ -1171,9 +1184,10 @@ export async function renameCategory(catId: string, name: string): Promise<strin
   if (c.isSystem || c.baseId) return "Built-in categories can't be renamed.";
   const err = validateName(trimmed, all.filter((x) => x.id !== catId).map((x) => x.name));
   if (err) return err;
-  await db.transaction('rw', [db.cats, db.evts], async () => {
+  await db.transaction('rw', [db.cats, db.evts, db.meta], async () => {
     const now = Date.now();
     await db.cats.update(catId, { name: trimmed, updatedAt: now });
+    await updatePins(db, (k) => renamePinnedCategory(k, c.name, trimmed));
     for (const ev of (await db.evts.toArray()).filter(alive)) {
       if (ev.categories.includes(c.name)) {
         await db.evts.update(ev.id, { categories: ev.categories.map((x) => (x === c.name ? trimmed : x)), updatedAt: now });
@@ -1216,10 +1230,11 @@ export async function addSubcategory(catId: string, name: string): Promise<strin
 /** Spends keep their category and lose only the type. */
 export async function removeSubcategory(catId: string, name: string): Promise<void> {
   const db = getDB();
-  await db.transaction('rw', [db.cats, db.transactions], async () => {
+  await db.transaction('rw', [db.cats, db.transactions, db.meta], async () => {
     const c = (await loadCategories(db)).find((x) => x.id === catId);
     if (!c) return;
     const now = Date.now();
+    await updatePins(db, (k) => dropPinned(k, c.name, name));
     if (c.baseId) {
       const o = await overrideFor(db, c.baseId, now);
       const d = DEFAULT_CATEGORIES.find((x) => x.key === c.baseId)!;
@@ -1242,10 +1257,11 @@ export async function removeSubcategory(catId: string, name: string): Promise<vo
 /** Spends move to Other. "Other" itself can't be removed. */
 export async function removeCategory(catId: string): Promise<void> {
   const db = getDB();
-  await db.transaction('rw', [db.cats, db.transactions, db.evts], async () => {
+  await db.transaction('rw', [db.cats, db.transactions, db.evts, db.meta], async () => {
     const c = (await loadCategories(db)).find((x) => x.id === catId);
     if (!c || c.isSystem) return;
     const now = Date.now();
+    await updatePins(db, (k) => dropPinned(k, c.name));
     await db.transactions
       .filter((t) => alive(t) && inCategory(t, c))
       .modify({ type: 'Other', categoryId: 'other', subtype: null, updatedAt: now });

@@ -72,9 +72,14 @@ select:focus {
   position: relative;
   overflow: hidden;
   padding-top: var(--safe-top);
+  /* The app is laid out for a phone up to 420px wide. On anything wider (big phones, tablets, installed on a desktop) it stays
+     that width, centred, so every device shows the same screens instead of a stretched or re-flowed one. */
+  max-width: 420px;
+  margin-inline: auto;
 }
 
-@media (min-width: 421px) and (display-mode: browser) {
+/* Only a real desktop window gets the framed phone; phones (even 430px wide ones) keep the full-screen look. */
+@media (min-width: 521px) and (display-mode: browser) {
   body {
     background: #efedea;
   }
@@ -85,7 +90,7 @@ select:focus {
     justify-content: center;
   }
   .app-root {
-    width: 380px;
+    width: 390px;
     height: 780px;
     max-height: 96dvh;
     border-radius: 40px;

@@ -8,8 +8,6 @@ import {
   removeCategory,
   removeEvent,
   removeSubcategory,
-  toggleQuickType,
-  typeKey,
   useCategories,
   useCategoryCounts,
   useEventCounts,
@@ -19,7 +17,8 @@ import {
 } from '@/db/queries';
 import type { Category, StashEvent } from '@/db/schema';
 import { MAX_NAME } from '@/lib/categories';
-import { PinIcon } from './CategoryPicker';
+import { PinIcon, pinType } from './CategoryPicker';
+import { isPinned } from '@/lib/suggestions';
 import { captureEvent } from '@/lib/analytics';
 
 function AddInput({
@@ -122,12 +121,12 @@ function Row({
                 >
                   {s}
                   <button
-                    aria-label={pinned.includes(typeKey(cat.name, s)) ? `Remove ${s} from quick chips` : `Keep ${s} as a quick chip on the log screen`}
-                    aria-pressed={pinned.includes(typeKey(cat.name, s))}
-                    onClick={() => void toggleQuickType(cat.name, s)}
-                    className={`flex h-9 w-9 items-center justify-center rounded-full ${pinned.includes(typeKey(cat.name, s)) ? 'text-ink' : 'text-faint'}`}
+                    aria-label={isPinned(pinned, cat.name, s) ? `Remove ${s} from quick chips` : `Keep ${s} as a quick chip on the log screen`}
+                    aria-pressed={isPinned(pinned, cat.name, s)}
+                    onClick={() => void pinType(cat.name, s)}
+                    className={`flex h-9 w-9 items-center justify-center rounded-full ${isPinned(pinned, cat.name, s) ? 'text-ink' : 'text-faint'}`}
                   >
-                    <PinIcon filled={pinned.includes(typeKey(cat.name, s))} />
+                    <PinIcon filled={isPinned(pinned, cat.name, s)} />
                   </button>
                   <button
                     aria-label={`Remove ${s} from ${cat.name}`}

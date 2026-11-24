@@ -1,6 +1,6 @@
 'use client';
 import { track, trackOnce } from '@/lib/analytics';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BackIcon, IconButton, PrimaryButton } from '../ui/Button';
 import { Keypad } from '../ui/Keypad';
 import { CALC_INIT, OP_SYMBOL, calcPress, calcResult, formatTyped, isOp, type CalcState } from '../../lib/calc';
@@ -123,7 +123,10 @@ export function LogSpend({
   const cats = useCategories() ?? [];
   const pinned = useQuickTypes();
   const used = useUsedTypes();
-  const chips = quickChips(cats, pinned, used, new Date().getHours());
+  // not on every keypress: only when the categories, pins or used types change
+  const hour = new Date().getHours();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const chips = useMemo(() => quickChips(cats, pinned, used, hour), [cats.length, pinned, used, hour]);
   const amount = calcResult(calc);
   // Whom you can lend to = the Lend category's types; "+ Add" in Lend mode adds one there (same as Categories).
   const lendCat = cats.find((c) => c.name.toLowerCase() === LEND_CATEGORY.toLowerCase());

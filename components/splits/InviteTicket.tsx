@@ -37,10 +37,9 @@ export function InviteTicket({ data, me, onClose }: { data: GroupData; me?: stri
 
   return (
     <div className="splits-fade absolute inset-0 z-30 flex flex-col overflow-y-auto bg-white" role="dialog" aria-label="Invite">
-      <FlowBg seed={room.name} />
       <header className="relative flex items-center justify-between px-3 pt-5"><span className="w-11" /><Eyebrow>Invite</Eyebrow><IconButton label="Close" onClick={onClose}><CloseIcon /></IconButton></header>
       <div className="relative flex-1 px-6 pb-6 pt-4">
-        <div className="overflow-hidden rounded-[28px] border border-white/70 bg-white shadow-[0_14px_40px_rgba(30,27,75,0.10)]">
+        <div className="overflow-hidden rounded-[28px] border border-line bg-white shadow-[0_8px_28px_rgba(30,27,75,0.07)]">
           <div className="relative px-6 pb-6 pt-7 text-center">
             <FlowBg seed={room.name} />
             <div className="relative">

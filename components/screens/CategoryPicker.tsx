@@ -1,7 +1,14 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { BackIcon, IconButton } from '../ui/Button';
-import { addCategory, addSubcategory, adoptUsedTypes, toggleQuickType, typeKey, useCategories, useQuickTypes } from '@/db/queries';
+import { addCategory, addSubcategory, adoptUsedTypes, toggleQuickType, useCategories, useQuickTypes } from '@/db/queries';
+import { MAX_QUICK_CHIPS, isPinned } from '@/lib/suggestions';
+import { useToast } from '@/store/toast';
+
+/** Pin / unpin a type for the log screen's quick chips; tells the user when the limit is reached instead of failing silently. */
+export async function pinType(category: string, type: string): Promise<void> {
+  if ((await toggleQuickType(category, type)) === 'full') useToast.getState().show(`You can keep ${MAX_QUICK_CHIPS} quick chips. Unpin one first.`, 'warm');
+}
 import { num } from '@/lib/format';
 import { useCurrency } from '@/lib/currency';
 import { MAX_NAME } from '@/lib/categories';
@@ -132,7 +139,7 @@ export function CategoryPicker({
                 Just {sel.name}
               </button>
               {sel.subcategories.map((s) => {
-                const on = pinned.includes(typeKey(sel.name, s));
+                const on = isPinned(pinned, sel.name, s);
                 return (
                   <div key={s} className="flex min-h-[56px] items-center rounded-key border border-line">
                     <button onClick={() => onPick(sel.name, s)} className="min-h-[56px] min-w-0 flex-1 truncate pl-4 text-left text-[15px] font-medium text-ink">
@@ -141,7 +148,7 @@ export function CategoryPicker({
                     <button
                       aria-label={on ? `Remove ${s} from quick chips` : `Keep ${s} as a quick chip`}
                       aria-pressed={on}
-                      onClick={() => void toggleQuickType(sel.name, s)}
+                      onClick={() => void pinType(sel.name, s)}
                       className={`flex h-11 w-11 shrink-0 items-center justify-center ${on ? 'text-ink' : 'text-faint'}`}
                     >
                       <PinIcon filled={on} />

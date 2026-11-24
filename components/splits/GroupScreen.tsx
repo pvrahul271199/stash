@@ -5,7 +5,8 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import {
   addSettlement, deleteGroup, deleteItem, deleteSettlement, friendlyError, leaveGroup, useSplitsStore, type GroupData,
 } from '@/lib/groups';
-import { applySettlements, groupTotals, netBalances, rawDebts, simplifyDebts, type Debt, type GroupItem } from '@/lib/split';
+import { applySettlements, checkPartPayment, groupTotals, netBalances, rawDebts, simplifyDebts, type Debt, type GroupItem } from '@/lib/split';
+import { roundMoney } from '@/lib/money';
 import { useToast } from '@/store/toast';
 import { AddItemScreen } from './AddItemScreen';
 import { DebtGraph } from './DebtGraph';
@@ -13,7 +14,7 @@ import { InviteTicket } from './InviteTicket';
 import { ShareStatusSheet } from './ShareStatusSheet';
 import { FlowBg, Person, PersonStack, Sheet, Signed, nameOf, relTime, useMoney } from './parts';
 
-const TABS = ['Items', 'People', 'Graph'] as const;
+const TABS = ['People', 'Items', 'Graph'] as const;
 type Tab = (typeof TABS)[number];
 
 /**
@@ -30,8 +31,12 @@ export function GroupScreen({ data, me, onBack }: { data: GroupData; me: string;
   const [settle, setSettle] = useState<Debt | null>(null);
   const [editing, setEditing] = useState<GroupItem | null>(null);
   const [openItem, setOpenItem] = useState<string | null>(null);
+  const [graphBig, setGraphBig] = useState(false);
+  const [graphView, setGraphView] = useState<'simplified' | 'raw'>('simplified');
+  const [payMode, setPayMode] = useState<'full' | 'part'>('full');
+  const [partAmt, setPartAmt] = useState('');
   const [confirm, setConfirm] = useState<null | 'leave' | 'delete'>(null);
-  const [tab, setTab] = useState<Tab>('Items');
+  const [tab, setTab] = useState<Tab>('People');
   const [busy, setBusy] = useState(false);
 
   const ids = members.map((m) => m.id);
@@ -74,21 +79,18 @@ export function GroupScreen({ data, me, onBack }: { data: GroupData; me: string;
         <div className="relative px-6 pt-3 text-center">
           <p className="text-[12px] text-soft">{position > 0 ? 'The group owes you' : position < 0 ? 'You owe the group' : items.length ? 'You are square' : 'Nothing yet'}</p>
           <p className={`num mt-1 text-[52px] leading-none ${position < 0 ? 'text-warm' : 'text-ink'}`}>{money(position)}</p>
-          <p className="num mt-2 text-[12px] text-soft">paid {money(mine.paid)} {'·'} your share {money(mine.share)}</p>
+          <div className="mx-auto mt-3 flex w-fit overflow-hidden rounded-full bg-white/70 text-left">
+            <div className="px-4 py-1.5"><p className="text-[10px] font-medium uppercase tracking-[0.08em] text-faint">You paid</p><p className="num text-[14px] font-semibold text-ink">{money(mine.paid)}</p></div>
+            <div className="my-1.5 w-px bg-ink/10" />
+            <div className="px-4 py-1.5"><p className="text-[10px] font-medium uppercase tracking-[0.08em] text-faint">Your share</p><p className="num text-[14px] font-semibold text-ink">{money(mine.share)}</p></div>
+          </div>
         </div>
-        <div className="no-scrollbar relative mt-4 flex justify-center gap-2 overflow-x-auto px-5">
-          {mineDebts.map((d) => (
-            <button key={d.from + d.to} onClick={() => setSettle(d)}
-              aria-label={`Settle ${money(d.amount)}: ${nameOf(members, d.from, me)} pays ${nameOf(members, d.to, me)}`}
-              className="flex h-10 min-h-0 shrink-0 items-center gap-2 rounded-full bg-white py-1.5 pl-1.5 pr-3.5 shadow-sm">
-              <Person members={members} id={d.from} size={26} /><span className="text-faint" aria-hidden="true">{'→'}</span><Person members={members} id={d.to} size={26} />
-              <span className={`num text-[13px] font-semibold ${d.from === me ? 'text-warm' : 'text-ink'}`}>{money(d.amount)}</span>
-              <span className="text-[12px] font-semibold text-ink">Settle</span>
-            </button>))}
-          {mineDebts.length === 0 && (
-            <span className="rounded-full bg-white/70 px-4 py-2 text-[13px] text-soft">
-              {debts.length === 0 ? (items.length ? 'Everyone is settled up' : 'Add an item to start splitting') : `Nothing for you to settle · ${others} between others`}
-            </span>)}
+        <div className="relative mt-3 flex justify-center px-5">
+          {mineDebts.length > 0
+            ? <button onClick={() => setTab('People')} className="h-9 min-h-0 rounded-full bg-white/80 px-4 text-[13px] font-semibold text-ink shadow-sm active:bg-white">Settle up {'›'}</button>
+            : <span className="rounded-full bg-white/70 px-4 py-2 text-[13px] text-soft">
+                {debts.length === 0 ? (items.length ? 'Everyone is settled up' : 'Add an item to start splitting') : `Nothing for you to settle · ${others} between others`}
+              </span>}
         </div>
       </div>
 
@@ -104,35 +106,20 @@ export function GroupScreen({ data, me, onBack }: { data: GroupData; me: string;
         {tab === 'Items' && (
           <>
             {items.length === 0 && <p className="py-8 text-center text-[13px] text-faint">No items yet.</p>}
-            {items.map((it) => {
-              const canDelete = it.createdBy === me || creator;
-              const open = openItem === it.id;
-              return (
-                <div key={it.id} className="border-b border-line">
-                  <button onClick={() => setOpenItem(open ? null : it.id)} aria-expanded={open} className="flex w-full items-center gap-3 py-3 text-left">
-                    <Person members={members} id={it.paidBy} size={32} />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[14px] font-medium text-ink">{it.notes ?? it.subtype ?? it.type}</span>
-                      <span className="block text-[11px] text-faint">{relTime(it.createdAt)} {'·'} {nameOf(members, it.paidBy, me)} paid</span>
-                    </span>
-                    <span className="text-right">
-                      <span className="num block text-[14px] font-semibold text-ink">{money(it.total)}</span>
-                      {it.shares[me] != null && <span className="num block text-[11px] text-soft">you {money(it.shares[me])}</span>}
-                    </span>
-                  </button>
-                  {open && (
-                    <div className="mb-3 rounded-[14px] bg-tint p-3">
-                      <p className="mb-1 text-[11px] text-faint">{it.type}{it.subtype ? ` · ${it.subtype}` : ''} {'·'} split {Object.keys(it.shares).length} ways</p>
-                      {Object.entries(it.shares).map(([id, s]) => (
-                        <div key={id} className="flex items-center gap-2 py-1 text-[12px]"><Person members={members} id={id} size={20} /><span className="flex-1 text-soft">{nameOf(members, id, me)}</span><span className="num text-ink">{money(s)}</span></div>))}
-                      {canDelete && (
-                        <div className="mt-2 flex gap-4">
-                          <button onClick={() => setEditing(it)} className="h-8 min-h-0 rounded-full border border-line bg-white px-3.5 text-[12px] font-semibold text-ink active:bg-tint">Edit item</button>
-                          <button disabled={busy} onClick={() => void run(() => deleteItem(it.id), 'Item removed')} className="h-8 min-h-0 rounded-full border border-line bg-white px-3.5 text-[12px] font-medium text-warm active:bg-tint">Delete item</button>
-                        </div>)}
-                    </div>)}
-                </div>);
-            })}
+            {items.map((it) => (
+              <div key={it.id} className="border-b border-line">
+                <button onClick={() => setOpenItem(it.id)} aria-haspopup="dialog" className="flex w-full items-center gap-3 py-3 text-left active:bg-tint/60">
+                  <Person members={members} id={it.paidBy} size={32} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[14px] font-medium text-ink">{it.notes ?? it.subtype ?? it.type}</span>
+                    <span className="block text-[11px] text-faint">{relTime(it.createdAt)} {'·'} {nameOf(members, it.paidBy, me)} paid</span>
+                  </span>
+                  <span className="text-right">
+                    <span className="num block text-[14px] font-semibold text-ink">{money(it.total)}</span>
+                    {it.shares[me] != null && <span className="num block text-[11px] text-soft">you {money(it.shares[me])}</span>}
+                  </span>
+                </button>
+              </div>))}
             {settlements.length > 0 && <p className="mt-5 text-[11px] font-semibold uppercase tracking-[0.1em] text-faint">Payments made</p>}
             {settlements.map((s) => (
               <div key={s.id} className="flex items-center gap-3 border-b border-line py-2.5 text-[12px] text-soft">
@@ -144,13 +131,28 @@ export function GroupScreen({ data, me, onBack }: { data: GroupData; me: string;
 
         {tab === 'People' && (
           <>
-            {members.map((m) => { const r = totals.byMember[m.id]; return (
-              <div key={m.id} className="flex items-center gap-3 border-b border-line py-3">
-                <Person members={members} id={m.id} size={32} />
-                <span className="min-w-0 flex-1"><span className="block text-[14px] font-medium text-ink">{nameOf(members, m.id, me)}</span>
-                  <span className="num block text-[11px] text-faint">paid {money(r?.paid ?? 0)} {'·'} share {money(r?.share ?? 0)}</span></span>
-                <Signed v={net[m.id] ?? 0} money={money} className="text-[14px]" />
-              </div>); })}
+            {[...members].sort((x, y) => Number(y.id === me) - Number(x.id === me)).map((m) => {
+              const r = totals.byMember[m.id];
+              // Settle sits on the person you pay (or who pays you), never on rows you are not part of
+              const d = mineDebts.find((x) => (x.from === me && x.to === m.id) || (x.to === me && x.from === m.id));
+              return (
+                <div key={m.id} className="flex items-center gap-3 border-b border-line py-3.5">
+                  <Person members={members} id={m.id} size={36} />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[14px] font-medium text-ink">{nameOf(members, m.id, me)}</p>
+                    <p className="mt-0.5 flex gap-3 text-[11px] text-faint">
+                      <span>Paid <b className="num font-medium text-soft">{money(r?.paid ?? 0)}</b></span>
+                      <span>Share <b className="num font-medium text-soft">{money(r?.share ?? 0)}</b></span>
+                    </p>
+                  </div>
+                  <div className="flex flex-col items-end gap-1.5">
+                    <Signed v={net[m.id] ?? 0} money={money} className="text-[14px]" />
+                    {d && (
+                      <button onClick={() => { setPayMode('full'); setPartAmt(''); setSettle(d); }} aria-label={`Settle ${money(d.amount)} with ${nameOf(members, m.id, me)}`}
+                        className="h-9 min-h-0 rounded-full bg-ink px-4 text-[13px] font-semibold text-white active:opacity-80">Settle</button>)}
+                  </div>
+                </div>);
+            })}
             <div className="mt-8 flex flex-col items-center">
               <button disabled={!canClose} onClick={() => setConfirm(creator ? 'delete' : 'leave')}
                 className="h-10 min-h-0 rounded-full border border-line bg-white px-5 text-[13px] font-medium text-soft active:bg-tint disabled:opacity-40">
@@ -166,14 +168,54 @@ export function GroupScreen({ data, me, onBack }: { data: GroupData; me: string;
         {tab === 'Graph' && (
           <div className="pt-3">
             {(debts.length > 0 || raw.length > 0)
-              ? <DebtGraph members={members} simplified={debts} raw={raw} me={me} money={money} />
+              ? (
+                <>
+                  <DebtGraph compact view={graphView} onView={setGraphView} members={members} simplified={debts} raw={raw} me={me} money={money} />
+                  <button onClick={() => setGraphBig(true)} className="mx-auto mt-2 flex h-9 min-h-0 items-center gap-1.5 rounded-full border border-line px-4 text-[12px] font-semibold text-ink active:bg-tint">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7" /></svg>Enlarge
+                  </button>
+                </>)
               : <p className="py-8 text-center text-[13px] text-faint">{items.length ? 'Everyone is settled up.' : 'Add an item to see who pays whom.'}</p>}
-            {others > 0 && <p className="mt-3 text-center text-[12px] text-faint">You can settle only your own payments. The rest are settled by the people in them.</p>}
           </div>)}
       </div>
 
       <div className="px-5 pb-6 pt-2"><PrimaryButton onClick={() => setOverlay('add')}>Add item</PrimaryButton></div>
 
+      {graphBig && (
+        <Sheet title="Who pays whom" onClose={() => setGraphBig(false)} full>
+          <div className="pt-2"><DebtGraph view={graphView} onView={setGraphView} members={members} simplified={debts} raw={raw} me={me} money={money} /></div>
+        </Sheet>)}
+      {openItem && (() => {
+        const it = items.find((x) => x.id === openItem);
+        if (!it) return null;
+        const canDelete = it.createdBy === me || creator;
+        const myShare = it.shares[me] ?? 0;
+        const myPaid = it.paidBy === me ? it.total : 0;
+        const delta = myPaid - myShare;
+        return (
+          <Sheet title={it.notes ?? it.subtype ?? it.type} onClose={() => setOpenItem(null)} full>
+            <p className="mt-1 text-[12px] text-faint">{it.type}{it.subtype ? ` · ${it.subtype}` : ''} {'·'} {relTime(it.createdAt)}</p>
+            <p className="num mt-4 text-[40px] leading-none text-ink">{money(it.total)}</p>
+            <p className="mt-1.5 flex items-center gap-2 text-[13px] text-soft"><Person members={members} id={it.paidBy} size={22} />{nameOf(members, it.paidBy, me)} paid {'·'} split {Object.keys(it.shares).length} ways</p>
+            <div className="mt-5 grid grid-cols-2 gap-2">
+              <div className="rounded-2xl bg-tint px-4 py-3"><p className="text-[10px] font-medium uppercase tracking-[0.08em] text-faint">You paid</p><p className="num mt-0.5 text-[18px] font-semibold text-ink">{money(myPaid)}</p></div>
+              <div className="rounded-2xl bg-tint px-4 py-3"><p className="text-[10px] font-medium uppercase tracking-[0.08em] text-faint">Your share</p><p className="num mt-0.5 text-[18px] font-semibold text-ink">{money(myShare)}</p></div>
+            </div>
+            <p className={`mt-2 text-center text-[12px] ${delta < 0 ? 'text-warm' : 'text-soft'}`}>
+              {myShare === 0 && myPaid === 0 ? 'You are not part of this item.' : delta > 0 ? `The group owes you ${money(delta)} for this` : delta < 0 ? `You owe ${money(delta)} for this` : 'This one is even for you'}
+            </p>
+            <p className="mb-1 mt-5 text-[11px] font-semibold uppercase tracking-[0.1em] text-faint">Who owes what</p>
+            {Object.entries(it.shares).map(([id, sh]) => (
+              <div key={id} className="flex items-center gap-2.5 border-b border-line py-2 text-[13px]">
+                <Person members={members} id={id} size={24} /><span className="flex-1 text-ink">{nameOf(members, id, me)}{id === it.paidBy && <span className="ml-1.5 rounded-full bg-goodBg px-2 py-0.5 text-[10px] font-medium text-good">paid</span>}</span><span className="num font-medium text-ink">{money(sh)}</span>
+              </div>))}
+            {canDelete && (
+              <div className="mt-5 flex gap-2">
+                <SecondaryButton className="!h-11 !text-[14px]" onClick={() => { const x = it; setOpenItem(null); setEditing(x); }}>Edit item</SecondaryButton>
+                <SecondaryButton className="!h-11 !text-[14px] !text-warm" disabled={busy} onClick={() => { setOpenItem(null); void run(() => deleteItem(it.id), 'Item removed'); }}>Delete item</SecondaryButton>
+              </div>)}
+          </Sheet>);
+      })()}
       {settle && (
         <Sheet title="Settle up" onClose={() => setSettle(null)}>
           <div className="mt-6 flex items-center justify-between px-2">
@@ -186,11 +228,40 @@ export function GroupScreen({ data, me, onBack }: { data: GroupData; me: string;
             </div>
             <div className="flex w-20 flex-col items-center gap-1"><Person members={members} id={settle.to} size={52} /><span className="text-[12px] text-soft">{nameOf(members, settle.to, me)}</span></div>
           </div>
-          <p className="mt-5 text-center text-[13px] text-soft">Mark it as paid once the money has actually moved. Everyone in the group sees it.</p>
-          <div className="mt-5 flex gap-2">
-            <SecondaryButton className="!h-12 !text-[14px]" onClick={() => setSettle(null)}>Not yet</SecondaryButton>
-            <PrimaryButton className="!h-12 !text-[14px]" disabled={busy} onClick={() => { const d = settle; setSettle(null); void run(() => addSettlement(room.id, d.from, d.to, d.amount), 'Marked as paid'); }}>Mark as paid</PrimaryButton>
-          </div>
+          {(() => {
+            const chk = payMode === 'full' ? { amount: settle.amount } : checkPartPayment(partAmt, settle.amount);
+            const ok = 'amount' in chk;
+            const left = ok ? roundMoney(settle.amount - chk.amount) : settle.amount;
+            return (
+              <>
+                <div role="tablist" className="mx-auto mt-5 flex w-fit rounded-full bg-tint p-0.5">
+                  {(['full', 'part'] as const).map((k) => (
+                    <button key={k} role="tab" aria-selected={payMode === k} onClick={() => setPayMode(k)}
+                      className={`h-8 min-h-0 rounded-full px-5 text-[12px] font-medium ${payMode === k ? 'bg-ink text-white' : 'text-soft'}`}>{k === 'full' ? 'Pay all' : 'Pay part'}</button>))}
+                </div>
+                {/* Same box in both modes (an input for part, a locked amount for all): switching never changes the sheet's height */}
+                <div className={`mt-4 flex h-14 items-center gap-2 rounded-btn border px-4 ${payMode === 'part' ? 'border-line focus-within:border-ink' : 'border-transparent bg-tint'}`}>
+                  <input inputMode="decimal" readOnly={payMode === 'full'} tabIndex={payMode === 'full' ? -1 : 0} aria-label={payMode === 'full' ? 'Full amount' : 'Amount you paid'} placeholder="0"
+                    value={payMode === 'full' ? String(settle.amount) : partAmt}
+                    onChange={(e) => { const v = e.target.value.replace(/[^\d.]/g, ''); if (/^\d*\.?\d{0,2}$/.test(v)) setPartAmt(v); }}
+                    className={`num h-full min-w-0 flex-1 bg-transparent text-[20px] outline-none placeholder:text-faint ${payMode === 'full' ? 'text-soft' : 'text-ink'}`} />
+                  <span className="shrink-0 text-[12px] text-soft">{payMode === 'full' ? 'full amount' : `of ${money(settle.amount)}`}</span>
+                </div>
+                <p className={`mt-3 flex min-h-[40px] items-start justify-center text-center text-[13px] leading-snug ${!ok && payMode === 'part' && partAmt ? 'text-warm' : 'text-soft'}`}>
+                  {payMode === 'full' ? 'Mark it as paid once the money has actually moved. Everyone in the group sees it.'
+                    : !partAmt ? 'Type what you actually paid.'
+                    : !ok ? `That is more than the ${money(settle.amount)} owed.`
+                    : left > 0 ? `${money(left)} stays to pay.` : 'This clears the payment.'}
+                </p>
+                <div className="mt-5 flex gap-2">
+                  <SecondaryButton className="!h-12 !text-[14px]" onClick={() => setSettle(null)}>Not yet</SecondaryButton>
+                  <PrimaryButton className="!h-12 !text-[14px]" disabled={busy || !ok}
+                    onClick={() => { if (!ok) return; const d = settle; setSettle(null); void run(() => addSettlement(room.id, d.from, d.to, chk.amount), 'Marked as paid'); }}>
+                    {payMode === 'full' ? 'Mark as paid' : ok ? `Mark ${money(chk.amount)} as paid` : 'Mark as paid'}
+                  </PrimaryButton>
+                </div>
+              </>);
+          })()}
         </Sheet>)}
       {overlay === 'invite' && <InviteTicket data={data} me={me} onClose={() => setOverlay(null)} />}
       {overlay === 'share' && <ShareStatusSheet data={data} debts={debts} preferred={me} onClose={() => setOverlay(null)} />}
