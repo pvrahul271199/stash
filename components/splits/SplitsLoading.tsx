@@ -1,31 +1,48 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { avatarHue } from '@/lib/split';
 
 /**
- * Splits loading screen: the app's own calm loader (breathing circle, slow ripples) with two coins passing each other in the
- * middle, since that is what Splits does. Coins hold still for people who prefer reduced motion.
+ * Splits loading screen (design C, "people gathering"): five avatars turn slowly on a faint orbit, each one counter-turning so
+ * it stays upright, with a small core breathing in the middle. Motion stops for people who prefer reduced motion (CSS below).
  */
-export function SplitsLoading({ message = 'Loading your groups…' }: { message?: string }) {
-  const [still, setStill] = useState(false);
-  useEffect(() => { setStill(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false); }, []);
+const SEATS = 5;
+const RADIUS = 62;
+
+export function SplitsLoading({ message = 'Getting everyone together…' }: { message?: string }) {
   return (
     <div role="status" aria-live="polite" aria-busy="true" aria-label={message} className="flex h-full flex-col items-center justify-center">
-      <div className="relative flex h-[220px] w-[220px] items-center justify-center">
-        <span aria-hidden="true" className="stash-breathe absolute inset-4 rounded-full bg-tint" />
-        <span aria-hidden="true" className="stash-ripple absolute inset-4 rounded-full border border-good/40" />
-        <span aria-hidden="true" className="stash-ripple absolute inset-4 rounded-full border border-good/40" style={{ animationDelay: '1.2s' }} />
-        <svg width="90" height="50" viewBox="0 0 90 50" aria-hidden="true" className="relative">
-          <circle cx={still ? 30 : 18} cy="25" r="12" fill="#1E1B4B">
-            {!still && <animate attributeName="cx" values="18;72;18" dur="1.6s" repeatCount="indefinite" />}
-            {!still && <animate attributeName="cy" values="25;18;25" dur="1.6s" repeatCount="indefinite" />}
-          </circle>
-          <circle cx={still ? 60 : 72} cy="25" r="12" fill="none" stroke="#1E1B4B" strokeWidth="2.5">
-            {!still && <animate attributeName="cx" values="72;18;72" dur="1.6s" repeatCount="indefinite" />}
-            {!still && <animate attributeName="cy" values="25;32;25" dur="1.6s" repeatCount="indefinite" />}
-          </circle>
-        </svg>
+      <style>{`
+        @keyframes splitsOrbit { to { transform: rotate(360deg); } }
+        @keyframes splitsUpright { to { transform: rotate(-360deg); } }
+        @keyframes splitsCore {
+          0%, 100% { transform: translate(-50%, -50%) scale(0.8); opacity: 0.35; }
+          50% { transform: translate(-50%, -50%) scale(1.15); opacity: 0.9; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .splits-orbit, .splits-upright, .splits-core { animation: none !important; }
+        }
+      `}</style>
+      <div className="relative h-[200px] w-[200px]">
+        <span aria-hidden="true" className="absolute left-[38px] top-[38px] h-[124px] w-[124px] rounded-full border border-dashed border-line" />
+        <div className="splits-orbit absolute inset-0" style={{ animation: 'splitsOrbit 9s linear infinite' }}>
+          {Array.from({ length: SEATS }, (_, i) => {
+            const a = -Math.PI / 2 + (i * 2 * Math.PI) / SEATS;
+            return (
+              <span key={i} className="absolute" style={{ left: 100 + RADIUS * Math.cos(a) - 20, top: 100 + RADIUS * Math.sin(a) - 20 }}>
+                <span className="splits-upright block" style={{ animation: 'splitsUpright 9s linear infinite' }}>
+                  <span className="block h-10 w-10 rounded-full ring-2 ring-white" style={{ background: avatarHue(i) }} />
+                </span>
+              </span>
+            );
+          })}
+        </div>
+        <span
+          aria-hidden="true"
+          className="splits-core absolute left-1/2 top-1/2 h-5 w-5 rounded-full bg-ink"
+          style={{ animation: 'splitsCore 2.4s ease-in-out infinite' }}
+        />
       </div>
-      <p className="font-display animate-pulse text-[15px] font-medium tracking-[-0.01em] text-soft motion-reduce:animate-none">{message}</p>
+      <p className="mt-8 text-[14px] text-soft">{message}</p>
     </div>
   );
 }

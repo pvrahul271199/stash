@@ -54,7 +54,7 @@ function Row({ s, onOpen }: { s: Summary; onOpen: () => void }) {
 export function SplitsTab({ onSignIn, sample }: { onSignIn: () => void; sample?: boolean }) {
   const auth = useAuth();
   const signedIn = auth.status === 'signedIn' && !!auth.uid && !sample;
-  const { groups, loading, error, refresh } = useSplits(signedIn);
+  const { groups, error, refresh } = useSplits(signedIn);
   const focusId = useSplitsStore((s) => s.focusId);
   const setFocus = useSplitsStore((s) => s.setFocus);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -162,7 +162,7 @@ export function SplitsTab({ onSignIn, sample }: { onSignIn: () => void; sample?:
       <div className="mt-5 flex-1 overflow-y-auto px-5">
         {rows.length > 0 && <Eyebrow>Groups {'·'} {rows.length}</Eyebrow>}
         {rows.map((s) => <Row key={s.data.room.id} s={s} onOpen={() => setOpenId(s.data.room.id)} />)}
-        {!groups && loading && !error && <div className="h-[420px]"><SplitsLoading /></div>}
+        {!groups && !error && <div className="h-[420px]"><SplitsLoading /></div>}
         {error && (
           <div className="rounded-[18px] border border-line bg-white p-4 text-center" role="alert">
             <p className="text-[13px] text-soft">{error}</p>
@@ -170,7 +170,9 @@ export function SplitsTab({ onSignIn, sample }: { onSignIn: () => void; sample?:
           </div>)}
         {groups && groups.length === 0 && !error && <EmptyGroups />}
       </div>
-      <div className="px-5 pb-3 pt-2"><PrimaryButton onClick={() => setCreating(true)}>New group</PrimaryButton></div>
+      {(groups || error) && (
+        <div className="px-5 pb-3 pt-2"><PrimaryButton onClick={() => setCreating(true)}>New group</PrimaryButton></div>
+      )}
       {creating && <NewGroupSheet onClose={() => setCreating(false)} onCreated={(id) => { setCreating(false); setInviteFor(id); }} />}
       {inviteGroup && <InviteTicket data={inviteGroup} me={me} onClose={() => { setOpenId(inviteGroup.room.id); setInviteFor(null); }} />}
     </>
