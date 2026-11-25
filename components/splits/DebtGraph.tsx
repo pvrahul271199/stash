@@ -64,7 +64,7 @@ export function DebtGraph({
       {debts.length === 0 ? (
         <p className="py-10 text-center text-[13px] text-faint">Nothing to pay.</p>
       ) : (
-        <svg key={view} role="img" aria-label={label} viewBox={`0 0 ${W} ${H}`} className="mt-1 block w-full">
+        <svg key={view} role="img" aria-label={label} viewBox={`0 0 ${W} ${H}`} className={`mt-1 block w-full ${compact ? 'mx-auto max-w-[260px]' : ''}`}>
           {debts.map((d, i) => {
             const a = pos.get(d.from)!, b = pos.get(d.to)!;
             const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1, ux = dx / len, uy = dy / len, nx = -uy, ny = ux;

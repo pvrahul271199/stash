@@ -24,7 +24,7 @@ type Tab = (typeof TABS)[number];
  * tabs below hold Items, People and the debt Graph; Add item is pinned at the bottom.
  * You can settle only payments you are part of (you pay or you receive): other people's payments are shown, never offered.
  */
-export function GroupScreen({ data, me, onBack }: { data: GroupData; me: string; onBack: () => void }) {
+export function GroupScreen({ data, me, onBack, readOnly = false }: { data: GroupData; me: string; onBack: () => void; readOnly?: boolean }) {
   const { room, members, items, settlements } = data;
   const money = useMoney(room.currency);
   const toast = useToast((s) => s.show);
@@ -61,17 +61,17 @@ export function GroupScreen({ data, me, onBack }: { data: GroupData; me: string;
 
   return (
     <>
-      <div className="relative pb-4 bg-[#1F3A5F] text-white">
+      <div className="relative pb-4 text-white" style={{ background: 'linear-gradient(160deg, #2B5083 0%, #1F3A5F 55%, #172C4A 100%)' }}>
         <header className="relative flex items-center gap-1 px-3 pb-1 pt-5">
           <IconButton label="Back" onClick={onBack} className="!text-white"><BackIcon /></IconButton>
           <div className="min-w-0 flex-1 px-1">
             <h1 className="font-display truncate text-[20px] font-semibold text-white">{room.name}</h1>
             <p className="truncate text-[12px] text-white/80">{members.length} {members.length === 1 ? 'person' : 'people'} {'·'} {money(totals.total)} spent</p>
           </div>
-          <button onClick={() => setOverlay('invite')} aria-label="Invite people" className="flex h-9 min-h-0 items-center gap-1.5 rounded-full bg-white/20 px-3 text-[12px] font-semibold text-white">
+          {!readOnly && <button onClick={() => setOverlay('invite')} aria-label="Invite people" className="flex h-9 min-h-0 items-center gap-1.5 rounded-full bg-white/20 px-3 text-[12px] font-semibold text-white">
             <PersonStack members={members} size={18} max={3} />{members.length}
-          </button>
-          {items.length > 0 && (
+          </button>}
+          {items.length > 0 && !readOnly && (
             <button onClick={() => setOverlay('share')} aria-label="Share status" className="flex h-9 min-h-0 w-9 items-center justify-center rounded-full bg-white/20 text-white">
               <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 15V4M8 8l4-4 4 4M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5" /></svg>
             </button>)}
@@ -103,6 +103,7 @@ export function GroupScreen({ data, me, onBack }: { data: GroupData; me: string;
         )}
       </div>
 
+      {readOnly && <p className="px-5 pt-3 text-center text-[12px] leading-snug text-soft">Sample group. Sign in to create your own and add what you paid.</p>}
       <div className="px-5 pt-3">
         <div role="tablist" className="flex rounded-full bg-tint p-0.5">
           {TABS.map((k) => (
@@ -133,7 +134,7 @@ export function GroupScreen({ data, me, onBack }: { data: GroupData; me: string;
             {settlements.map((s) => (
               <div key={s.id} className="flex items-center gap-3 border-b border-line py-2.5 text-[12px] text-soft">
                 <span className="flex-1">{nameOf(members, s.from, me)} paid {nameOf(members, s.to, me)} {money(s.amount)} {'·'} {relTime(Date.parse(s.createdAt))}</span>
-                {(s.from === me || s.to === me) && (
+                {(s.from === me || s.to === me) && !readOnly && (
                   <button disabled={busy} onClick={() => void run(() => deleteSettlement(s.id), 'Payment undone')} className="h-7 min-h-0 rounded-full border border-line bg-white px-3 text-[12px] font-semibold text-ink active:bg-tint">Undo</button>)}
               </div>))}
           </>)}
@@ -153,16 +154,22 @@ export function GroupScreen({ data, me, onBack }: { data: GroupData; me: string;
                       <span>Paid <b className="num font-medium text-soft">{money(r?.paid ?? 0)}</b></span>
                       <span>Share <b className="num font-medium text-soft">{money(r?.share ?? 0)}</b></span>
                     </p>
-                  </div>
-                  <div className="flex flex-col items-end gap-1.5">
-                    <Signed v={net[m.id] ?? 0} money={money} className="text-[14px]" />
                     {d && (
+                      <p className="mt-1.5 flex items-center gap-2.5 text-[12px] text-soft">
+                        <span>{d.from === me ? 'You owe' : 'Owes you'} <b className="num font-semibold text-ink">{money(d.amount)}</b></span>
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex shrink-0 flex-col items-end gap-1.5">
+                    <Signed v={net[m.id] ?? 0} money={money} className="text-[14px]" />
+                    {d && !readOnly && (
                       <button onClick={() => { setPayMode('full'); setPartAmt(''); setSettle(d); }} aria-label={`Settle ${money(d.amount)} with ${nameOf(members, m.id, me)}`}
-                        className="h-9 min-h-0 rounded-full bg-ink px-4 text-[13px] font-semibold text-white active:opacity-80">Settle</button>)}
+                        className="min-h-0 text-[13px] font-semibold text-ink active:opacity-70">Settle</button>
+                    )}
                   </div>
                 </div>);
             })}
-            <div className="mt-8 flex flex-col items-center">
+            {!readOnly && <div className="mt-8 flex flex-col items-center">
               <button disabled={!canClose} onClick={() => setConfirm(creator ? 'delete' : 'leave')}
                 className="h-10 min-h-0 rounded-full border border-line bg-white px-5 text-[13px] font-medium text-soft active:bg-tint disabled:opacity-40">
                 {creator ? 'Delete this group' : 'Leave this group'}
@@ -171,7 +178,7 @@ export function GroupScreen({ data, me, onBack }: { data: GroupData; me: string;
                 <p className="mt-1 max-w-[280px] text-center text-[12px] leading-snug text-faint">
                   {creator ? `Everyone must be settled up before the group can be deleted (${debts.length} ${debts.length === 1 ? 'payment' : 'payments'} left).` : 'Settle your balance before you leave the group.'}
                 </p>)}
-            </div>
+            </div>}
           </>)}
 
         {tab === 'Graph' && (
@@ -180,15 +187,15 @@ export function GroupScreen({ data, me, onBack }: { data: GroupData; me: string;
               ? (
                 <>
                   <DebtGraph compact view={graphView} onView={setGraphView} members={members} simplified={debts} raw={raw} me={me} money={money} />
-                  <button onClick={() => setGraphBig(true)} className="mx-auto mt-2 flex h-9 min-h-0 items-center gap-1.5 rounded-full border border-line px-4 text-[12px] font-semibold text-ink active:bg-tint">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7" /></svg>Enlarge
+                  <button onClick={() => setGraphBig(true)} aria-label="Enlarge graph" className="ml-auto mt-2 flex h-9 w-9 min-h-0 items-center justify-center rounded-full border border-line text-ink active:bg-tint">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7" /></svg>
                   </button>
                 </>)
               : <p className="py-8 text-center text-[13px] text-faint">{items.length ? 'Everyone is settled up.' : 'Add an item to see who pays whom.'}</p>}
           </div>)}
       </div>
 
-      <div className="px-5 pb-6 pt-2"><PrimaryButton onClick={() => setOverlay('add')}>Add item</PrimaryButton></div>
+      {!readOnly && <div className="px-5 pb-6 pt-2"><PrimaryButton onClick={() => setOverlay('add')}>Add item</PrimaryButton></div>}
 
       {graphBig && (
         <Sheet title="Who pays whom" onClose={() => setGraphBig(false)} full>
@@ -197,7 +204,7 @@ export function GroupScreen({ data, me, onBack }: { data: GroupData; me: string;
       {openItem && (() => {
         const it = items.find((x) => x.id === openItem);
         if (!it) return null;
-        const canDelete = it.createdBy === me || creator;
+        const canDelete = !readOnly && (it.createdBy === me || creator);
         const myShare = it.shares[me] ?? 0;
         const myPaid = it.paidBy === me ? it.total : 0;
         const delta = myPaid - myShare;
