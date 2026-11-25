@@ -12,7 +12,7 @@ import { InviteTicket } from '../splits/InviteTicket';
 import { NewGroupSheet } from '../splits/NewGroupSheet';
 import { SAMPLE_GROUPS, SAMPLE_ME } from '@/lib/splitsSample';
 import { SplitsLoading } from '../splits/SplitsLoading';
-import { Eyebrow, Person, PersonStack, Signed, nameOf, paletteFor, relTime, useMoney } from '../splits/parts';
+import { COUPLE_ROSE, Eyebrow, Person, PersonStack, Signed, nameOf, paletteFor, relTime, useMoney } from '../splits/parts';
 
 interface Summary { data: GroupData; net: number; pending: number; mine: Debt[]; last: number | null }
 
@@ -25,11 +25,11 @@ function summarise(data: GroupData, me: string): Summary {
 }
 
 /** The group's own colours (same palette as its flowing header) with its first letter: groups are told apart at a glance. */
-function Tile({ name }: { name: string }) {
+function Tile({ name, couple = false }: { name: string; couple?: boolean }) {
   const [base, a, b] = paletteFor(name);
   return (
     <span aria-hidden="true" className="font-display flex h-10 w-10 shrink-0 items-center justify-center rounded-[14px] text-[17px] font-semibold text-ink"
-      style={{ background: `linear-gradient(145deg, ${a} 0%, ${base} 55%, ${b} 100%)` }}>
+      style={{ background: couple ? COUPLE_ROSE : `linear-gradient(145deg, ${a} 0%, ${base} 55%, ${b} 100%)` }}>
       {name.trim()[0]?.toUpperCase() ?? '?'}
     </span>
   );
@@ -40,7 +40,7 @@ function Row({ s, onOpen }: { s: Summary; onOpen: () => void }) {
   const { room, members, items } = s.data;
   return (
     <button onClick={onOpen} className="flex w-full items-center gap-3 border-b border-line py-3.5 text-left">
-      <Tile name={room.name} />
+      <Tile name={room.name} couple={room.kind === 'couple'} />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[15px] font-semibold text-ink">{room.name}</span>
         <span className="block truncate text-[12px] text-soft">

@@ -1234,3 +1234,31 @@ begin
 end $$;
 revoke all on function public.edit_group_item(uuid, numeric, uuid, text, text, text, jsonb) from public, anon;
 grant execute on function public.edit_group_item(uuid, numeric, uuid, text, text, text, jsonb) to authenticated;
+
+-- ---------- splits: group kind (Couple or Friends or family) ----------
+-- Run this block after the splits block above (safe to re-run). Old clients keep working: existing groups are 'friends'.
+alter table public.group_rooms add column if not exists kind text not null default 'friends';
+alter table public.group_rooms drop constraint if exists group_rooms_kind_check;
+alter table public.group_rooms add constraint group_rooms_kind_check check (kind in ('couple', 'friends'));
+
+-- Replace the two-argument create_group with a three-argument one (the old signature is dropped so PostgREST has one candidate).
+drop function if exists public.create_group(text, text);
+create or replace function public.create_group(p_name text, p_currency text default 'INR', p_kind text default 'friends')
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare v_uid uuid := auth.uid(); v_id uuid; v_code text;
+begin
+  if v_uid is null then raise exception 'not authenticated' using errcode = '28000'; end if;
+  if p_name is null or char_length(btrim(p_name)) not between 1 and 60 then raise exception 'bad name' using errcode = '22023'; end if;
+  if (select count(*) from public.group_rooms where created_by = v_uid and created_at > now() - interval '1 day') >= 20 then
+    raise exception 'too many groups' using errcode = '54000';
+  end if;
+  v_code := substr(replace(gen_random_uuid()::text, '-', ''), 1, 12);
+  insert into public.group_rooms (name, currency, kind, created_by, link_code, invite_expires_at)
+  values (btrim(p_name), coalesce(nullif(btrim(p_currency), ''), 'INR'), case when p_kind = 'couple' then 'couple' else 'friends' end,
+          v_uid, v_code, now() + interval '7 days')
+  returning id into v_id;
+  insert into public.group_members (group_id, user_id, display_name) values (v_id, v_uid, public.stash_display_name(v_uid));
+  return jsonb_build_object('id', v_id, 'link_code', v_code);
+end $$;
+revoke all on function public.create_group(text, text, text) from public, anon;
+grant execute on function public.create_group(text, text, text) to authenticated;

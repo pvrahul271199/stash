@@ -309,3 +309,7 @@ Decisions to take before building:
 - Item edits/deletes by others must update the local copy on the next refresh.
 
 Runner-up (smaller): a nudge with a UPI pay link for what you owe ("You owe Kiran ₹1,152. Pay now?").
+
+## E-SPLIT-KIND: save "Couple" on a group
+
+Status: **built** (`group_rooms.kind`, `create_group(p_name, p_currency, p_kind)`; the `group kind` block of `supabase/schema.sql`, run it before shipping). Couple groups show the rose header and tile; older groups are `friends`. Still open: a join preview (`group_preview`) does not return the kind yet, so an invite card for a couple group shows the pastel background.

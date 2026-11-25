@@ -16,7 +16,7 @@ export default meta;
 const data = (i: number): GroupData => {
   const g = GROUPS[i];
   return {
-    room: { id: g.id, name: g.name, currency: i === 1 ? 'USD' : 'INR', createdBy: g.createdBy, createdAt: '2026-11-12T00:00:00Z', linkCode: 'G0A7R1P', closed: false, expiresAt: null },
+    room: { id: g.id, name: g.name, currency: i === 1 ? 'USD' : 'INR', kind: 'friends', createdBy: g.createdBy, createdAt: '2026-11-12T00:00:00Z', linkCode: 'G0A7R1P', closed: false, expiresAt: null },
     members: PEOPLE.filter((p) => g.members.includes(p.id)),
     items: g.items.map((it, n) => ({ ...it, createdAt: Date.now() - n * 86400000 })),
     settlements: g.settlements.map((s, n) => ({ ...s, id: `s${n}`, createdAt: new Date().toISOString() })),

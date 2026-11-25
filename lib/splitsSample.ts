@@ -9,7 +9,7 @@ export const SAMPLE_ME = 'me';
 
 const people = (names: [string, string][]): GroupMember[] => names.map(([id, name]) => ({ id, name }));
 const room = (id: string, name: string): GroupData['room'] => ({
-  id, name, currency: 'INR', createdBy: SAMPLE_ME, createdAt: '2026-11-01T09:00:00Z', linkCode: 'sample', closed: false, expiresAt: null,
+  id, name, currency: 'INR', kind: 'friends', createdBy: SAMPLE_ME, createdAt: '2026-11-01T09:00:00Z', linkCode: 'sample', closed: false, expiresAt: null,
 });
 const item = (id: string, total: number, paidBy: string, among: string[], type: string, subtype: string, notes: string | undefined, at: number): GroupItem => ({
   id, total, paidBy, shares: equalShares(total, among), type, subtype, notes, createdBy: paidBy, createdAt: at,

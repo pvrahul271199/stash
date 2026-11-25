@@ -184,6 +184,13 @@ select:focus {
 .splits-fade { animation: splits-fade 0.2s ease-out; }
 .splits-up { animation: splits-up 0.28s cubic-bezier(0.22, 1, 0.36, 1); }
 @media (prefers-reduced-motion: reduce) { .splits-fade, .splits-up { animation: none; } }
+/* A couple's group header: the navy header's white text becomes ink on the rose background (GroupScreen). */
+.splits-rose-head .text-white { color: #1E1B4B; }
+.splits-rose-head .\!text-white { color: #1E1B4B !important; }
+.splits-rose-head .text-white\/85, .splits-rose-head .text-white\/80 { color: rgba(30, 27, 75, 0.75); }
+.splits-rose-head .text-white\/60 { color: rgba(30, 27, 75, 0.55); }
+.splits-rose-head .bg-white\/20 { background-color: rgba(255, 255, 255, 0.6); }
+.splits-rose-head .border-white\/15 { border-color: rgba(30, 27, 75, 0.12); }
 /* Splits flowing background: three soft blobs drift slowly over a pastel base (colours set inline per group, see FlowBg). */
 @keyframes flow-a { 0% { transform: translate3d(-12%, -8%, 0) scale(1); } 50% { transform: translate3d(14%, 10%, 0) scale(1.18); } 100% { transform: translate3d(-12%, -8%, 0) scale(1); } }
 @keyframes flow-b { 0% { transform: translate3d(14%, 6%, 0) scale(1.1); } 50% { transform: translate3d(-14%, -10%, 0) scale(0.92); } 100% { transform: translate3d(14%, 6%, 0) scale(1.1); } }
