@@ -10,9 +10,11 @@ import { roundMoney } from '@/lib/money';
 import { useToast } from '@/store/toast';
 import { AddItemScreen } from './AddItemScreen';
 import { DebtGraph } from './DebtGraph';
+
 import { InviteTicket } from './InviteTicket';
 import { ShareStatusSheet } from './ShareStatusSheet';
-import { FlowBg, Person, PersonStack, Sheet, Signed, nameOf, relTime, useMoney } from './parts';
+
+import { Person, PersonStack, Sheet, Signed, nameOf, relTime, useMoney } from './parts';
 
 const TABS = ['People', 'Items', 'Graph'] as const;
 type Tab = (typeof TABS)[number];
@@ -49,7 +51,6 @@ export function GroupScreen({ data, me, onBack }: { data: GroupData; me: string;
   const others = debts.length - mineDebts.length;
   // Nobody walks away from money owed: a member leaves only when their own balance is zero, the creator deletes only when all are.
   const canClose = creator ? Object.values(net).every((v) => v === 0) : (net[me] ?? 0) === 0;
-  const mine = totals.byMember[me] ?? { paid: 0, share: 0, net: 0 };
   const position = net[me] ?? 0;
 
   async function run(fn: () => Promise<unknown>, ok: string) {
@@ -60,38 +61,46 @@ export function GroupScreen({ data, me, onBack }: { data: GroupData; me: string;
 
   return (
     <>
-      <div className="relative pb-4">
-        <FlowBg seed={room.name} />
+      <div className="relative pb-4 bg-[#1F3A5F] text-white">
         <header className="relative flex items-center gap-1 px-3 pb-1 pt-5">
-          <IconButton label="Back" onClick={onBack}><BackIcon /></IconButton>
+          <IconButton label="Back" onClick={onBack} className="!text-white"><BackIcon /></IconButton>
           <div className="min-w-0 flex-1 px-1">
-            <h1 className="font-display truncate text-[20px] font-semibold text-ink">{room.name}</h1>
-            <p className="truncate text-[12px] text-soft">{members.length} {members.length === 1 ? 'person' : 'people'} {'·'} {money(totals.total)} spent</p>
+            <h1 className="font-display truncate text-[20px] font-semibold text-white">{room.name}</h1>
+            <p className="truncate text-[12px] text-white/80">{members.length} {members.length === 1 ? 'person' : 'people'} {'·'} {money(totals.total)} spent</p>
           </div>
-          <button onClick={() => setOverlay('invite')} aria-label="Invite people" className="flex h-9 min-h-0 items-center gap-1.5 rounded-full bg-white/70 px-3 text-[12px] font-semibold text-ink">
+          <button onClick={() => setOverlay('invite')} aria-label="Invite people" className="flex h-9 min-h-0 items-center gap-1.5 rounded-full bg-white/20 px-3 text-[12px] font-semibold text-white">
             <PersonStack members={members} size={18} max={3} />{members.length}
           </button>
           {items.length > 0 && (
-            <button onClick={() => setOverlay('share')} aria-label="Share status" className="flex h-9 min-h-0 w-9 items-center justify-center rounded-full bg-white/70 text-ink">
+            <button onClick={() => setOverlay('share')} aria-label="Share status" className="flex h-9 min-h-0 w-9 items-center justify-center rounded-full bg-white/20 text-white">
               <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 15V4M8 8l4-4 4 4M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5" /></svg>
             </button>)}
         </header>
-        <div className="relative px-6 pt-3 text-center">
-          <p className="text-[12px] text-soft">{position > 0 ? 'The group owes you' : position < 0 ? 'You owe the group' : items.length ? 'You are square' : 'Nothing yet'}</p>
-          <p className={`num mt-1 text-[52px] leading-none ${position < 0 ? 'text-warm' : 'text-ink'}`}>{money(position)}</p>
-          <div className="mx-auto mt-3 flex w-fit overflow-hidden rounded-full bg-white/70 text-left">
-            <div className="px-4 py-1.5"><p className="text-[10px] font-medium uppercase tracking-[0.08em] text-faint">You paid</p><p className="num text-[14px] font-semibold text-ink">{money(mine.paid)}</p></div>
-            <div className="my-1.5 w-px bg-ink/10" />
-            <div className="px-4 py-1.5"><p className="text-[10px] font-medium uppercase tracking-[0.08em] text-faint">Your share</p><p className="num text-[14px] font-semibold text-ink">{money(mine.share)}</p></div>
+        <div className="relative px-6 pb-2 pt-7 text-center">
+          <p className="font-display text-[17px] font-medium tracking-[0.01em] text-white/85">{position > 0 ? 'The group owes you' : position < 0 ? 'You owe the group' : items.length ? 'You are square' : 'Nothing yet'}</p>
+          <p className="mt-2 font-display text-[44px] font-medium leading-none tracking-[-0.02em] tabular-nums text-white">{money(position)}</p>
+          <dl className="mx-auto mt-6 grid max-w-[360px] grid-cols-3 border-t border-white/15 pt-4 text-center">
+            <div className="px-1">
+              <dt className="text-[10.5px] font-medium uppercase tracking-[0.12em] text-white/60">Spent</dt>
+              <dd className="num mt-1 text-[20px] font-semibold leading-none text-white">{money(totals.total)}</dd>
+            </div>
+            <div className="border-x border-white/15 px-1">
+              <dt className="text-[10.5px] font-medium uppercase tracking-[0.12em] text-white/60">Items</dt>
+              <dd className="num mt-1 text-[20px] font-semibold leading-none text-white">{items.length}</dd>
+            </div>
+            <div className="px-1">
+              <dt className="text-[10.5px] font-medium uppercase tracking-[0.12em] text-white/60">People</dt>
+              <dd className="num mt-1 text-[20px] font-semibold leading-none text-white">{members.length}</dd>
+            </div>
+          </dl>
+        </div>
+        {mineDebts.length === 0 && (
+          <div className="relative mt-3 flex justify-center px-5">
+            <span className="rounded-full bg-white/20 px-4 py-2 text-[13px] text-white/80">
+              {debts.length === 0 ? (items.length ? 'Everyone is settled up' : 'Add an item to start splitting') : `Nothing for you to settle · ${others} between others`}
+            </span>
           </div>
-        </div>
-        <div className="relative mt-3 flex justify-center px-5">
-          {mineDebts.length > 0
-            ? <button onClick={() => setTab('People')} className="h-9 min-h-0 rounded-full bg-white/80 px-4 text-[13px] font-semibold text-ink shadow-sm active:bg-white">Settle up {'›'}</button>
-            : <span className="rounded-full bg-white/70 px-4 py-2 text-[13px] text-soft">
-                {debts.length === 0 ? (items.length ? 'Everyone is settled up' : 'Add an item to start splitting') : `Nothing for you to settle · ${others} between others`}
-              </span>}
-        </div>
+        )}
       </div>
 
       <div className="px-5 pt-3">

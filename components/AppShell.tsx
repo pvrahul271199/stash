@@ -11,6 +11,7 @@ import { Welcome } from './screens/Welcome';
 import { TodayTab } from './screens/TodayTab';
 import { PWAManager } from './pwa/PWAManager';
 import { LoadingScreen } from './ui/LoadingScreen';
+import { SplitsLoading } from './splits/SplitsLoading';
 import { LogoutDialog } from './ui/LogoutDialog';
 import { flushConsentRecord, hasSyncConsent } from '@/lib/consent';
 
@@ -25,7 +26,9 @@ const MonthEnd = dynamic(() => import('./screens/MonthEnd').then((m) => m.MonthE
 const PlanScreen = dynamic(() => import('./screens/PlanScreen').then((m) => m.PlanScreen), { ssr: false, loading: screenFallback });
 const HistoryTab = dynamic(() => import('./screens/HistoryTab').then((m) => m.HistoryTab), { ssr: false, loading: screenFallback });
 const InsightsTab = dynamic(() => import('./screens/InsightsTab').then((m) => m.InsightsTab), { ssr: false, loading: screenFallback });
-const SplitsTab = dynamic(() => import('./screens/SplitsTab').then((m) => m.SplitsTab), { ssr: false, loading: screenFallback });
+// Splits shows its own loader while its code arrives, so the Chelav logo must not flash first.
+const splitsFallback = () => <div className="flex min-h-0 flex-1 flex-col"><SplitsLoading /></div>;
+const SplitsTab = dynamic(() => import('./screens/SplitsTab').then((m) => m.SplitsTab), { ssr: false, loading: splitsFallback });
 const JoinGroupSheet = dynamic(() => import('./splits/JoinGroupSheet').then((m) => m.JoinGroupSheet), { ssr: false });
 const UserTab = dynamic(() => import('./screens/UserTab').then((m) => m.UserTab), { ssr: false, loading: screenFallback });
 const ThankYou = dynamic(() => import('./screens/ThankYou').then((m) => m.ThankYou), { ssr: false, loading: screenFallback });

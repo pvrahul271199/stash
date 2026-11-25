@@ -162,8 +162,15 @@ export function rawDebts(items: GroupItem[], settlements: Settlement[] = []): De
     .sort((a, b) => b.amount - a.amount);
 }
 
-export const initials = (name: string): string =>
-  name.trim().split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? '').join('') || '?';
+/**
+ * Up to two initials. Takes the first letter or digit of each word (by code point, so an emoji or symbol at the start of a
+ * name is skipped rather than rendered as a broken or blank glyph). A name with no letters or digits gives '?'.
+ */
+export const initials = (name: string): string => {
+  const first = (w: string) => Array.from(w).find((ch) => /[\p{L}\p{N}]/u.test(ch)) ?? '';
+  const letters = name.trim().split(/\s+/).slice(0, 2).map((w) => first(w).toUpperCase()).join('');
+  return letters || '?';
+};
 
 /** Muted avatar hues (same family as theme/tokens categoryRamp, minus ink and teal). */
 export const AVATAR_HUES = ['#C2546F', '#3A7CA5', '#7A9A3C', '#8A6BB8', '#D98324', '#9C9486'] as const;
