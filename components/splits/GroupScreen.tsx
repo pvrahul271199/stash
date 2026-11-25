@@ -14,7 +14,7 @@ import { DebtGraph } from './DebtGraph';
 import { InviteTicket } from './InviteTicket';
 import { ShareStatusSheet } from './ShareStatusSheet';
 
-import { Person, PersonStack, Sheet, Signed, nameOf, relTime, useMoney } from './parts';
+import { COUPLE_ROSE, Person, PersonStack, Sheet, Signed, nameOf, relTime, useMoney } from './parts';
 
 const TABS = ['People', 'Items', 'Graph'] as const;
 type Tab = (typeof TABS)[number];
@@ -31,6 +31,7 @@ export function GroupScreen({ data, me, onBack, readOnly = false }: { data: Grou
   const refresh = useSplitsStore((s) => s.refresh);
   const [overlay, setOverlay] = useState<null | 'add' | 'invite' | 'share'>(null);
   const [settle, setSettle] = useState<Debt | null>(null);
+  const [detail, setDetail] = useState<string | null>(null);
   const [editing, setEditing] = useState<GroupItem | null>(null);
   const [openItem, setOpenItem] = useState<string | null>(null);
   const [graphBig, setGraphBig] = useState(false);
@@ -47,11 +48,18 @@ export function GroupScreen({ data, me, onBack, readOnly = false }: { data: Grou
   const debts = simplifyDebts(net);
   const raw = rawDebts(items, settlements);
   const creator = room.createdBy === me;
+  const couple = room.kind === 'couple';
   const mineDebts = debts.filter((d) => d.from === me || d.to === me);
   const others = debts.length - mineDebts.length;
   // Nobody walks away from money owed: a member leaves only when their own balance is zero, the creator deletes only when all are.
   const canClose = creator ? Object.values(net).every((v) => v === 0) : (net[me] ?? 0) === 0;
   const position = net[me] ?? 0;
+
+  // A tap on a person: unsettled with you -> the Settle sheet; otherwise their details sheet.
+  function openPerson(id: string, d: Debt | undefined) {
+    if (d && !readOnly) { setPayMode('full'); setPartAmt(''); setSettle(d); return; }
+    setDetail(id);
+  }
 
   async function run(fn: () => Promise<unknown>, ok: string) {
     setBusy(true);
@@ -61,7 +69,9 @@ export function GroupScreen({ data, me, onBack, readOnly = false }: { data: Grou
 
   return (
     <>
-      <div className="relative pb-4 text-white" style={{ background: 'linear-gradient(160deg, #2B5083 0%, #1F3A5F 55%, #172C4A 100%)' }}>
+      {/* A couple's group is rose with ink text (.splits-rose-head in globals.css restyles the white text inside it) */}
+      <div className={`relative pb-4 text-white ${couple ? 'splits-rose-head' : ''}`}
+        style={{ background: couple ? COUPLE_ROSE : 'linear-gradient(160deg, #2B5083 0%, #1F3A5F 55%, #172C4A 100%)' }}>
         <header className="relative flex items-center gap-1 px-3 pb-1 pt-5">
           <IconButton label="Back" onClick={onBack} className="!text-white"><BackIcon /></IconButton>
           <div className="min-w-0 flex-1 px-1">
@@ -147,6 +157,9 @@ export function GroupScreen({ data, me, onBack, readOnly = false }: { data: Grou
               const d = mineDebts.find((x) => (x.from === me && x.to === m.id) || (x.to === me && x.from === m.id));
               return (
                 <div key={m.id} className="flex items-center gap-3 border-b border-line py-3.5">
+                  {/* Tap a person: an unsettled balance with you opens Settle; anyone else opens their details */}
+                  <button type="button" onClick={() => openPerson(m.id, d)} aria-label={d && !readOnly ? `Settle with ${nameOf(members, m.id, me)}` : `Details for ${nameOf(members, m.id, me)}`}
+                    className="flex min-w-0 flex-1 items-center gap-3 text-left active:opacity-70">
                   <Person members={members} id={m.id} size={36} />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-[14px] font-medium text-ink">{nameOf(members, m.id, me)}</p>
@@ -160,6 +173,7 @@ export function GroupScreen({ data, me, onBack, readOnly = false }: { data: Grou
                       </p>
                     )}
                   </div>
+                  </button>
                   <div className="flex shrink-0 flex-col items-end gap-1.5">
                     <Signed v={net[m.id] ?? 0} money={money} className="text-[14px]" />
                     {d && !readOnly && (
@@ -279,6 +293,40 @@ export function GroupScreen({ data, me, onBack, readOnly = false }: { data: Grou
               </>);
           })()}
         </Sheet>)}
+      {detail && (() => {
+        const m = members.find((x) => x.id === detail);
+        if (!m) return null;
+        const r = totals.byMember[m.id];
+        const bal = net[m.id] ?? 0;
+        const inItems = items.filter((it) => it.shares[m.id] != null || it.paidBy === m.id);
+        const pays = settlements.filter((s) => s.from === m.id || s.to === m.id);
+        return (
+          <Sheet title={nameOf(members, m.id, me)} onClose={() => setDetail(null)}>
+            <div className="mt-1 flex items-center gap-3">
+              <Person members={members} id={m.id} size={48} />
+              <div className="min-w-0">
+                <Signed v={bal} money={money} className="text-[22px]" />
+                <p className="text-[12px] text-soft">{bal === 0 ? 'Settled up' : bal > 0 ? 'Is owed this in total' : 'Owes this in total'}</p>
+              </div>
+            </div>
+            <div className="mt-5 grid grid-cols-2 gap-2">
+              <div className="rounded-2xl bg-tint px-4 py-3"><p className="text-[10px] font-medium uppercase tracking-[0.08em] text-faint">Paid</p><p className="num mt-0.5 text-[18px] font-semibold text-ink">{money(r?.paid ?? 0)}</p></div>
+              <div className="rounded-2xl bg-tint px-4 py-3"><p className="text-[10px] font-medium uppercase tracking-[0.08em] text-faint">Share</p><p className="num mt-0.5 text-[18px] font-semibold text-ink">{money(r?.share ?? 0)}</p></div>
+            </div>
+            <p className="mb-1 mt-5 text-[11px] font-semibold uppercase tracking-[0.1em] text-faint">Items</p>
+            {inItems.length === 0 && <p className="py-3 text-[13px] text-faint">Not part of any item yet.</p>}
+            {inItems.map((it) => (
+              <div key={it.id} className="flex items-center gap-2.5 border-b border-line py-2 text-[13px]">
+                <span className="min-w-0 flex-1 truncate text-ink">{it.notes ?? it.subtype ?? it.type}</span>
+                <span className="num shrink-0 text-soft">{money(it.shares[m.id] ?? 0)}</span>
+              </div>))}
+            {pays.length > 0 && <p className="mb-1 mt-5 text-[11px] font-semibold uppercase tracking-[0.1em] text-faint">Payments</p>}
+            {pays.map((s) => (
+              <p key={s.id} className="border-b border-line py-2 text-[12px] text-soft">
+                {nameOf(members, s.from, me)} paid {nameOf(members, s.to, me)} <span className="num text-ink">{money(s.amount)}</span> {'·'} {relTime(Date.parse(s.createdAt))}
+              </p>))}
+          </Sheet>);
+      })()}
       {overlay === 'invite' && <InviteTicket data={data} me={me} onClose={() => setOverlay(null)} />}
       {overlay === 'share' && <ShareStatusSheet data={data} debts={debts} preferred={me} onClose={() => setOverlay(null)} />}
       {overlay === 'add' && <AddItemScreen data={data} me={me} onClose={() => setOverlay(null)} />}

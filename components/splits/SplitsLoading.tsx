@@ -7,6 +7,8 @@ import { avatarHue } from '@/lib/split';
  */
 const SEATS = 5;
 const RADIUS = 62;
+/** Initials on the placeholder avatars, so the loader reads like the people in a group. */
+const LETTERS = ['R', 'M', 'A', 'S', 'P'];
 
 export function SplitsLoading({ message = 'Getting everyone together…' }: { message?: string }) {
   return (
@@ -30,7 +32,9 @@ export function SplitsLoading({ message = 'Getting everyone together…' }: { me
             return (
               <span key={i} className="absolute" style={{ left: 100 + RADIUS * Math.cos(a) - 20, top: 100 + RADIUS * Math.sin(a) - 20 }}>
                 <span className="splits-upright block" style={{ animation: 'splitsUpright 9s linear infinite' }}>
-                  <span className="block h-10 w-10 rounded-full ring-2 ring-white" style={{ background: avatarHue(i) }} />
+                  <span className="flex h-10 w-10 items-center justify-center rounded-full text-[14px] font-semibold text-white ring-2 ring-white" style={{ background: avatarHue(i) }}>
+                    {LETTERS[i]}
+                  </span>
                 </span>
               </span>
             );

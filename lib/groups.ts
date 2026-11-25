@@ -11,10 +11,14 @@ import { supabaseEnv } from './supabaseClient';
 import { roundMoney } from './money';
 import type { GroupItem, GroupMember, Settlement } from './split';
 
+export type GroupKind = 'couple' | 'friends';
+
 export interface GroupRoom {
   id: string;
   name: string;
   currency: string;
+  /** 'couple' shows the rose look; 'friends' is everyone else (and every group made before the kind column). */
+  kind: GroupKind;
   createdBy: string | null;
   createdAt: string;
   linkCode: string;
@@ -82,7 +86,7 @@ export async function loadGroups(): Promise<GroupData[]> {
     for (const it of its) for (const id of [it.paidBy, ...Object.keys(it.shares)]) if (!known.has(id)) { known.add(id); mem.push({ id, name: 'Former member' }); }
     return {
       room: {
-        id: gid, name: r.name as string, currency: (r.currency as string) ?? 'INR', createdBy: (r.created_by as string | null) ?? null,
+        id: gid, name: r.name as string, currency: (r.currency as string) ?? 'INR', kind: r.kind === 'couple' ? 'couple' : 'friends', createdBy: (r.created_by as string | null) ?? null,
         createdAt: r.created_at as string, linkCode: r.link_code as string, closed: !!r.invitation_expired, expiresAt: (r.invite_expires_at as string | null) ?? null,
       },
       members: mem,
@@ -94,7 +98,8 @@ export async function loadGroups(): Promise<GroupData[]> {
   });
 }
 
-export const createGroup = (name: string, currency: string) => rpc<{ id: string; link_code: string }>('create_group', { p_name: name, p_currency: currency });
+export const createGroup = (name: string, currency: string, kind: GroupKind = 'friends') =>
+  rpc<{ id: string; link_code: string }>('create_group', { p_name: name, p_currency: currency, p_kind: kind });
 export const joinGroup = (code: string) => rpc<string>('join_group', { p_code: code });
 export const setInvites = (group: string, open: boolean) => rpc<string>('set_group_invites', { p_group: group, p_open: open });
 export const addItem = (a: { group: string; total: number; paidBy: string; type: string; subtype?: string; notes?: string; shares: Record<string, number> }) =>

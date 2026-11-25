@@ -17,6 +17,8 @@ export const FLOW_PALETTES: readonly (readonly [string, string, string, string])
   ['#FDF6EC', '#F9DDBA', '#F6D3DE', '#D6E8F5'], // cream, apricot, rose, sky
   ['#F3F8EC', '#DDEBC6', '#CDE9EA', '#F5DDEB'], // sage, aqua, pink
 ];
+/** Background of a couple's group (header, list tile, New group preview). Ink text reads on it. */
+export const COUPLE_ROSE = 'linear-gradient(160deg, #FDE7EE 0%, #F9D0DC 60%, #FBE6D8 100%)';
 export const paletteFor = (seed: string): readonly [string, string, string, string] => {
   let h = 0;
   for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
