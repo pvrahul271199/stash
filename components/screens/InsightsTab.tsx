@@ -7,6 +7,7 @@ import { Note } from '../ui/Chip';
 import { dayRowsOf, useSavedFromLeftovers, useAllCycles, useCategories, useCycleEntries, useEvents, useIncomes } from '@/db/queries';
 import { incomeBetween } from '@/lib/income';
 import type { Entry, Plan } from '@/db/schema';
+import { AtAGlance } from './AtAGlance';
 import { EditSpendSheet } from './EditSpendSheet';
 import { monthLabel, type DerivedCycle } from '@/lib/period';
 import {
@@ -51,6 +52,9 @@ type Level = 'good' | 'warn' | 'bad';
 
 const LEVEL_DOT: Record<Level, string> = { good: 'bg-good', warn: 'bg-warm', bad: 'bg-bad' };
 
+const INSIGHTS_SECS = ['Overview', 'Trend', 'Categories', 'Events'] as const;
+type InsightsSec = (typeof INSIGHTS_SECS)[number];
+
 export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | undefined; plan: Plan | undefined }) {
   const { currency } = useCurrency();
   // Insights are per month: this month by default, earlier months with the arrows.
@@ -65,6 +69,7 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
   const [focusType, setFocusType] = useState<string | null>(null);
   const [focusEvent, setFocusEvent] = useState<string | null>(null);
   const [mode, setMode] = useState<ChartMode>('each');
+  const [sec, setSec] = useState<InsightsSec>('Overview');
   const [editing, setEditing] = useState<Entry | null>(null);
   const entries = useCycleEntries(cycle?.id);
   const rows = useMemo(() => (cycle ? dayRowsOf(cycle) : undefined), [cycle]);
@@ -191,10 +196,12 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
       : null;
   const paceLevel: Level | null = paceRatio == null ? null : paceRatio <= 1 ? 'good' : paceRatio <= 1.1 ? 'warn' : 'bad';
 
+  const hasFocus = !!(activeFocus || activeEvent);
   const cycleIncome = incomeBetween(incomes, cycle.monthStart, cycle.monthEnd);
 
   return (
-    <div className="flex-1 overflow-y-auto px-6 pb-8 pt-6" style={{ overflowAnchor: 'none' }}>
+    <div className="relative min-h-0 flex-1">
+    <div className="h-full overflow-y-auto px-6 pb-28 pt-6" style={{ overflowAnchor: 'none' }}>
       <div className="flex items-center justify-between gap-3">
         <h1 className="text-question font-semibold text-ink">Insights</h1>
         <div className="flex items-center gap-1" role="group" aria-label="Month">
@@ -228,6 +235,30 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
         </p>
       ) : null}
 
+      {/* Focus row: always there (fixed height), so turning a focus on or off never moves the page */}
+      <div className="sticky top-0 z-10 -mx-6 mt-2 bg-white/95 px-6 py-1 backdrop-blur">
+        <div className="relative h-8">
+          <div aria-hidden={hasFocus} className={`absolute inset-0 flex items-center text-[12px] text-faint transition-opacity duration-300 ${hasFocus ? 'pointer-events-none opacity-0' : 'opacity-100'}`}>
+            All spending · tap a category or event to focus
+          </div>
+          <div aria-hidden={!hasFocus} className={`absolute inset-0 flex items-center transition-opacity duration-300 ${hasFocus ? 'opacity-100' : 'pointer-events-none opacity-0'}`}>
+            <div className="flex min-w-0 items-center gap-2 rounded-full bg-tint py-1 pl-3 pr-1 text-[12px] text-ink">
+              <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: focusColor }} />
+              <span className="truncate">Showing <b>{[activeFocus, activeType, activeEvent].filter(Boolean).join(' · ')}</b></span>
+              <button
+                type="button"
+                tabIndex={hasFocus ? 0 : -1}
+                aria-label="Clear focus"
+                onClick={() => { setFocus(null); setFocusType(null); setFocusEvent(null); }}
+                className="flex h-6 w-6 min-h-0 shrink-0 items-center justify-center rounded-full bg-white text-[13px] text-ink shadow-sm"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      {sec === 'Overview' && (<>
       {/* 1. Summary */}
       <section className="mt-5 rounded-[20px] border border-line bg-white p-5 shadow-sm" aria-label="Summary">
         <div className="flex items-start justify-between gap-3">
@@ -287,6 +318,11 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
         </p>
       </section>
 
+      <Section title="At a glance" hint="What stands out this month.">
+        <AtAGlance entries={entries} days={fullDays} startDate={cycle.startDate} planAmount={cycle.planAmount} totalDays={cycle.totalDays} colorOf={colorOf} />
+      </Section>
+      </>)}
+      {sec === 'Trend' && (<>
       {/* 3. Spending over the month */}
       <Section title="Spending over the month" hint="Filter by category, type or event to zoom in.">
         <div className="grid grid-cols-2 rounded-key bg-tint p-1" role="group" aria-label="Chart view">
@@ -423,6 +459,8 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
         </div>
       </Section>
 
+      </>)}
+      {sec === 'Categories' && (<>
       {/* 4. Where it went */}
       <Section title="Where it went" hint="Tap a slice to focus the whole page on it.">
         {slices.length === 0 ? (
@@ -442,8 +480,10 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
         )}
       </Section>
 
+      </>)}
+      {(sec === 'Categories' ? !!(activeFocus || activeEvent) : sec === 'Events' && !!activeEvent) && (<>
       {/* 4a. Every spend behind the numbers: same for any month, tap to edit */}
-      {(activeFocus || activeEvent) && (
+      {(
         <Section
           title={`Spends${activeFocus ? ` in ${activeFocus}` : ''}${activeType ? ` · ${activeType}` : ''}${activeEvent ? ` · ${activeEvent}` : ''}`}
           hint="Tap a spend to see or change it."
@@ -475,6 +515,8 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
         </Section>
       )}
 
+      </>)}
+      {sec === 'Events' && (<>
       {/* 4b. By event (with sub-categories breakdown) */}
       {evList.length > 0 && (
       <Section title="By event" hint="Trips, parties, anything you tagged.">
@@ -549,6 +591,8 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
       </Section>
       )}
 
+      </>)}
+      {sec === 'Categories' && (<>
       {/* 4c. By payment mode */}
       {payments.length > 0 && (
         <Section title="By payment mode" hint="How you paid, by share of spend.">
@@ -588,6 +632,8 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
         </Section>
       )}
 
+      </>)}
+      {sec === 'Trend' && (<>
       {/* 5. By day of week */}
       <Section title="By day of week" hint="Which days run hotter than usual.">
         {weekday.closedCount >= MIN_CLOSED_DAYS ? (
@@ -597,11 +643,15 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
         )}
       </Section>
 
+      </>)}
+      {sec === 'Trend' && (<>
       {/* 6. By time of day */}
       <Section title="By time of day" hint="When in the day your money moves.">
         <TimeOfDayChart buckets={time} color={barColor} hotColor={activeFocus ? undefined : HOT} resetKey={activeFocus} />
       </Section>
 
+      </>)}
+      {sec === 'Overview' && (<>
       {/* 7. Patterns */}
       <Section title="Patterns">
         <div className="flex flex-col gap-2.5">
@@ -628,6 +678,8 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
         </div>
       </Section>
 
+      </>)}
+      {sec === 'Overview' && (<>
       {/* 8. Biggest spends */}
       <Section title="Biggest spends" hint="Your five largest this month.">
         {biggest.length === 0 ? (
@@ -665,7 +717,24 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
           </ol>
         )}
       </Section>
+      </>)}
       {editing && <EditSpendSheet entry={editing} onClose={() => setEditing(null)} />}
+    </div>
+    <div className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center">
+      <div role="tablist" aria-label="Insights sections" className="pointer-events-auto flex gap-1 rounded-full border border-line bg-white/95 p-1 shadow-lg backdrop-blur">
+        {INSIGHTS_SECS.map((k) => (
+          <button
+            key={k}
+            role="tab"
+            aria-selected={sec === k}
+            onClick={() => setSec(k)}
+            className={`h-10 min-h-0 rounded-full px-3.5 text-[13px] font-medium ${sec === k ? 'bg-ink text-white' : 'text-soft'}`}
+          >
+            {k}
+          </button>
+        ))}
+      </div>
+    </div>
     </div>
   );
 }
