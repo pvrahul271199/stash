@@ -1,23 +1,9 @@
 'use client';
-import { useState } from 'react';
 import type { Entry } from '@/db/schema';
-import type { EventPlanView } from '@/db/queries';
 import type { EventTotal } from '@/lib/insights';
-import { formatWithWeekday, toISO } from '@/lib/dates';
+import { formatWithWeekday } from '@/lib/dates';
 import { inr1 } from '@/lib/format';
 
-type Pill = 'All' | 'Plans' | 'Events';
-
-type Row =
-  | { kind: 'occ'; id: string; name: string; date: string; o: EventPlanView }
-  | { kind: 'evt'; id: string; name: string; date: string; ev: EventTotal };
-
-const IcoList = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <path d="M9 6h11M9 12h11M9 18h11" />
-    <path d="m3.5 6 1 1 2-2M3.5 12l1 1 2-2M3.5 18l1 1 2-2" />
-  </svg>
-);
 const IcoTag = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <path d="M3 12V4h8l10 10-8 8L3 12z" />
@@ -26,12 +12,11 @@ const IcoTag = () => (
 );
 
 /**
- * Insights > Events: occasions (planned checklists) and events (spends tagged with an event name) in one list.
- * An occasion has a dark checklist icon and opens its checklist; an event has a quiet tag icon and, when tapped,
- * shows its spends right under it. Pills: All | Plans | Events.
+ * Insights > Events: events only (spends tagged with an event name). Tap one to see its spends right under it.
+ * Plans (shopping lists) live in History > Plans, so a plan's own tagged spends are left out of this list.
  */
 export function EventsSection({
-  occasions,
+  planNames,
   events,
   entries,
   activeEvent,
@@ -39,10 +24,10 @@ export function EventsSection({
   colorOf,
   onToggleEvent,
   onToggleCategory,
-  onOpenOccasion,
   onEditEntry,
 }: {
-  occasions: EventPlanView[];
+  /** Names of plans: their tagged spends belong to the plan, not to an event. */
+  planNames: string[];
   events: EventTotal[];
   entries: Entry[];
   activeEvent: string | null;
@@ -50,89 +35,40 @@ export function EventsSection({
   colorOf: Record<string, string>;
   onToggleEvent: (name: string) => void;
   onToggleCategory: (name: string) => void;
-  onOpenOccasion?: (eventId: string) => void;
   onEditEntry: (e: Entry) => void;
 }) {
-  const [pill, setPill] = useState<Pill>('All');
-  const occNames = new Set(occasions.map((o) => o.event.name));
+  const plans = new Set(planNames);
   const lastSpend = (name: string) => entries.reduce((m, e) => (e.event === name && e.date > m ? e.date : m), '');
-  const rows: Row[] = [
-    ...occasions.map((o): Row => ({ kind: 'occ', id: o.event.id, name: o.event.name, date: toISO(new Date(o.event.createdAt)), o })),
-    // an occasion's own spends are already inside its card
-    ...events.filter((e) => !occNames.has(e.name)).map((ev): Row => ({ kind: 'evt', id: `e:${ev.name}`, name: ev.name, date: lastSpend(ev.name), ev })),
-  ].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+  const rows = events
+    .filter((e) => !plans.has(e.name))
+    .map((ev) => ({ ev, date: lastSpend(ev.name) }))
+    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+  const total = rows.reduce((t, r) => t + r.ev.total, 0);
 
-  const nOcc = rows.filter((r) => r.kind === 'occ').length;
-  const counts: Record<Pill, number> = { All: rows.length, Plans: nOcc, Events: rows.length - nOcc };
-  const shown = rows.filter((r) => pill === 'All' || (pill === 'Plans' ? r.kind === 'occ' : r.kind === 'evt'));
-  const total = rows.reduce((t, r) => t + (r.kind === 'occ' ? r.o.totals.paid : r.ev.total), 0);
-
-  if (rows.length === 0) return <p className="mt-4 text-[13px] text-soft">Events you tag, and plans you make, show up here.</p>;
-
-  const card = (r: Row) =>
-    r.kind === 'occ' ? <OccasionRow o={r.o} onOpen={onOpenOccasion} /> : (
-      <EventRow ev={r.ev} spends={entries.filter((e) => e.event === r.name && (!activeFocus || e.category === activeFocus)).sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : b.amount - a.amount))} onEdit={onEditEntry} selected={activeEvent === r.name} activeFocus={activeFocus} colorOf={colorOf} onToggle={() => onToggleEvent(r.name)} onCategory={onToggleCategory} />
-    );
+  if (rows.length === 0) return <p className="mt-4 text-[13px] text-soft">Events you tag show up here.</p>;
 
   return (
     <div className="mt-3">
       <p className="num text-[13px] text-soft">
-        {rows.length} {rows.length === 1 ? 'item' : 'items'} · {inr1(total)}
+        {rows.length} {rows.length === 1 ? 'event' : 'events'} · {inr1(total)}
       </p>
-      <div role="tablist" aria-label="Show" className="mt-3 grid grid-cols-3 rounded-full bg-tint p-1">
-        {(['All', 'Plans', 'Events'] as const).map((k) => (
-          <button
-            key={k}
-            type="button"
-            role="tab"
-            aria-selected={pill === k}
-            onClick={() => setPill(k)}
-            className={`h-9 min-h-0 rounded-full text-[13px] font-medium transition-colors ${pill === k ? 'bg-ink text-white' : 'text-soft'}`}
-          >
-            {k} <span className="num opacity-70">{counts[k]}</span>
-          </button>
+      <ul className="mt-3 flex flex-col gap-2.5">
+        {rows.map(({ ev }) => (
+          <li key={ev.name}>
+            <EventRow
+              ev={ev}
+              spends={entries.filter((e) => e.event === ev.name && (!activeFocus || e.category === activeFocus)).sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : b.amount - a.amount))}
+              onEdit={onEditEntry}
+              selected={activeEvent === ev.name}
+              activeFocus={activeFocus}
+              colorOf={colorOf}
+              onToggle={() => onToggleEvent(ev.name)}
+              onCategory={onToggleCategory}
+            />
+          </li>
         ))}
-      </div>
-      {shown.length === 0 ? (
-        <p className="mt-6 text-center text-[13px] text-soft">Nothing here yet.</p>
-      ) : (
-        <ul className="mt-3 flex flex-col gap-2.5">
-          {shown.map((r) => (
-            <li key={r.id}>{card(r)}</li>
-          ))}
-        </ul>
-      )}
+      </ul>
     </div>
-  );
-}
-
-function OccasionRow({ o, onOpen }: { o: EventPlanView; onOpen?: (eventId: string) => void }) {
-  const { event, totals, items } = o;
-  const over = totals.planned > 0 && totals.paid > totals.planned;
-  const next = items.filter((i) => !i.state.paid).slice(0, 3);
-  const body = (
-    <div className="flex items-center gap-3">
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-ink text-white"><IcoList /></span>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-[15px] font-semibold text-ink">{event.name}</p>
-        <p className="num mt-0.5 truncate text-[12px] text-soft">
-          {totals.count > 0 && totals.doneCount === totals.count ? `All ${totals.count} bought` : `${totals.count - totals.doneCount} of ${totals.count} to buy${totals.toGo > 0 ? ` · ${inr1(totals.toGo)} to go` : ''}`}
-        </p>
-        {next.length > 0 && <p className="num mt-0.5 truncate text-[12px] text-faint">Next: {next.map((i) => i.item.name).join(' · ')}</p>}
-      </div>
-      <div className="shrink-0 text-right">
-        <p className={`num text-[17px] font-semibold ${over ? 'text-warm' : 'text-ink'}`}>{inr1(totals.paid)}</p>
-        <p className="num text-[12px] text-faint">{totals.planned > 0 ? `of ${inr1(totals.planned)}` : 'no amounts yet'}</p>
-      </div>
-    </div>
-  );
-  const cls = 'block w-full rounded-note border border-line bg-white p-3.5 text-left';
-  return onOpen ? (
-    <button type="button" onClick={() => onOpen(event.id)} className={cls} aria-label={`Open ${event.name} checklist`}>
-      {body}
-    </button>
-  ) : (
-    <div className={cls}>{body}</div>
   );
 }
 

@@ -9,7 +9,6 @@ import { incomeBetween } from '@/lib/income';
 import type { Entry, Plan } from '@/db/schema';
 import { AtAGlance } from './AtAGlance';
 import { EditSpendSheet } from './EditSpendSheet';
-import { EventPlanSheet } from './EventPlanSheet';
 import { EventsSection } from './EventsSection';
 import { monthLabel, type DerivedCycle } from '@/lib/period';
 import {
@@ -38,7 +37,7 @@ import { SwipeRow } from '../ui/SwipeRow';
 
 function Section({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
   return (
-    <section className="mt-9">
+    <section className="mt-3">
       <div className="mb-3.5">
         <h2 className="text-section font-semibold text-ink">{title}</h2>
         {hint && <p className="mt-0.5 text-[13px] text-soft">{hint}</p>}
@@ -84,8 +83,6 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
     clearWantSec();
   }, [wantSec, clearWantSec]);
   const [editing, setEditing] = useState<Entry | null>(null);
-  /** An occasion opened from the Occasions block (the checklist sheet). */
-  const [planFor, setPlanFor] = useState<string | null>(null);
   const occasions = useOccasions();
   const entries = useCycleEntries(cycle?.id);
   const rows = useMemo(() => (cycle ? dayRowsOf(cycle) : undefined), [cycle]);
@@ -250,7 +247,9 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
         </p>
       ) : null}
 
-      {/* Focus row: always there (fixed height), so turning a focus on or off never moves the page */}
+      {/* Focus row: on the other tabs it is always there (fixed height), so turning a focus on or off never moves the page.
+          On Overview the "All spending · tap a category…" line is gone, so the row only appears while a focus is on. */}
+      {(sec !== 'Overview' || hasFocus) && (
       <div className="sticky top-0 z-10 -mx-6 mt-2 bg-white/95 px-6 py-1 backdrop-blur">
         <div className="relative h-8">
           <div aria-hidden={hasFocus} className={`absolute inset-0 flex items-center text-[12px] text-faint transition-opacity duration-300 ${hasFocus ? 'pointer-events-none opacity-0' : 'opacity-100'}`}>
@@ -273,6 +272,7 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
           </div>
         </div>
       </div>
+      )}
       {sec === 'Overview' && (<>
       {/* 1. Summary */}
       <section className="mt-5 rounded-[20px] border border-line bg-white p-5 shadow-sm" aria-label="Summary">
@@ -533,7 +533,7 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
       </>)}
       {sec === 'Events' && (<>
       <EventsSection
-        occasions={occasions ?? []}
+        planNames={(occasions ?? []).map((o) => o.event.name)}
         events={evList}
         entries={entries ?? []}
         activeEvent={activeEvent}
@@ -541,7 +541,6 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
         colorOf={colorOf}
         onToggleEvent={(name) => setFocusEvent(activeEvent === name ? null : name)}
         onToggleCategory={toggleFocus}
-        onOpenOccasion={current ? setPlanFor : undefined}
         onEditEntry={setEditing}
       />
       </>)}
@@ -672,7 +671,6 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
       </Section>
       </>)}
       {editing && <EditSpendSheet entry={editing} onClose={() => setEditing(null)} />}
-      {planFor && current && <EventPlanSheet cycle={current} start={{ k: 'list', eventId: planFor }} onClose={() => setPlanFor(null)} />}
     </div>
     <div className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center">
       <div role="tablist" aria-label="Insights sections" className="pointer-events-auto flex gap-1 rounded-full border border-line bg-white/95 p-1 shadow-lg backdrop-blur">

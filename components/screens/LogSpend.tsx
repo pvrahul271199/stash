@@ -3,6 +3,7 @@ import { track, trackOnce } from '@/lib/analytics';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BackIcon, IconButton, PrimaryButton } from '../ui/Button';
 import { Keypad } from '../ui/Keypad';
+import { LogHints } from '../ui/LogHints';
 import { CALC_INIT, OP_SYMBOL, calcPress, calcResult, formatTyped, isOp, type CalcState } from '../../lib/calc';
 import { CategoryPicker } from './CategoryPicker';
 import { LendFields, NEW_LEND_DRAFT, type LendDraft } from './LendFields';
@@ -91,6 +92,28 @@ export function LogSpend({
       return !v;
     });
   }
+  // First time only: arrows pointing at the event tag and the Plan icon (same style as "Missed a day?" on Today). Remembered per device.
+  const headRef = useRef<HTMLDivElement>(null);
+  const [showHints, setShowHints] = useState(false);
+  useEffect(() => {
+    let seen = true;
+    try {
+      seen = localStorage.getItem('stash:hint:log') === '1';
+    } catch {
+      /* no storage: skip the hint rather than nag */
+    }
+    if (seen) return;
+    const t = setTimeout(() => setShowHints(true), 500);
+    return () => clearTimeout(t);
+  }, []);
+  const endHints = useCallback(() => {
+    setShowHints(false);
+    try {
+      localStorage.setItem('stash:hint:log', '1');
+    } catch {
+      /* ignore */
+    }
+  }, []);
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const lastPayment = useLastPayment();
@@ -375,7 +398,8 @@ export function LogSpend({
 
       {view === 'keypad' && (
         <>
-          <div className="relative flex items-center justify-between gap-2">
+          <div ref={headRef} className="relative flex items-center justify-between gap-2">
+            {showHints && view === 'keypad' && !eventMenuOpen && <LogHints host={headRef} skip={activeEvent ? ['event'] : []} onDone={endHints} />}
             <IconButton label="Close" onClick={onClose} className="-ml-2 h-9 w-9 min-h-0 shrink-0">
               <svg
                 width="18"
@@ -398,6 +422,7 @@ export function LogSpend({
                   setEventMenuOpen((v) => !v);
                   setEventErr(null);
                 }}
+                data-hint="event"
                 aria-expanded={eventMenuOpen}
                 aria-label={activeEvent ? `Logging in ${activeEvent}. Tap to switch event` : 'Choose an event'}
                 className={`inline-flex h-8 min-h-0 max-w-[190px] items-center gap-1.5 rounded-full border pl-2.5 pr-2 text-[12px] font-medium transition-colors ${
@@ -464,6 +489,7 @@ export function LogSpend({
                   useUI.getState().goToHistoryPlans();
                   onClose();
                 }}
+                data-hint="plan"
                 aria-label="Plan: a to-do list with prices"
                 title="Plan"
                 className="flex h-9 w-9 min-h-0 items-center justify-center rounded-full text-soft transition-colors hover:text-ink active:bg-tint"
