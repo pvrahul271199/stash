@@ -211,8 +211,11 @@ export function AppShell() {
     if (!ready || !consented || hasCycle !== false || auth.status !== 'signedIn' || !auth.uid) return;
     if (restoredFor.current === auth.uid) return;
     restoredFor.current = auth.uid;
+    // A brand-new account has nothing in the cloud to bring back: skip the "Bringing your data back…" loader (a cold server
+    // could keep a first-time user staring at it for many seconds). The normal sync still runs in the background.
+    if (auth.isNew) return;
     void restoreFor(auth.uid);
-  }, [ready, consented, hasCycle, auth.status, auth.uid, restoreFor]);
+  }, [ready, consented, hasCycle, auth.status, auth.uid, auth.isNew, restoreFor]);
 
   // No browser right-click menu (it is not a security measure: DevTools still opens from the keyboard/menu). Text fields keep
   // theirs so paste still works.
@@ -303,6 +306,7 @@ export function AppShell() {
     const a = getAuth();
     captureEvent('account_authenticated', { is_new_account: a.isNew });
     if (a.isNew && a.uid) {
+      restoredFor.current = a.uid; // nothing to restore for an account created a second ago: no loader
       // a brand-new Google account: never copy this phone's guest data silently, ask first
       const found = await describeGuestData().catch(() => null);
       if (found) setMoveOffer({ ...found, uid: a.uid });

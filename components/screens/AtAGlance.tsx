@@ -2,7 +2,7 @@
 import { weekdayStats, MIN_CLOSED_DAYS, biggestSpends, categoryTotals, type DayPoint, type InsightEntry } from '@/lib/insights';
 import { compactINR } from '@/lib/history';
 import { formatWithWeekday } from '@/lib/dates';
-import { inr1 } from '@/lib/format';
+import { inr, inr1 } from '@/lib/format';
 
 const HOT = '#D98324';
 type Spend = InsightEntry & { date: string };
@@ -29,9 +29,22 @@ export function AtAGlance({ entries, days, startDate, planAmount, totalDays, col
   const priciest = [...wd].sort((a, b) => b.avg - a.avg)[0];
   const max = Math.max(...wd.map((s) => s.avg), 1);
   const over = closed.filter((d) => d.totalSpent > perDay).length;
+  const whole = (n: number) => inr(Math.round(n));
+  const gap = priciest.avg - usual;
   const tip = priciest.avg > usual * 1.15
-    ? `${priciest.name} are your priciest day, about ${inr1(priciest.avg - usual)} above a usual day. Moving one outing to a weekday could save around ${inr1((priciest.avg - usual) * 4)} a month.`
-    : `Spending is even across the week. ${top.name} is where any saving would come from.`;
+    ? {
+        title: `${priciest.name} cost you the most`,
+        body: (
+          <>
+            A typical one runs about <b className="num font-semibold">{whole(gap)}</b> above a usual day. Moving one outing to a weekday could save around{' '}
+            <b className="num font-semibold">{whole(gap * 4)}</b> a month.
+          </>
+        ),
+      }
+    : {
+        title: 'Spending is even across the week',
+        body: <>Any saving would come from <b className="font-semibold">{top.name}</b>.</>,
+      };
 
   return (
     <>
@@ -74,9 +87,18 @@ export function AtAGlance({ entries, days, startDate, planAmount, totalDays, col
           </div>
         </div>
       </div>
-      <p className="mt-3 rounded-note bg-tint px-3.5 py-2.5 text-[13px] leading-snug text-ink">
-        <span className="font-semibold">Try this: </span>{tip}
-      </p>
+      <div className="mt-3 flex gap-3 rounded-[16px] bg-tint px-4 py-3.5">
+        <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white text-ink shadow-sm" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9 18h6M10 21h4M12 3a6 6 0 00-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0012 3z" />
+          </svg>
+        </span>
+        <div className="min-w-0">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-faint">Try this</p>
+          <p className="mt-0.5 text-[15px] font-semibold leading-snug text-ink">{tip.title}</p>
+          <p className="mt-1 text-[13px] leading-relaxed text-soft">{tip.body}</p>
+        </div>
+      </div>
     </>
   );
 }
