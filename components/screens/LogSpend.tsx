@@ -34,7 +34,6 @@ import { inr, num } from '@/lib/format';
 import { useCurrency } from '@/lib/currency';
 import { useToast } from '@/store/toast';
 import { captureEvent } from '@/lib/analytics';
-import { EventHint } from '../ui/EventHint';
 import { useUI } from '@/store/ui';
 import { HugeNumber } from '../ui/HugeNumber';
 
@@ -92,27 +91,6 @@ export function LogSpend({
       return !v;
     });
   }
-  // First time only: an arrow pointing at the event pill ("you can create an event"). Remembered per device.
-  const [showEventHint, setShowEventHint] = useState(false);
-  useEffect(() => {
-    let seen = true;
-    try {
-      seen = localStorage.getItem('stash:hint:event') === '1';
-    } catch {
-      /* no storage: skip the hint rather than nag */
-    }
-    if (seen) return;
-    const t = setTimeout(() => setShowEventHint(true), 600);
-    return () => clearTimeout(t);
-  }, []);
-  const endEventHint = () => {
-    setShowEventHint(false);
-    try {
-      localStorage.setItem('stash:hint:event', '1');
-    } catch {
-      /* ignore */
-    }
-  };
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const lastPayment = useLastPayment();
@@ -417,7 +395,6 @@ export function LogSpend({
               <button
                 type="button"
                 onClick={() => {
-                  endEventHint();
                   setEventMenuOpen((v) => !v);
                   setEventErr(null);
                 }}
@@ -477,15 +454,11 @@ export function LogSpend({
               )}
             </div>
 
-            {/* Plan: a small icon, top right. The first-time hint points at it and stays perfectly still. */}
+            {/* Plan: a small icon, top right. */}
             <div className="relative -mr-2 h-9 w-9 shrink-0">
-              {showEventHint && view === 'keypad' && !eventMenuOpen && occasions.length === 0 && (
-                <EventHint onDone={endEventHint} />
-              )}
               <button
                 type="button"
                 onClick={() => {
-                  endEventHint();
                   setEventMenuOpen(false);
                   // Plans live in History > Plans: go there (the log screen closes behind us).
                   useUI.getState().goToHistoryPlans();
