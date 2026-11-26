@@ -1,3 +1,4 @@
+import type { EventItem } from '@/lib/eventPlan';
 import Dexie, { type Table } from 'dexie';
 import { useSyncExternalStore } from 'react';
 import { migrateV4ToV5, migrateCatsToOverrides, migrateTxnLinks, migrateToDerivedPeriods } from './migrate';
@@ -217,6 +218,11 @@ export interface StashEvent extends Syncable {
   note: string | null;
   categories: string[];
   createdAt: number;
+  /**
+   * The occasion's checklist (lib/eventPlan.ts): planned items, each linked to the spend that paid it. Not indexed, so
+   * no Dexie version bump; rows from before it read as `[]`. Never read this field raw: use `normalizeItems`.
+   */
+  items?: EventItem[];
 }
 
 /** UI view of a transaction with the day derived from its cycle (`day` 0 = outside the cycle). */

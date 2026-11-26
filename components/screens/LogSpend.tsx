@@ -34,6 +34,7 @@ import { useCurrency } from '@/lib/currency';
 import { useToast } from '@/store/toast';
 import { captureEvent } from '@/lib/analytics';
 import { EventHint } from '../ui/EventHint';
+import { EventPlanSheet } from './EventPlanSheet';
 import { HugeNumber } from '../ui/HugeNumber';
 
 
@@ -66,6 +67,8 @@ export function LogSpend({
   const [note, setNote] = useState('');
   const [noteOpen, setNoteOpen] = useState(false);
   const [eventMenuOpen, setEventMenuOpen] = useState(false);
+  /** "Plan an occasion": the checklist side of events (EventPlanSheet). */
+  const [planOpen, setPlanOpen] = useState(false);
   const [newEventName, setNewEventName] = useState('');
   const [eventErr, setEventErr] = useState<string | null>(null);
   const [view, setView] = useState<'keypad' | 'picker'>('keypad');
@@ -491,6 +494,24 @@ export function LogSpend({
                   aria-label="Event switcher"
                   className="absolute left-1/2 top-full z-30 mt-2 w-[268px] -translate-x-1/2 rounded-note border border-ink/20 bg-white p-3 shadow-[0_12px_32px_-8px_rgba(30,27,75,0.16)]"
                 >
+                  {/* Two different jobs, said in plain words: tag spends you log now, or plan what an occasion will cost. */}
+                  <div className="grid grid-cols-2 gap-1.5 pb-2.5">
+                    <div className="flex flex-col items-start gap-0.5 rounded-[12px] border border-ink bg-tint px-2.5 py-2">
+                      <span className="text-[12px] font-semibold text-ink">Log into an event</span>
+                      <span className="text-[10.5px] leading-snug text-soft">Tag the spends you log now</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEventMenuOpen(false);
+                        setPlanOpen(true);
+                      }}
+                      className="flex min-h-0 flex-col items-start gap-0.5 rounded-[12px] border border-line bg-white px-2.5 py-2 text-left transition-colors hover:border-ink/40"
+                    >
+                      <span className="text-[12px] font-semibold text-ink">Plan an occasion</span>
+                      <span className="text-[10.5px] leading-snug text-soft">Items and amounts to tick off</span>
+                    </button>
+                  </div>
                   <div className="flex items-center justify-between pb-2">
                     <span className="text-[11px] font-semibold tracking-wide text-soft">Event tag</span>
                     {activeEvent && (
@@ -859,6 +880,7 @@ export function LogSpend({
           </PrimaryButton>
         </>
       )}
+      {planOpen && <EventPlanSheet cycle={cycle} targetDate={targetDate} onClose={() => setPlanOpen(false)} />}
     </div>
   );
 }

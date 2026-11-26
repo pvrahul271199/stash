@@ -756,9 +756,12 @@ export function UserTab({
         <ConfirmDialog
           title={`Remove ${removingEvent.name}?`}
           body={
-            (eventCounts[removingEvent.name] ?? 0) > 0
+            ((eventCounts[removingEvent.name] ?? 0) > 0
               ? `${eventCounts[removingEvent.name]} ${eventCounts[removingEvent.name] === 1 ? 'spend stays' : 'spends stay'} as they are, just without the event tag.`
-              : 'No spends are tagged with this event.'
+              : 'No spends are tagged with this event.') +
+            (removingEvent.items?.length
+              ? ` Its checklist of ${removingEvent.items.length} ${removingEvent.items.length === 1 ? 'item' : 'items'} is removed too; anything already paid stays as a spend.`
+              : '')
           }
           confirmLabel={`Remove ${removingEvent.name}`}
           onCancel={() => setRemovingEvent(null)}

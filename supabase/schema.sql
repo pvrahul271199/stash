@@ -228,6 +228,10 @@ create table if not exists public.events (
 );
 create index if not exists idx_events_user_updated on public.events (user_id, updated_at);
 alter table public.events add column if not exists version bigint not null default 1;
+-- Event checklist (E-EVENT-PLAN): planned items, each {id, name, planned, txnId, createdAt}. Run this block BEFORE shipping the app.
+-- Nullable on purpose: push_changes copies columns from the pushed json, so an older app that does not send `items` would
+-- violate NOT NULL. The client reads null as an empty list (normalizeItems).
+alter table public.events add column if not exists items jsonb default '[]'::jsonb;
 drop trigger if exists trg_events_lww on public.events;
 create trigger trg_events_lww before update on public.events
   for each row execute function public.stash_lww_guard();
@@ -828,6 +832,11 @@ do $$ begin
   if not exists (select 1 from pg_constraint where conname = 'events_size_check') then
     alter table public.events add constraint events_size_check check (
       length(name) <= 100 and length(coalesce(note, '')) <= 1000 and octet_length(categories::text) <= 20000
+    ) not valid;
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'events_items_size_check') then
+    alter table public.events add constraint events_items_size_check check (
+      items is null or (jsonb_typeof(items) = 'array' and octet_length(items::text) <= 20000)
     ) not valid;
   end if;
   if not exists (select 1 from pg_constraint where conname = 'plans_size_check') then
