@@ -1,6 +1,6 @@
 'use client';
 import { entryLines } from '@/lib/entryDisplay';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
   removeEntry,
   removeIncome,
@@ -17,7 +17,7 @@ import { monthView, type DerivedCycle } from '@/lib/period';
 import { EditSpendSheet } from './EditSpendSheet';
 import { LogSpend } from './LogSpend';
 import { incomeBetween, incomeLabel } from '@/lib/income';
-import { LendTab } from './LendTab';
+import { LendTab, type LendView } from './LendTab';
 import { MonthRecapButton } from './MonthRecaps';
 import { TitleTabs } from '../ui/TitleTabs';
 import {
@@ -44,6 +44,8 @@ export function HistoryTab({ activeCycle, plan, initialTab = 'spends' }: { activ
   const { currency } = useCurrency();
   const allCycles = useAllCycles() ?? [activeCycle];
   const [tab, setTab] = useState<'spends' | 'lend'>(initialTab);
+  const [lendView, setLendView] = useState<LendView>('Lent');
+  const lendScroll = useRef<HTMLDivElement>(null);
   const loans = useLoans() ?? [];
   const incomes = useIncomes() ?? [];
   const [query, setQuery] = useState('');
@@ -153,9 +155,23 @@ export function HistoryTab({ activeCycle, plan, initialTab = 'spends' }: { activ
 
   if (tab === 'lend') {
     return (
-      <div className="flex-1 overflow-y-auto px-6 pb-8 pt-6">
-        {titleTabs}
-        <LendTab />
+      <div className="relative min-h-0 flex-1">
+        <div ref={lendScroll} className="h-full overflow-y-auto px-6 pb-28 pt-6">
+          {titleTabs}
+          <LendTab view={lendView} />
+        </div>
+        {/* Floating section tabs, same as Insights: they stay at the bottom while the list scrolls */}
+        <div className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center">
+          <div role="tablist" aria-label="Lend view" className="pointer-events-auto flex gap-1 rounded-full border border-line bg-white/95 p-1 shadow-lg backdrop-blur">
+            {(['Lent', 'Timeline'] as const satisfies readonly LendView[]).map((k) => (
+              <button key={k} role="tab" aria-selected={lendView === k}
+                onClick={() => { setLendView(k); lendScroll.current?.scrollTo({ top: 0 }); }}
+                className={`h-10 min-h-0 rounded-full px-3.5 text-[13px] font-medium ${lendView === k ? 'bg-ink text-white' : 'text-soft'}`}>
+                {k}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
     );
   }

@@ -1,0 +1,22 @@
+[12:30:49.500] [INFO] storybook v10.6.5
+[12:30:49.855] [DEBUG] Getting package.json info for /Users/rahulpv/Downloads/stash/package.json...
+[12:30:49.925] [DEBUG] Could not determine @babel/preset-env version in use. In case of runtime errors with @babel/preset-env, you may need to set the babelRemoveBugfixes feature flag in your `main.ts` file.
+[12:30:50.092] [INFO] Starting...
+[12:30:50.402] [DEBUG] Starting preview..
+[12:30:50.458] [INFO] Vite Re-optimizing dependencies because vite config has changed
+[12:30:50.476] [DEBUG] Change detection enabled.
+[12:30:50.477] [DEBUG] Change detection: snapshotting Vite resolve config (restart required if vite.config.ts changes)
+[12:30:50.477] [DEBUG] Change detection: ignored 12 regex alias(es); related modules tracked as opaque-leaf.
+[12:30:50.477] [DEBUG] ChangeDetectionResolverFactory: skipped regex aliases [/^@storybook\/global$/, /^storybook\/test$/, /^storybook\/actions$/, /^storybook\/preview-api$/, /^storybook\/internal\/channels$/, /^storybook\/internal\/client-logger$/, /^storybook\/internal\/core-events$/, /^storybook\/internal\/preview-errors$/, /^storybook\/internal\/types$/, /^storybook\/internal\/preview-api$/, /^\/?@vite\/env/, /^\/?@vite\/client/]
+[12:30:50.658] [ERROR] [38;2;241;97;97mError: listen EADDRINUSE: address already in use 127.0.0.1:6006[39m
+    at Server.setupListenHandle [as _listen2] (node:net:1940:16)
+    at listenInCluster (node:net:1997:12)
+    at node:net:2206:7
+    at process.processTicksAndRejections (node:internal/process/task_queues:90:21)
+[12:30:50.658] [WARN] Broken build, fix the error above.
+You may need to refresh the browser.
+[12:30:50.801] [DEBUG] ChangeDetectionResolverFactory: 'qrcode-generator' from '/Users/rahulpv/Downloads/stash/components/splits/QR.tsx' unresolved ("." is not exported under the conditions ["storybook", "stories", "test", "module", "browser", "development|production"] from package /Users/rahulpv/Downloads/stash/node_modules/qrcode-generator (see exports field in /Users/rahulpv/Downloads/stash/node_modules/qrcode-generator/package.json))
+[12:30:50.801] [DEBUG] Could not resolve qrcode-generator from /Users/rahulpv/Downloads/stash/components/splits/QR.tsx
+[12:30:50.826] [DEBUG] ChangeDetectionResolverFactory: '@supabase/supabase-js' from '/Users/rahulpv/Downloads/stash/lib/supabaseClient.ts' unresolved ("." is not exported under the conditions ["storybook", "stories", "test", "module", "browser", "development|production"] from package /Users/rahulpv/Downloads/stash/node_modules/@supabase/supabase-js (see exports field in /Users/rahulpv/Downloads/stash/node_modules/@supabase/supabase-js/package.json))
+[12:30:50.826] [DEBUG] Could not resolve @supabase/supabase-js from /Users/rahulpv/Downloads/stash/lib/supabaseClient.ts
+[12:30:50.828] [DEBUG] Change detection graph built: 51 stories, 136 deps tracked, 350ms

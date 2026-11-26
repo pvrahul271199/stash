@@ -12,6 +12,7 @@ import { InviteTicket } from '../splits/InviteTicket';
 import { NewGroupSheet } from '../splits/NewGroupSheet';
 import { SAMPLE_GROUPS, SAMPLE_ME } from '@/lib/splitsSample';
 import { SplitsLoading } from '../splits/SplitsLoading';
+import { PendingSheet, type PendingRow } from '../splits/PendingSheet';
 import { Eyebrow, Person, PersonStack, Signed, nameOf, paletteFor, relTime, useMoney } from '../splits/parts';
 
 interface Summary { data: GroupData; net: number; pending: number; mine: Debt[]; last: number | null }
@@ -63,6 +64,7 @@ export function SplitsTab({ onSignIn, sample }: { onSignIn: () => void; sample?:
   const setFocus = useSplitsStore((s) => s.setFocus);
   const [openId, setOpenId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [pendingOpen, setPendingOpen] = useState(false);
   const [inviteFor, setInviteFor] = useState<string | null>(null);
   const me = sample ? SAMPLE_ME : auth.uid ?? '';
 
@@ -101,6 +103,12 @@ export function SplitsTab({ onSignIn, sample }: { onSignIn: () => void; sample?:
   const fmt = (n: number) => formatWithCurrency(n, info);
   const info = SUPPORTED_CURRENCIES.find((c) => c.code === cur) ?? SUPPORTED_CURRENCIES[0];
   const inviteGroup = groups?.find((g) => g.room.id === inviteFor);
+  // Every open payment in the same currency as the card, in every group (you pay, or someone pays you)
+  const openPayments: PendingRow[] = same.flatMap((r) => r.mine.map((d): PendingRow => {
+    const dir = d.from === me ? 'pay' : 'get';
+    const personId = dir === 'pay' ? d.to : d.from;
+    return { key: `${r.data.room.id}:${d.from}:${d.to}`, groupId: r.data.room.id, group: r.data.room.name, dir, personId, person: nameOf(r.data.members, personId, me), members: r.data.members, amount: d.amount };
+  }));
 
   return (
     <>
@@ -108,7 +116,7 @@ export function SplitsTab({ onSignIn, sample }: { onSignIn: () => void; sample?:
       {rows.length > 0 && (
         <section className="mx-5" aria-label="Across all groups">
           <div className="flex flex-col overflow-hidden rounded-[26px] border border-line bg-white shadow-[0_12px_32px_rgba(30,27,75,0.09)]">
-            <div className="block w-full px-5 pb-3 pt-4 text-left">
+            <button type="button" onClick={() => openPayments.length && setPendingOpen(true)} disabled={!openPayments.length} className="block w-full px-5 pb-3 pt-4 text-left disabled:cursor-default">
                 <span className="flex items-center justify-between">
                   <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-faint">Across all groups</span>
                   <span className="rounded-full bg-tint px-2.5 py-0.5 text-[10px] font-medium text-soft">{pending ? `${pending} to settle` : 'Nothing to settle'}</span>
@@ -123,7 +131,11 @@ export function SplitsTab({ onSignIn, sample }: { onSignIn: () => void; sample?:
                     <span className="rounded-full bg-warm" style={{ width: `${(owe / (owed + owe)) * 100}%` }} />
                   </span>)}
                 <span className="mt-3 block h-[18px]" aria-hidden="true" />
-            </div>
+            </button>
+            {openPayments.length > 0 && (
+              <button type="button" onClick={() => setPendingOpen(true)} className="flex items-center justify-between border-t border-line px-5 py-3 text-left text-[13px] font-medium text-ink active:bg-tint">
+                <span>See the {openPayments.length} {openPayments.length === 1 ? 'payment' : 'payments'}</span><span aria-hidden="true" className="text-faint">›</span>
+              </button>)}
               {other > 0 && <p className="border-t border-line px-6 py-2 text-[11px] text-faint">+{other} {other === 1 ? 'group' : 'groups'} in other currencies, not added here</p>}
           </div>
         </section>)}
@@ -144,6 +156,10 @@ export function SplitsTab({ onSignIn, sample }: { onSignIn: () => void; sample?:
           ? <PrimaryButton onClick={onSignIn}>Sign in to make your own group</PrimaryButton>
           : <PrimaryButton onClick={() => setCreating(true)} disabled={!(groups || error)}>New group</PrimaryButton>}
       </div>
+      {pendingOpen && (
+        <PendingSheet rows={openPayments} fmt={fmt} onClose={() => setPendingOpen(false)}
+          onSettle={(id) => { setPendingOpen(false); setOpenId(id); }} />
+      )}
       {creating && <NewGroupSheet onClose={() => setCreating(false)} onCreated={(id) => { setCreating(false); setInviteFor(id); }} />}
       {inviteGroup && <InviteTicket data={inviteGroup} me={me} onClose={() => { setOpenId(inviteGroup.room.id); setInviteFor(null); }} />}
     </>

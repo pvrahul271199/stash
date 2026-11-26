@@ -107,6 +107,8 @@ export const addSettlement = (group: string, from: string, to: string, amount: n
 export const deleteSettlement = (id: string) => rpc<null>('delete_group_settlement', { p_id: id });
 export const leaveGroup = (group: string) => rpc<null>('leave_group', { p_group: group });
 export const deleteGroup = (group: string) => rpc<null>('delete_group', { p_group: group });
+/** Creator only (rename_group in supabase/schema.sql). The name is trimmed server-side; 1 to 60 characters. */
+export const renameGroup = (group: string, name: string) => rpc<null>('rename_group', { p_group: group, p_name: name });
 
 export type InvitePreview = { status: 'open' | 'closed' | 'expired' | 'missing'; name?: string; creator?: string; members?: number };
 

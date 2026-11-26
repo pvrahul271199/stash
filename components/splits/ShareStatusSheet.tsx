@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { PrimaryButton, SecondaryButton } from '@/components/ui/Button';
+import { Logo } from '@/components/ui/Logo';
 import { DEFAULT_SHARE_OPTS, NOTE_MAX, readShareOpts, settledText, shareFacts, shareLines, shareText, type ShareOpts } from '@/lib/shareStatus';
 import type { Debt } from '@/lib/split';
 import { useToast } from '@/store/toast';
@@ -118,7 +119,11 @@ export function ShareStatusSheet({ data, debts, preferred, onClose }: { data: Gr
                   <p className="mt-2 font-display text-[22px] font-semibold text-ink">{opts.groupName ? room.name : 'The group'}</p>
                   <p className="mt-1 text-[14px] text-ink/70">is all settled up</p>
                 </>)}
-              <p className="mt-6 text-[10px] font-medium tracking-wide text-ink/50">chelav splits</p>
+              <div className="mt-6 flex items-center justify-center gap-2">
+                <Logo size={20} />
+                <span className="font-display text-[13px] font-semibold text-ink/80">Chelav</span>
+                <span className="text-[11px] text-ink/50">· Splits</span>
+              </div>
             </div>
           </div>
 

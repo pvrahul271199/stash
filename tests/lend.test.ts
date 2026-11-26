@@ -12,7 +12,7 @@ import { MAPPERS } from '@/lib/sync';
 import { addDays } from '@/lib/dates';
 import {
   closedLoans, dueFromChoice, dueText, loanName, loanStatus, openLoans, remaining, summarize, validateLoan,
-  loanEffects, writtenOffAmount, type LoanLike,
+  loanEffects, writtenOffAmount, type LoanLike, lendTimeline, lendEventText,
 } from '@/lib/lend';
 
 const loan = (over: Partial<LoanLike & { createdAt: number }> = {}): LoanLike & { createdAt: number } => ({
@@ -495,5 +495,39 @@ describe('hold back (always on)', () => {
     expect(remote.hold_back).toBe(true);
     expect(MAPPERS.loans.toLocal({ ...remote, client_updated_at: 5, deleted_at: null } as never).holdBack).toBe(true);
     expect(MAPPERS.loans.toLocal({ id: 'o', client_updated_at: 1, deleted_at: null, txn_id: null, person: 'M', kind: 'Family', amount: '8', lent_on: '2026-11-02', due_date: null, will_pay: 'yes', repayments: null, written_off: null, created_at: '9' } as never).holdBack).toBe(false);
+  });
+});
+
+describe('lendTimeline', () => {
+  const tl = (over: Record<string, unknown>) => ({
+    id: 'x', person: 'Mum', kind: 'Family', amount: 5000, lentOn: '2026-10-01', dueDate: null, willPay: 'yes' as const,
+    repayments: [], writtenOff: false, writtenOffOn: null, createdAt: 1, ...over,
+  }) as Parameters<typeof lendTimeline>[0][number];
+
+  it('lists lent, repayments and write-offs of every loan, newest first', () => {
+    const loans = [
+      tl({ id: 'a', person: 'Mum', lentOn: '2026-10-01', amount: 5000, repayments: [{ id: 'r1', amount: 1000, date: '2026-11-03' }] }),
+      tl({ id: 'b', person: 'Ravi', lentOn: '2026-11-10', amount: 2000, writtenOff: true, writtenOffOn: '2026-11-20' }),
+    ];
+    const ev = lendTimeline(loans);
+    expect(ev.map((e) => [e.date, e.kind, e.who, e.amount])).toEqual([
+      ['2026-11-20', 'written-off', 'Ravi', 2000],
+      ['2026-11-10', 'lent', 'Ravi', 2000],
+      ['2026-11-03', 'repaid', 'Mum', 1000],
+      ['2026-10-01', 'lent', 'Mum', 5000],
+    ]);
+  });
+
+  it('write-off counts only what was still owed on that day', () => {
+    const ev = lendTimeline([tl({ id: 'c', amount: 800, repayments: [{ id: 'r', amount: 300, date: '2026-11-02' }], writtenOff: true, writtenOffOn: '2026-11-05' })]);
+    expect(ev.find((e) => e.kind === 'written-off')?.amount).toBe(500);
+  });
+
+  it('puts a write-off before a repayment on the same day, and says each line in words', () => {
+    const ev = lendTimeline([tl({ id: 'd', repayments: [{ id: 'r', amount: 100, date: '2026-11-05' }], writtenOff: true, writtenOffOn: '2026-11-05' })]);
+    expect(ev.map((e) => e.kind)).toEqual(['written-off', 'repaid', 'lent']);
+    expect(lendEventText({ kind: 'lent', who: 'Mum' })).toBe('Lent to Mum');
+    expect(lendEventText({ kind: 'repaid', who: 'Mum' })).toBe('Mum paid back');
+    expect(lendEventText({ kind: 'written-off', who: 'Mum' })).toBe('Written off: Mum');
   });
 });

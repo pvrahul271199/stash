@@ -171,3 +171,34 @@ export function validateLoan(input: { amount: number; person: string; kind: stri
   if (input.dueDate && input.dueDate < lentOn) return 'The pay-back date is before the day you lent it.';
   return null;
 }
+
+/**
+ * One line of the Lend timeline: every money movement of every loan, newest first. Read-only, derived from the loans.
+ *  - `lent`: the day the money went out (`lentOn`, the amount lent)
+ *  - `repaid`: each repayment, on its own day
+ *  - `written-off`: the rest, on the day it was written off (only the amount that was still owed then)
+ */
+export type LendEventKind = 'lent' | 'repaid' | 'written-off';
+export interface LendEvent { key: string; date: string; kind: LendEventKind; loanId: string; who: string; amount: number }
+export type TimelineLoan = LoanLike & { id: string; person: string; kind: string; lentOn: string; writtenOffOn?: string | null };
+
+const KIND_ORDER: Record<LendEventKind, number> = { 'written-off': 0, repaid: 1, lent: 2 };
+
+export function lendTimeline(loans: readonly TimelineLoan[]): LendEvent[] {
+  const out: LendEvent[] = [];
+  for (const l of loans) {
+    const who = loanName(l);
+    out.push({ key: `${l.id}:lent`, date: l.lentOn, kind: 'lent', loanId: l.id, who, amount: roundMoney(l.amount) });
+    for (const r of l.repayments) {
+      out.push({ key: `${l.id}:r:${r.id}`, date: r.date, kind: 'repaid', loanId: l.id, who, amount: roundMoney(r.amount) });
+    }
+    if (l.writtenOff && l.writtenOffOn) {
+      out.push({ key: `${l.id}:off`, date: l.writtenOffOn, kind: 'written-off', loanId: l.id, who, amount: writtenOffAmount(l) });
+    }
+  }
+  return out.sort((a, b) => b.date.localeCompare(a.date) || KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || a.key.localeCompare(b.key));
+}
+
+/** Plain words for a timeline line: "Lent to Mum", "Mum paid back", "Written off: Mum". */
+export const lendEventText = (e: Pick<LendEvent, 'kind' | 'who'>): string =>
+  e.kind === 'lent' ? `Lent to ${e.who}` : e.kind === 'repaid' ? `${e.who} paid back` : `Written off: ${e.who}`;

@@ -1,5 +1,6 @@
 import { Fragment, useState, type ReactNode } from 'react';
 import type { Meta } from '@storybook/react-vite';
+import { Logo } from '@/components/ui/Logo';
 import { QR } from '@/components/splits/QR';
 import { FlowBg } from '@/components/splits/parts';
 import { roundMoney } from '@/lib/money';
@@ -31,7 +32,11 @@ const settledPct = (s: Sum) => {
 const open = (s: Sum) => roundMoney(s.debts.reduce((a, d) => a + d.amount, 0));
 const perHead = (s: Sum) => (s.g.members.length ? roundMoney(s.total / s.g.members.length) : 0);
 const Brand = ({ light }: { light?: boolean }) => (
-  <p className={`text-[10px] font-medium tracking-wide ${light ? 'text-white/70' : 'text-faint'}`}>chelav splits · {fmtDay}</p>
+  <div className="flex items-center justify-center gap-2">
+    <Logo size={20} />
+    <span className={`font-display text-[13px] font-semibold ${light ? 'text-white/90' : 'text-ink/80'}`}>Chelav</span>
+    <span className={`text-[11px] ${light ? 'text-white/60' : 'text-ink/50'}`}>· Splits · {fmtDay}</span>
+  </div>
 );
 
 /** Story-only: pick which group the card is for. In the app this is simply the group you opened. */

@@ -1200,6 +1200,23 @@ end $$;
 revoke all on function public.delete_group(uuid) from public, anon;
 grant execute on function public.delete_group(uuid) to authenticated;
 
+-- rename_group: creator only. Trims the name and keeps it to 1-60 characters (same limit as the New group field).
+-- Run this block after the splits block above (safe to re-run).
+create or replace function public.rename_group(p_group uuid, p_name text)
+returns void language plpgsql security definer set search_path = public as $$
+declare v_name text := btrim(coalesce(p_name, ''));
+begin
+  if not exists (select 1 from public.group_rooms where id = p_group and created_by = auth.uid() and deleted_at is null) then
+    raise exception 'only the creator can rename the group' using errcode = '42501';
+  end if;
+  if length(v_name) < 1 or length(v_name) > 60 then
+    raise exception 'the name must be 1 to 60 characters' using errcode = '22023';
+  end if;
+  update public.group_rooms set name = v_name where id = p_group;
+end $$;
+revoke all on function public.rename_group(uuid, text) from public, anon;
+grant execute on function public.rename_group(uuid, text) to authenticated;
+
 -- edit_group_item: same checks as add_group_item; only who added the item or the group's creator may change it.
 -- Run this block after the splits block above (safe to re-run).
 create or replace function public.edit_group_item(

@@ -7,8 +7,45 @@ import type { Loan } from '@/db/schema';
 import { addDays, formatShort } from '@/lib/dates';
 import { inr } from '@/lib/format';
 import { cleanAmountInput, roundMoney } from '@/lib/money';
-import { closedLoans, dueText, loanName, loanStatus, openLoans, remaining, repaid, summarize } from '@/lib/lend';
+import { closedLoans, dueText, lendEventText, lendTimeline, type LendEventKind, loanName, loanStatus, openLoans, remaining, repaid, summarize } from '@/lib/lend';
 import { useToast } from '@/store/toast';
+
+/** Tag words only where they add something: a repayment says "Paid back", a write-off says "Written off", plain text, no background. */
+const TAG: Partial<Record<LendEventKind, { label: string; cls: string }>> = {
+  repaid: { label: 'Paid back', cls: 'text-soft' },
+  'written-off': { label: 'Written off', cls: 'text-warm' },
+};
+
+/**
+ * Every money movement of every loan (open and paid back), newest first, as a timeline: the day on the left, a card per
+ * movement. Read-only. Same layout as the Lend timeline design (stories/lend-designs.stories.tsx, L3).
+ */
+function Timeline({ loans }: { loans: Loan[] }) {
+  const events = lendTimeline(loans);
+  if (events.length === 0) return <section className="mt-6" aria-label="Timeline"><p className="text-body text-soft">No money has moved yet.</p></section>;
+  return (
+    <section className="mt-4" aria-label="Timeline">
+      {events.map((e, i) => (
+        <div key={e.key} className="relative flex gap-3 pb-4">
+          <div className="flex w-12 shrink-0 flex-col items-center">
+            <span className="num text-center text-[12px] font-semibold leading-tight text-soft">{formatShort(e.date)}</span>
+            {i < events.length - 1 && <span className="mt-1 h-full w-px bg-line" />}
+          </div>
+          <div className={`min-w-0 flex-1 rounded-[18px] border border-line p-3.5 ${e.kind === 'written-off' ? 'bg-warmBg/40' : 'bg-white'}`}>
+            <div className="flex items-center justify-between gap-2">
+              <p className="min-w-0 truncate text-[14px] font-medium text-ink">{e.who}</p>
+              {TAG[e.kind] && <span className={`shrink-0 text-[11px] font-medium ${TAG[e.kind]!.cls}`}>{TAG[e.kind]!.label}</span>}
+            </div>
+            <div className="mt-2 flex items-end justify-between gap-3">
+              <span className="text-[12px] text-soft">{lendEventText(e)}</span>
+              <span className="num text-[16px] font-semibold text-ink">{inr(e.amount)}</span>
+            </div>
+          </div>
+        </div>
+      ))}
+    </section>
+  );
+}
 
 const action = 'min-h-0 rounded-full border border-line bg-white px-3 py-1.5 text-[13px] text-ink active:bg-tint';
 
@@ -16,7 +53,9 @@ const action = 'min-h-0 rounded-full border border-line bg-white px-3 py-1.5 tex
  * History > Lend. Looks like Today: the total is the same HugeNumber, rows use Today's spend-row type.
  * Tap a person for what you can do: got it back, part paid, push a week, change "will they pay", write off.
  */
-export function LendTab() {
+export type LendView = 'Lent' | 'Timeline';
+
+export function LendTab({ view }: { view: LendView }) {
   const loans = useLoans();
   const today = useToday();
   const toast = useToast((s) => s.show);
@@ -171,6 +210,7 @@ export function LendTab() {
           : `${sum.people} ${sum.people === 1 ? 'person' : 'people'}${sum.overdue ? ` · ${sum.overdue} overdue` : ''}`}
       </p>
 
+      {view === 'Timeline' ? <Timeline loans={loans} /> : (
       <section className="mt-6" aria-label="Lent">
         {open.length === 0 && closed.length === 0 ? (
           <p className="text-body text-soft">Lent money to someone? Flip Spend to Lend when you log it and it shows up here.</p>
@@ -196,7 +236,7 @@ export function LendTab() {
             {showClosed && <ul className="divide-y divide-line">{closed.map(row)}</ul>}
           </>
         )}
-      </section>
+      </section>)}
 
       {confirmOff && (
         <ConfirmDialog

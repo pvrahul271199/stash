@@ -36,7 +36,7 @@ import { SwipeRow } from '../ui/SwipeRow';
 
 function Section({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
   return (
-    <section className="mt-9">
+    <section className="mt-3">
       <div className="mb-3.5">
         <h2 className="text-section font-semibold text-ink">{title}</h2>
         {hint && <p className="mt-0.5 text-[13px] text-soft">{hint}</p>}
@@ -235,8 +235,10 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
         </p>
       ) : null}
 
-      {/* Focus row: always there (fixed height), so turning a focus on or off never moves the page */}
-      <div className="sticky top-0 z-10 -mx-6 mt-2 bg-white/95 px-6 py-1 backdrop-blur">
+      {/* Focus row: on the other tabs it is always there (fixed height), so turning a focus on or off never moves the page.
+          Overview has no focus, so the row is not shown there at all. */}
+      {sec !== 'Overview' && (
+      <div className="sticky top-0 z-10 -mx-6 mt-1 bg-white/95 px-6 backdrop-blur">
         <div className="relative h-8">
           <div aria-hidden={hasFocus} className={`absolute inset-0 flex items-center text-[12px] text-faint transition-opacity duration-300 ${hasFocus ? 'pointer-events-none opacity-0' : 'opacity-100'}`}>
             All spending · tap a category or event to focus
@@ -258,6 +260,7 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
           </div>
         </div>
       </div>
+      )}
       {sec === 'Overview' && (<>
       {/* 1. Summary */}
       <section className="mt-5 rounded-[20px] border border-line bg-white p-5 shadow-sm" aria-label="Summary">

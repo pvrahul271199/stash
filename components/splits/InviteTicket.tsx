@@ -6,8 +6,11 @@ import { useToast } from '@/store/toast';
 import { Eyebrow, FlowBg, PersonStack } from './parts';
 import { QR } from './QR';
 
-/** Invite card: group name, scannable QR, the link, Copy / Share, and (creator only) Close / Reopen invites. */
-export function InviteTicket({ data, me, onClose }: { data: GroupData; me?: string; onClose: () => void }) {
+/** Invite card: group name, scannable QR, the link, Copy / Share, (creator only) Close / Reopen invites, and the leave / delete action. */
+/** Optional leave / delete action shown at the foot of the sheet (the group screen confirms it). */
+export interface InviteRemoval { label: string; hint: string; disabled: boolean; onRun: () => void }
+
+export function InviteTicket({ data, me, onClose, removal }: { data: GroupData; me?: string; onClose: () => void; removal?: InviteRemoval }) {
   const { room, members } = data;
   const toast = useToast((s) => s.show);
   const refresh = useSplitsStore((s) => s.refresh);
@@ -67,6 +70,14 @@ export function InviteTicket({ data, me, onClose }: { data: GroupData; me?: stri
         <p className="mt-3 text-center text-[12px] text-faint">
           {open ? (creator ? 'Close the invite once everyone has joined.' : 'Anyone with this link can join.') : creator ? 'Reopening makes a new link; the old one stops working.' : 'Ask the group creator to reopen invites.'}
         </p>
+        {removal && (
+          <div className="mt-8 flex flex-col items-center pb-2">
+            <button disabled={removal.disabled} onClick={removal.onRun}
+              className="min-h-0 text-[13px] font-medium text-[#2B5083] underline underline-offset-4 active:opacity-60 disabled:text-faint disabled:no-underline">
+              {removal.label}
+            </button>
+            {removal.hint && <p className="mt-2 max-w-[280px] text-center text-[12px] leading-snug text-faint">{removal.hint}</p>}
+          </div>)}
       </div>
     </div>
   );
