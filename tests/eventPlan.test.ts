@@ -203,7 +203,7 @@ describe('shared picture', () => {
     expect(qtyLabel('2')).toBe('× 2');
     expect(qtyLabel('500 g')).toBe('500 g');
     const d = { title: 'Market', dateText: 'Sun', rows: [{ name: 'Milk', qty: '2', price: 60, bought: true }, { name: 'Eggs', qty: '', price: 0, bought: false }], planned: 60, spent: 60, toGo: 0, money: (n: number) => `₹${n}` };
-    expect(planText(d, { strike: true })).toBe('*Market*\nSun\n\n✅ ~Milk~  × 2  –  ₹60\n⬜ Eggs\n\nPlanned: ₹60\nSpent so far: ₹60\nStill to buy: ₹0\n\n– Chelav');
+    expect(planText(d, { strike: true })).toBe('*Market*\nSun\n\n✅ ~Milk~  × 2  –  ₹60\n⬜ Eggs\n\nTotal spent: ₹60\n\n– Chelav');
     expect(planText(d, { strike: false })).toContain('✅ Milk  × 2');
   });
 });

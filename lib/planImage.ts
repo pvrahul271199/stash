@@ -31,6 +31,9 @@ const W = 720;
 const PAD = 48;
 const ROW_H = 68;
 
+/** The one total shown: what was spent, or (nothing bought yet) what the list adds up to. */
+const totalOf = (d: ShareData) => (d.spent > 0 ? { label: 'Total spent', amount: d.spent } : { label: 'Total', amount: d.planned });
+
 /**
  * Plain-text version for "Copy as text". One item per line with a blank line between the sections, so it pastes
  * cleanly into WhatsApp, Notes or a message: title, date, items, totals, sign-off.
@@ -44,9 +47,8 @@ export function planText(d: ShareData, o: ShareOptions): string {
     return `${mark} ${name}${qty}${price}`;
   });
   const out = [`*${d.title}*`, d.dateText, '', ...rows];
-  if (d.planned > 0 || d.spent > 0) {
-    out.push('', `Planned: ${d.money(d.planned)}`, `Spent so far: ${d.money(d.spent)}`, `Still to buy: ${d.money(d.toGo)}`);
-  }
+  const t = totalOf(d);
+  if (t.amount > 0) out.push('', `${t.label}: ${d.money(t.amount)}`);
   out.push('', '– Chelav');
   return out.join('\n');
 }
@@ -61,8 +63,9 @@ const loadIcon = (): Promise<HTMLImageElement | null> =>
 
 export async function renderPlanCanvas(d: ShareData, o: ShareOptions): Promise<HTMLCanvasElement> {
   const icon = await loadIcon();
-  const showTotals = d.planned > 0 || d.spent > 0;
-  const H = PAD + 120 + d.rows.length * ROW_H + (showTotals ? 210 : 40) + 70;
+  const total = totalOf(d);
+  const showTotals = total.amount > 0;
+  const H = PAD + 120 + d.rows.length * ROW_H + (showTotals ? 110 : 40) + 30;
   const c = document.createElement('canvas');
   c.width = W;
   c.height = H;
@@ -95,7 +98,7 @@ export async function renderPlanCanvas(d: ShareData, o: ShareOptions): Promise<H
   let y = PAD + 14;
   text(`SHOPPING LIST · ${d.dateText}`.toUpperCase(), PAD, y, 20, FAINT, 600);
   y += 52;
-  text(d.title, PAD, y, 48, INK, 600, 'left', W - PAD * 2);
+  text(d.title, PAD, y, 48, INK, 600, 'left', W - PAD * 2 - 50);
   y += 38;
   text(`${done} of ${d.rows.length} bought`, PAD, y, 24, SOFT);
   y += 26;
@@ -150,28 +153,18 @@ export async function renderPlanCanvas(d: ShareData, o: ShareOptions): Promise<H
   }
 
   if (showTotals) {
-    y += 46;
-    text('Planned', PAD, y, 26, SOFT);
-    text(d.money(d.planned), W - PAD, y, 26, INK, 400, 'right');
-    y += 42;
-    text('Spent so far', PAD, y, 26, SOFT);
-    text(d.money(d.spent), W - PAD, y, 26, INK, 400, 'right');
-    y += 28;
-    rule(y, true);
-    y += 54;
-    text('Still to buy', PAD, y, 28, INK, 600);
-    text(d.money(d.toGo), W - PAD, y + 4, 48, INK, 600, 'right');
-    y += 20;
+    y += 62;
+    text(total.label, PAD, y, 28, INK, 600);
+    text(d.money(total.amount), W - PAD, y + 4, 48, INK, 600, 'right');
   }
   if (icon) {
-    const size = 44;
-    const x = PAD;
-    const top = H - PAD - size + 14;
+    // very small app icon, top right
+    const size = 30;
     g.save();
     g.beginPath();
-    g.roundRect(x, top, size, size, 11);
+    g.roundRect(W - PAD - size, PAD - 4, size, size, 8);
     g.clip();
-    g.drawImage(icon, x, top, size, size);
+    g.drawImage(icon, W - PAD - size, PAD - 4, size, size);
     g.restore();
   }
   return c;

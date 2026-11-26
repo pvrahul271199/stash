@@ -606,13 +606,15 @@ function Checklist({
         <div className="mt-2 shrink-0">
           <div className="rounded-[18px] border border-line bg-white px-4 pb-3.5 pt-3 shadow-[0_6px_20px_-8px_rgba(30,27,75,0.18)]">
             <dl className="num space-y-1 text-[13px] text-soft">
-              <div className="flex justify-between"><dt>Planned</dt><dd className="text-ink">{livePlanned > 0 ? inr(livePlanned) : '—'}</dd></div>
-              <div className="flex justify-between"><dt>Spent so far</dt><dd className={totals.variance > 0 ? 'text-warm' : 'text-ink'}>{inr(totals.paid)}</dd></div>
+              <div className="flex justify-between"><dt>Bought</dt><dd className="text-ink">{totals.doneCount}</dd></div>
+              <div className="flex justify-between"><dt>Not bought yet</dt><dd className="text-ink">{totals.count - totals.doneCount}</dd></div>
             </dl>
             <div className="my-2.5 border-t-[1.5px] border-dashed border-line" aria-hidden="true" />
             <div className="flex items-baseline justify-between">
-              <span className="text-[13px] font-semibold text-ink">{open.length === 0 ? 'All bought' : 'Still to buy'}</span>
-              <span className="num text-[24px] font-semibold leading-none text-ink">{open.length === 0 ? '✓' : liveToGo > 0 ? inr(liveToGo) : '—'}</span>
+              <span className="text-[13px] font-semibold text-ink">{totals.paid > 0 ? 'Total spent' : 'Total'}</span>
+              <span className="num text-[24px] font-semibold leading-none text-ink">
+                {totals.paid > 0 ? inr(totals.paid) : livePlanned > 0 ? inr(livePlanned) : '—'}
+              </span>
             </div>
           </div>
           <label className="mt-2 flex h-10 items-center justify-between gap-3">
