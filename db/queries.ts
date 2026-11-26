@@ -56,6 +56,10 @@ import { LEND_CATEGORY, remaining, validateLoan, loanEffects, type LoanKind } fr
 import { DEFAULT_INCOME_SOURCE, incomeEffects, validateIncome } from '@/lib/income';
 import { uuidv7 } from '@/lib/uuid';
 import { roundMoney } from '@/lib/money';
+import {
+  addItem, itemState, normalizeItems, planTotals, removeItem, setItemTxn, updateItem, validateAmount,
+  type EventItem, type ItemState, type ItemTxn, type PlanTotals,
+} from '@/lib/eventPlan';
 
 /* ---------- helpers ---------- */
 
@@ -1385,6 +1389,182 @@ export async function startEvent(name: string, note?: string | null): Promise<st
 
 export async function endEvent(): Promise<void> {
   await getDB().meta.update('main', { activeEvent: null });
+}
+
+/* ---------- event checklist (occasions): lib/eventPlan.ts, docs/FLOWS.md 19c ---------- */
+
+/** The spends the items point at, keyed by id (dead or missing ones are simply absent or flagged by `deletedAt`). */
+async function itemTxnMap(db: StashDB, items: readonly EventItem[]): Promise<Map<string, ItemTxn>> {
+  const ids = items.map((i) => i.txnId).filter((x): x is string => !!x);
+  const rows = ids.length ? await db.transactions.bulkGet(ids) : [];
+  const m = new Map<string, ItemTxn>();
+  rows.forEach((t) => t && m.set(t.id, { amount: t.amount, fromSavings: t.fromSavings, deletedAt: t.deletedAt }));
+  return m;
+}
+
+export interface PlannedItem {
+  item: EventItem;
+  state: ItemState;
+}
+export interface EventPlanView {
+  event: StashEvent;
+  items: PlannedItem[];
+  totals: PlanTotals;
+}
+
+async function loadPlan(db: StashDB, ev: StashEvent): Promise<EventPlanView> {
+  const items = normalizeItems(ev.items);
+  const txns = await itemTxnMap(db, items);
+  return { event: ev, items: items.map((item) => ({ item, state: itemState(item, txns) })), totals: planTotals(items, txns) };
+}
+
+/** Non-hook read of one occasion (used by tests and one-off checks). */
+export async function getEventPlan(eventId: string): Promise<EventPlanView | null> {
+  const db = getDB();
+  const ev = await liveEvent(db, eventId);
+  return ev ? loadPlan(db, ev) : null;
+}
+
+/** One occasion with its items; `null` once the event is deleted. Re-reads when the event or any spend changes. */
+export function useEventPlan(eventId: string | null): EventPlanView | null | undefined {
+  return useLiveQuery(async () => {
+    if (!eventId) return null;
+    const db = getDB();
+    const ev = await db.evts.get(eventId);
+    return ev && alive(ev) ? loadPlan(db, ev) : null;
+  }, [eventId]);
+}
+
+/** Every event that has a checklist, newest first. */
+export function useOccasions(): EventPlanView[] | undefined {
+  return useLiveQuery(async () => {
+    const db = getDB();
+    const evs = (await db.evts.toArray()).filter((e) => alive(e) && normalizeItems(e.items).length > 0);
+    evs.sort((a, b) => b.createdAt - a.createdAt);
+    return Promise.all(evs.map((e) => loadPlan(db, e)));
+  }, []);
+}
+
+async function liveEvent(db: StashDB, eventId: string): Promise<StashEvent | null> {
+  const ev = await db.evts.get(eventId);
+  return ev && alive(ev) ? ev : null;
+}
+
+/**
+ * Creates an event together with its checklist. It does NOT turn the event on: planning an occasion and logging into an
+ * event are different jobs (paying an item tags the spend by id, whether or not the event is the active one).
+ */
+export async function createOccasion(
+  name: string,
+  items: { name: string; planned: number }[],
+): Promise<{ error: string | null; id?: string }> {
+  const db = getDB();
+  const trimmed = name.trim();
+  const all = (await db.evts.toArray()).filter(alive);
+  const err = validateName(trimmed, all.map((e) => e.name));
+  if (err) return { error: err };
+  let list: EventItem[] = [];
+  const now = Date.now();
+  for (const it of items) {
+    const r = addItem(list, it.name, it.planned, uuid(), now);
+    if (r.error || !r.items) return { error: `${it.name || 'An item'}: ${r.error ?? 'could not add'}` };
+    list = r.items;
+  }
+  const id = uuid();
+  await db.evts.add({ id, updatedAt: now, name: trimmed, note: null, categories: [], createdAt: now, items: list });
+  requestSync();
+  return { error: null, id };
+}
+
+type ItemEdit = (items: EventItem[], txns: Map<string, ItemTxn>) => { items: EventItem[] | null; error: string | null };
+
+/** Reads the event's items, applies a pure edit, writes the result: all in one transaction. */
+async function editItems(eventId: string, edit: ItemEdit): Promise<string | null> {
+  const db = getDB();
+  let error: string | null = null;
+  await db.transaction('rw', [db.evts, db.transactions], async () => {
+    const ev = await liveEvent(db, eventId);
+    if (!ev) { error = 'That event is gone.'; return; }
+    const cur = normalizeItems(ev.items);
+    const r = edit(cur, await itemTxnMap(db, cur));
+    if (r.error || !r.items) { error = r.error ?? 'Could not save.'; return; }
+    await db.evts.update(eventId, { items: r.items, updatedAt: Date.now() });
+  });
+  if (!error) requestSync();
+  return error;
+}
+
+export const addEventItem = (eventId: string, name: string, planned: number) =>
+  editItems(eventId, (items) => addItem(items, name, planned, uuid(), Date.now()));
+
+export const updateEventItem = (eventId: string, itemId: string, patch: { name?: string; planned?: number }) =>
+  editItems(eventId, (items) => updateItem(items, itemId, patch));
+
+/** Refused while the item is paid: untick it first. */
+export const removeEventItem = (eventId: string, itemId: string) =>
+  editItems(eventId, (items, txns) => removeItem(items, itemId, txns));
+
+/**
+ * Ticks an item: logs a real spend (label = item name, tagged with the event) and links it, in one transaction.
+ * "From savings" never touches the daily amount. Returns an error message, or null.
+ */
+export async function payEventItem(
+  cycle: SpendCycle,
+  eventId: string,
+  itemId: string,
+  opts: { amount: number; fromSavings: boolean; /** ISO day to log it on (the log screen's day); default = the cycle's current day. */ date?: string },
+  now: Date = new Date(),
+): Promise<string | null> {
+  const amountErr = validateAmount(opts.amount);
+  if (amountErr) return amountErr;
+  const db = getDB();
+  const ev0 = await liveEvent(db, eventId);
+  if (!ev0) return 'That event is gone.';
+  const item0 = normalizeItems(ev0.items).find((i) => i.id === itemId);
+  if (!item0) return 'That item is gone.';
+  const txn = await buildTxn(
+    cycle,
+    { amount: opts.amount, label: item0.name, category: ev0.categories[0], event: ev0.name, fromSavings: opts.fromSavings },
+    now,
+    undefined,
+    opts.date,
+  );
+  txn.event = ev0.name;
+  txn.eventId = ev0.id;
+  let error: string | null = null;
+  await db.transaction('rw', [db.transactions, db.meta, db.plans, db.evts], async () => {
+    // re-check under the lock: another tab or device may have changed the item meanwhile
+    const ev = await liveEvent(db, eventId);
+    const items = normalizeItems(ev?.items);
+    const item = items.find((i) => i.id === itemId);
+    if (!ev || !item) { error = 'That item is gone.'; return; }
+    if (itemState(item, await itemTxnMap(db, [item])).paid) { error = 'That item is already paid.'; return; }
+    await extendTrackingStart(db, txn.txnDate);
+    await db.transactions.add(txn);
+    await db.evts.update(eventId, { items: setItemTxn(items, itemId, txn.id), updatedAt: Date.now() });
+  });
+  if (!error) requestSync();
+  return error;
+}
+
+/** Unticks an item: removes the spend that paid it and makes the item a plan again. */
+export async function unpayEventItem(eventId: string, itemId: string): Promise<string | null> {
+  const db = getDB();
+  let error: string | null = null;
+  await db.transaction('rw', [db.evts, db.transactions], async () => {
+    const ev = await liveEvent(db, eventId);
+    const items = normalizeItems(ev?.items);
+    const item = items.find((i) => i.id === itemId);
+    if (!ev || !item) { error = 'That item is gone.'; return; }
+    const now = Date.now();
+    if (item.txnId) {
+      const t = await db.transactions.get(item.txnId);
+      if (t && alive(t)) await db.transactions.update(t.id, { deletedAt: now, updatedAt: now });
+    }
+    await db.evts.update(eventId, { items: setItemTxn(items, itemId, null), updatedAt: now });
+  });
+  if (!error) requestSync();
+  return error;
 }
 
 /* ---------- sample data ---------- */

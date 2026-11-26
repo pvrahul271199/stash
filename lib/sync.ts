@@ -1,3 +1,4 @@
+import { normalizeItems } from './eventPlan';
 import Dexie from 'dexie';
 import { getDB, getActiveDBUid, dbNameFor, GUEST_UID, nextRev, withoutRevStamp, type CategoryRow, type Income, type LeftoverSaving, type MonthRecap, type Loan, type Plan, type StashDB, type StashEvent, type SyncBase, type SyncFailure, type Txn } from '@/db/schema';
 import { getAuth, getAccessToken } from './auth';
@@ -168,6 +169,7 @@ export const MAPPERS = {
       name: e.name,
       note: e.note,
       categories: e.categories,
+      items: normalizeItems(e.items),
       created_at: e.createdAt,
     }),
     toLocal: (r: Remote): StashEvent => ({
@@ -177,6 +179,7 @@ export const MAPPERS = {
       name: r.name as string,
       note: (r.note as string | null) ?? null,
       categories: (r.categories as string[]) ?? [],
+      items: normalizeItems(r.items),
       createdAt: r.created_at as number,
     }),
   },
