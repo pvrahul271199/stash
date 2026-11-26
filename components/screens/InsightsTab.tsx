@@ -4,11 +4,13 @@ import { DayChart, type ChartMode } from '../charts/DayChart';
 import { CategoryList, Donut } from '../charts/Donut';
 import { TimeOfDayChart, WeekdayChart } from '../charts/WeekdayTime';
 import { Note } from '../ui/Chip';
-import { dayRowsOf, useSavedFromLeftovers, useAllCycles, useCategories, useCycleEntries, useEvents, useIncomes } from '@/db/queries';
+import { dayRowsOf, useOccasions, useSavedFromLeftovers, useAllCycles, useCategories, useCycleEntries, useEvents, useIncomes } from '@/db/queries';
 import { incomeBetween } from '@/lib/income';
 import type { Entry, Plan } from '@/db/schema';
 import { AtAGlance } from './AtAGlance';
 import { EditSpendSheet } from './EditSpendSheet';
+import { EventPlanSheet } from './EventPlanSheet';
+import { OccasionCards } from './OccasionCards';
 import { monthLabel, type DerivedCycle } from '@/lib/period';
 import {
   MIN_CLOSED_DAYS,
@@ -71,6 +73,9 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
   const [mode, setMode] = useState<ChartMode>('each');
   const [sec, setSec] = useState<InsightsSec>('Overview');
   const [editing, setEditing] = useState<Entry | null>(null);
+  /** An occasion opened from the Occasions block (the checklist sheet). */
+  const [planFor, setPlanFor] = useState<string | null>(null);
+  const occasions = useOccasions();
   const entries = useCycleEntries(cycle?.id);
   const rows = useMemo(() => (cycle ? dayRowsOf(cycle) : undefined), [cycle]);
   const cats = useCategories();
@@ -520,6 +525,11 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
 
       </>)}
       {sec === 'Events' && (<>
+      {/* 4a. Occasions: planned checklists, above the plain tagged events */}
+      <OccasionCards onOpen={current ? setPlanFor : undefined} />
+      {evList.length === 0 && occasions && occasions.length === 0 && (
+        <p className="mt-3 text-[13px] text-soft">Events you tag, and occasions you plan, show up here.</p>
+      )}
       {/* 4b. By event (with sub-categories breakdown) */}
       {evList.length > 0 && (
       <Section title="By event" hint="Trips, parties, anything you tagged.">
@@ -722,6 +732,7 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
       </Section>
       </>)}
       {editing && <EditSpendSheet entry={editing} onClose={() => setEditing(null)} />}
+      {planFor && current && <EventPlanSheet cycle={current} start={{ k: 'list', eventId: planFor }} onClose={() => setPlanFor(null)} />}
     </div>
     <div className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center">
       <div role="tablist" aria-label="Insights sections" className="pointer-events-auto flex gap-1 rounded-full border border-line bg-white/95 p-1 shadow-lg backdrop-blur">

@@ -120,7 +120,7 @@ Tapping the logo on Today sets `forceWelcome` (AppShell) and shows `Welcome`. Gu
 
 - Create/delete in `UserTab`/`EventSheet`; quick-create inside `LogSpend` via `startEvent`.
 - `meta.activeEvent` tags **every** new spend (including back-dated ones) until `endEvent()`; never auto-expires. ⚠ F-19.
-- `removeEvent` untags entries; `removeCategory` moves entries to "Other" and strips the category from events.
+- `removeEvent` untags entries (and drops the event's checklist, see 19d); `removeCategory` moves entries to "Other" and strips the category from events.
 
 ## 13. Categories
 
@@ -166,6 +166,17 @@ Tapping the logo on Today sets `forceWelcome` (AppShell) and shows `Welcome`. Gu
 3. `cycleFor` / `allCycles` pass `incomeEffects(incomes)` as credits to `buildCycle`, so the pool rises and every remaining day gets more; plan amount, spends and Insights spend totals are unchanged.
 4. History shows it on its day as "+₹X, income, not a spend" (× removes it) and as a month line; Insights adds a line under the summary. Spent totals and the calendar cells never include it.
 5. User tab has a collapsed "Additional income" section (total on the header) listing this month's incomes; the × (`removeIncome`) soft-deletes and the daily amount drops back.
+
+## 19d. Event checklist / occasions (E-EVENT-PLAN)
+An *occasion* is an event with a checklist of planned items ("Decoration ₹3,000"). **Planning** (what will it cost) and **logging** (tag the spends I enter now) are different jobs and are kept apart: creating or ticking an occasion never turns the event on (`meta.activeEvent`), and a planned item never touches the pool.
+1. Log screen > the event pill opens the menu with two tiles: **Log into an event** (the existing tag chips, unchanged) and **Plan an occasion** (opens `EventPlanSheet`). Insights > Events shows an **Occasions** block on top (`OccasionCards`, planned vs paid, whole occasion, not per month) and tapping one opens the same sheet.
+2. `EventPlanSheet` hub: the occasions (`useOccasions`: events whose `items` is non-empty) with "3/6 paid · ₹X to go", "+ New occasion", and chips for plain events that can get a checklist. With no occasions yet it goes straight to *New*.
+3. *New occasion* (2 steps): name (same rules as any event: <= 24 chars, unique), then items (name <= 40 chars, amount > 0, <= 2 decimals, no duplicate names, up to 80). "Create occasion" needs at least one item; `createOccasion` writes the event and items in one transaction and does not activate it.
+4. Checklist (plain list): header "₹paid paid of ₹planned planned · 2 of 4 done", a bar, "₹X over/under plan so far", "₹Y of it from savings". Rows: round check, name, planned amount (paid rows show the real amount and "+₹50 over"/"₹50 under", and a *savings* tag). `Edit` switches rows to inputs (rename, change plan, × remove). `+ Add item` is the last row (`addEventItem`).
+5. Tick an unpaid item -> `EventPaySheet`: amount pre-filled with the plan (calc keypad), `Daily budget | From savings`, and a line from `payEffect` ("Today goes to -₹6,051.80. From tomorrow -₹1,064.75 a day." plus a warning when it is more than the month has left; for savings "Your daily amount stays the same."). *Mark as paid* -> `payEventItem`: one transaction that re-checks the item is still unpaid, adds a normal spend (label = item name, event and `eventId` set, category = the event's first category else resolved from the label, `fromSavings` as chosen) and stores its id in `item.txnId`. If the log screen was opened for another day the spend goes on that day.
+6. Tick a paid item -> inline "Remove the ₹X spend and untick?" -> `unpayEventItem` soft-deletes the spend and clears `txnId`; the pool is back.
+7. **"Paid" is never stored**: an item is paid while the txn its `txnId` points at is alive (`itemState`). Edit the amount in History and the checklist shows the new actual; delete the spend anywhere (`removeEntry`, another device) and the item unticks by itself. A paid item cannot be removed (untick first).
+8. Rename keeps items (they ride on the event row). `removeEvent` untags paid spends as always and drops the checklist; the confirm says so. Sync: `items` travels in the `events` row (`MAPPERS.events`, `normalizeItems` on the way in and out; field-level merge treats it as one field, last write wins). Guest -> account claim copies events and spends with their ids, so links hold. Escape inside the sheet closes only the sheet.
 
 ## 20. PWA install / update / offline
 
