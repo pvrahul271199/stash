@@ -11,6 +11,7 @@ import { MAX_ITEMS, MAX_ITEM_NAME, validateItem, type PlanTotals } from '@/lib/e
 import { inr } from '@/lib/format';
 import type { DerivedCycle } from '@/lib/period';
 import { useToast } from '@/store/toast';
+import { useUI } from '@/store/ui';
 import { captureEvent } from '@/lib/analytics';
 
 type View =
@@ -69,7 +70,11 @@ export function EventPlanSheet({
             canGoBack={!!occasions && occasions.length > 0}
             onBack={() => setView({ k: 'hub' })}
             onClose={onClose}
-            onCreated={(eventId) => setView({ k: 'list', eventId })}
+            onCreated={() => {
+              // land on Insights > Events, where the new occasion sits at the top
+              useUI.getState().goToInsightsEvents();
+              onClose();
+            }}
           />
         )}
         {effective.k === 'list' && (
@@ -243,7 +248,7 @@ function Hub({ onClose, onOpen, onNew }: { onClose: () => void; onOpen: (id: str
       </PrimaryButton>
       {plain.length > 0 && (
         <div className="mt-5 border-t border-line pt-4">
-          <p className="text-[12px] text-soft">Add a checklist to an event you already have</p>
+          <p className="text-[12px] text-soft">Turn an event you already have into an occasion</p>
           <div className="mt-2 flex flex-wrap gap-1.5">
             {plain.map((e) => (
               <button
@@ -277,7 +282,7 @@ function NewOccasion({ canGoBack, onBack, onClose, onCreated }: { canGoBack: boo
     const t = name.trim();
     if (!t) return setErr('Give it a name first.');
     if (t.length > MAX_NAME) return setErr(`Keep it to ${MAX_NAME} characters or less.`);
-    if (events.some((e) => e.name.trim().toLowerCase() === t.toLowerCase())) return setErr('You already have an event with that name.');
+    if (events.some((e) => e.name.trim().toLowerCase() === t.toLowerCase())) return setErr('You already have an occasion or event with that name.');
     setErr(null);
     setStep(2);
   }
@@ -382,7 +387,7 @@ function Checklist({ eventId, onBack, onClose, onPay }: { eventId: string; onBac
     return (
       <>
         <Header title="Occasion" onClose={onClose} />
-        <p className="mt-4 text-[14px] text-soft">This event was deleted.</p>
+        <p className="mt-4 text-[14px] text-soft">This occasion was deleted.</p>
         <PrimaryButton className="mt-4 h-[46px] min-h-0 text-[15px]" onClick={onBack}>
           Back
         </PrimaryButton>

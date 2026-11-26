@@ -108,6 +108,15 @@ export function AppShell() {
   const [tab, setTab] = useState<Tab>('today');
   /** Which section History opens on: the Today card for money that is due jumps straight to Lend. */
   const [historyTab, setHistoryTab] = useState<'spends' | 'lend'>('spends');
+  // Flows that end on another screen (a new occasion -> Insights > Events) ask for it through the UI store.
+  const tabRequest = useUI((s) => s.tabRequest);
+  const clearTabRequest = useUI((s) => s.clearTabRequest);
+  useEffect(() => {
+    if (!tabRequest) return;
+    setHistoryTab('spends');
+    setTab(tabRequest);
+    clearTabRequest();
+  }, [tabRequest, clearTabRequest]);
   const [busy, setBusy] = useState(false);
   const [showDemo, setShowDemo] = useState(false);
   // New plans track from today by default; the user may pick any earlier day of this month on the calendar.

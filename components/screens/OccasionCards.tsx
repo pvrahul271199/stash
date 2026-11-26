@@ -1,6 +1,7 @@
 'use client';
 import { useOccasions, type EventPlanView } from '@/db/queries';
 import { inr1 } from '@/lib/format';
+import { Disclosure } from '../ui/Disclosure';
 
 /**
  * Insights > Events, top block: occasions you plan with a checklist. Looks different from the "By event" cards on
@@ -9,12 +10,15 @@ import { inr1 } from '@/lib/format';
 export function OccasionCards({ onOpen }: { onOpen?: (eventId: string) => void }) {
   const occasions = useOccasions();
   if (!occasions || occasions.length === 0) return null;
+  const paid = occasions.reduce((t, o) => t + o.totals.paid, 0);
+  const planned = occasions.reduce((t, o) => t + o.totals.planned, 0);
   return (
-    <section className="mt-3" aria-label="Occasions">
-      <div className="mb-3.5">
-        <h2 className="text-section font-semibold text-ink">Occasions</h2>
-        <p className="mt-0.5 text-[13px] text-soft">What you planned for, and what is paid. Whole occasion, not just this month.</p>
-      </div>
+    <Disclosure
+      title="Occasions"
+      hint="What you planned for, and what is paid. Whole occasion, not just this month."
+      summary={`${occasions.length} ${occasions.length === 1 ? 'occasion' : 'occasions'} · ${inr1(paid)} of ${inr1(planned)}`}
+      storageKey="stash:insights:occasions"
+    >
       <ul className="flex flex-col gap-3">
         {occasions.map((o) => (
           <li key={o.event.id}>
@@ -22,7 +26,7 @@ export function OccasionCards({ onOpen }: { onOpen?: (eventId: string) => void }
           </li>
         ))}
       </ul>
-    </section>
+    </Disclosure>
   );
 }
 

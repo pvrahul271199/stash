@@ -11,6 +11,7 @@ import { AtAGlance } from './AtAGlance';
 import { EditSpendSheet } from './EditSpendSheet';
 import { EventPlanSheet } from './EventPlanSheet';
 import { OccasionCards } from './OccasionCards';
+import { Disclosure } from '../ui/Disclosure';
 import { monthLabel, type DerivedCycle } from '@/lib/period';
 import {
   MIN_CLOSED_DAYS,
@@ -71,7 +72,18 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
   const [focusType, setFocusType] = useState<string | null>(null);
   const [focusEvent, setFocusEvent] = useState<string | null>(null);
   const [mode, setMode] = useState<ChartMode>('each');
-  const [sec, setSec] = useState<InsightsSec>('Overview');
+  const [sec, setSec] = useState<InsightsSec>(() => {
+    const want = useUI.getState().insightsSec;
+    return (INSIGHTS_SECS as readonly string[]).includes(want ?? '') ? (want as InsightsSec) : 'Overview';
+  });
+  // Asked to open a section (a new occasion lands on Events): jump there, once.
+  const wantSec = useUI((s) => s.insightsSec);
+  const clearWantSec = useUI((s) => s.clearInsightsSec);
+  useEffect(() => {
+    if (!wantSec) return;
+    if ((INSIGHTS_SECS as readonly string[]).includes(wantSec)) setSec(wantSec as InsightsSec);
+    clearWantSec();
+  }, [wantSec, clearWantSec]);
   const [editing, setEditing] = useState<Entry | null>(null);
   /** An occasion opened from the Occasions block (the checklist sheet). */
   const [planFor, setPlanFor] = useState<string | null>(null);
@@ -529,7 +541,12 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
       )}
       {/* 4b. By event (with sub-categories breakdown) */}
       {evList.length > 0 && (
-      <Section title="By event" hint="Trips, parties, anything you tagged.">
+      <Disclosure
+        title="By event"
+        hint="Trips, parties, anything you tagged."
+        summary={`${evList.length} ${evList.length === 1 ? 'event' : 'events'} · ${inr1(evList.reduce((t, e) => t + e.total, 0))}`}
+        storageKey="stash:insights:events"
+      >
         {(
           <ul className="flex flex-col gap-3">
             {evList.map((ev) => {
@@ -598,7 +615,7 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
             })}
           </ul>
         )}
-      </Section>
+      </Disclosure>
       )}
 
       </>)}

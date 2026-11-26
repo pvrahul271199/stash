@@ -15,6 +15,7 @@ import {
   startEvent,
   useActiveEvent,
   useEvents,
+  useOccasions,
   useLastPayment,
   useLoans,
   useCategories,
@@ -121,6 +122,7 @@ export function LogSpend({
   const payment = paymentOverride ?? lastPayment;
   const activeEvent = useActiveEvent();
   const events = useEvents() ?? [];
+  const occasions = useOccasions() ?? [];
   const toast = useToast((s) => s.show);
   const { currency } = useCurrency();
   const cats = useCategories() ?? [];
@@ -414,9 +416,6 @@ export function LogSpend({
             </IconButton>
 
             <div className="relative flex min-w-0 items-center gap-1">
-              {showEventHint && view === 'keypad' && !eventMenuOpen && !activeEvent && events.length === 0 && (
-                <EventHint onDone={endEventHint} />
-              )}
               <button
                 type="button"
                 onClick={() => {
@@ -480,7 +479,30 @@ export function LogSpend({
               )}
             </div>
 
-            <span className="w-7 shrink-0" aria-hidden="true" />
+            {/* Plan an occasion: a small icon, top right. The first-time hint points at it and stays perfectly still. */}
+            <div className="relative -mr-2 h-9 w-9 shrink-0">
+              {showEventHint && view === 'keypad' && !eventMenuOpen && !planOpen && occasions.length === 0 && (
+                <EventHint onDone={endEventHint} />
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  endEventHint();
+                  setEventMenuOpen(false);
+                  setPlanOpen(true);
+                }}
+                aria-label="Plan an occasion"
+                title="Plan an occasion"
+                className="flex h-9 w-9 min-h-0 items-center justify-center rounded-full text-soft transition-colors hover:text-ink active:bg-tint"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <rect x="5" y="4" width="14" height="17" rx="2.5" />
+                  <path d="M9.5 3.5h5v3h-5z" />
+                  <path d="M8.5 12l1.4 1.4L12 11.3" />
+                  <path d="M13.5 12.5h2.5M8.5 17h7.5" />
+                </svg>
+              </button>
+            </div>
 
             {eventMenuOpen && (
               <>
@@ -494,24 +516,6 @@ export function LogSpend({
                   aria-label="Event switcher"
                   className="absolute left-1/2 top-full z-30 mt-2 w-[268px] -translate-x-1/2 rounded-note border border-ink/20 bg-white p-3 shadow-[0_12px_32px_-8px_rgba(30,27,75,0.16)]"
                 >
-                  {/* Two different jobs, said in plain words: tag spends you log now, or plan what an occasion will cost. */}
-                  <div className="grid grid-cols-2 gap-1.5 pb-2.5">
-                    <div className="flex flex-col items-start gap-0.5 rounded-[12px] border border-ink bg-tint px-2.5 py-2">
-                      <span className="text-[12px] font-semibold text-ink">Log into an event</span>
-                      <span className="text-[10.5px] leading-snug text-soft">Tag the spends you log now</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEventMenuOpen(false);
-                        setPlanOpen(true);
-                      }}
-                      className="flex min-h-0 flex-col items-start gap-0.5 rounded-[12px] border border-line bg-white px-2.5 py-2 text-left transition-colors hover:border-ink/40"
-                    >
-                      <span className="text-[12px] font-semibold text-ink">Plan an occasion</span>
-                      <span className="text-[10.5px] leading-snug text-soft">Items and amounts to tick off</span>
-                    </button>
-                  </div>
                   <div className="flex items-center justify-between pb-2">
                     <span className="text-[11px] font-semibold tracking-wide text-soft">Event tag</span>
                     {activeEvent && (
