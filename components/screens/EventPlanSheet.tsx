@@ -444,7 +444,7 @@ function Checklist({
           totals && totals.count > 0 ? (
             <span className="num">{open.length === 0 ? `All ${totals.count} bought` : `${open.length} of ${totals.count} to buy`}</span>
           ) : (
-            'Planning to buy many things? List them all here, add prices if you know them, and tick each one off as you buy it.'
+            'Planning to buy many things? List them here and tick each off.'
           )
         }
       />
