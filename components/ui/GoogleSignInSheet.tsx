@@ -81,7 +81,7 @@ export function GoogleSignInSheet({
         aria-modal="true"
         aria-labelledby="gs-title"
         onClick={(e) => e.stopPropagation()}
-        className="max-h-[94%] w-full overflow-y-auto rounded-t-[28px] bg-white px-6 pt-3"
+        className="max-h-[94%] w-full overflow-y-auto rounded-t-[28px] bg-white px-6 pt-3 [scrollbar-gutter:stable]"
         style={{ paddingBottom: 'calc(var(--safe-bottom) + 20px)' }}
       >
         <div className="mx-auto mb-4 h-1 w-9 rounded-full bg-line" aria-hidden="true" />
@@ -125,11 +125,11 @@ export function GoogleSignInSheet({
             Google sign-in isn&apos;t available right now. Check your connection and try again in a moment.
           </p>
         ) : (
-          <div className="relative mt-4 min-h-[44px] w-full rounded-full bg-white">
+          <div className="relative mt-4 h-[44px] w-full overflow-hidden rounded-full bg-white">
             {/* the button fades in once Google has drawn it, and the placeholder fades out: nothing pops or blinks */}
             <div
               ref={host}
-              className={`flex w-full justify-center transition-opacity duration-300 ${ready ? 'opacity-100' : 'opacity-0'}`}
+              className={`flex h-[44px] w-full items-center justify-center transition-opacity duration-300 ${ready ? 'opacity-100' : 'opacity-0'}`}
               aria-label="Continue with Google"
             />
             <div
@@ -147,11 +147,10 @@ export function GoogleSignInSheet({
             )}
           </div>
         )}
-        {error && (
-          <p role="alert" className="mt-2 text-center text-[13px] text-warm">
-            {error}
-          </p>
-        )}
+        {/* always one line tall, so an error appearing or clearing never resizes the sheet */}
+        <p role={error ? 'alert' : undefined} className="mt-2 min-h-[20px] text-center text-[13px] text-warm">
+          {error}
+        </p>
 
         <div className="mt-3 flex items-start justify-center gap-1.5 px-2 text-center text-[11px] leading-snug text-faint">
           <p>By continuing you agree to your plan and spends being backed up to your account.</p>

@@ -606,8 +606,8 @@ function Checklist({
         <div className="mt-2 shrink-0">
           <div className="rounded-[18px] border border-line bg-white px-4 pb-3.5 pt-3 shadow-[0_6px_20px_-8px_rgba(30,27,75,0.18)]">
             <dl className="num space-y-1 text-[13px] text-soft">
-              <div className="flex justify-between"><dt>Bought</dt><dd className="text-ink">{totals.doneCount}</dd></div>
-              <div className="flex justify-between"><dt>Not bought yet</dt><dd className="text-ink">{totals.count - totals.doneCount}</dd></div>
+              <div className="flex justify-between"><dt>Total items</dt><dd className="text-ink">{totals.count}</dd></div>
+              <div className="flex justify-between"><dt>Items bought</dt><dd className="text-ink">{totals.doneCount}</dd></div>
             </dl>
             <div className="my-2.5 border-t-[1.5px] border-dashed border-line" aria-hidden="true" />
             <div className="flex items-baseline justify-between">

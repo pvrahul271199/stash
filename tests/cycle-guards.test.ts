@@ -283,6 +283,20 @@ describe('last month\'s summary and the sample month', () => {
     await exitSampleMode();
   });
 
+  it('sample data has four plans: partly bought, not started, all bought; bought priced items link a live spend', async () => {
+    day('2026-11-25');
+    await enterSampleMode(new Date(2026, 10, 25, 12));
+    const db = getDB();
+    const { normalizeItems } = await import('@/lib/eventPlan');
+    const plans = (await db.evts.toArray()).filter((e) => normalizeItems(e.items).length > 0);
+    expect(plans.map((e) => e.name).sort()).toEqual(['Diwali shopping', 'Riya’s birthday', 'Sunday market', 'Trip packing']);
+    const txns = new Map((await db.transactions.toArray()).map((t) => [t.id, t]));
+    const bought = (name: string) => normalizeItems(plans.find((e) => e.name === name)!.items).filter((i) => i.txnId && txns.get(i.txnId)?.deletedAt == null).length;
+    expect([bought('Sunday market'), bought('Riya’s birthday'), bought('Diwali shopping'), bought('Trip packing')]).toEqual([3, 2, 0, 4]);
+    expect(normalizeItems(plans[0].items).every((i) => i.qty)).toBe(true);
+    await exitSampleMode();
+  });
+
   it('on the 1st the sample is last month in full and this month is still empty', async () => {
     day('2026-11-01');
     await enterSampleMode(new Date(2026, 10, 1, 12));

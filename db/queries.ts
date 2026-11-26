@@ -1646,6 +1646,46 @@ export async function fillSample(now: Date = new Date()): Promise<void> {
         });
       });
     }
+    // Four sample plans (rough-book lists): some half bought, one not started, one all bought. A bought item with a price
+    // has a real spend linked to it, exactly as ticking it in the app would have made.
+    const catOf = (name: string) => cats.find((c) => c.name === name);
+    const samplePlans: { name: string; cat: string; ago: number; items: [string, string, number, number | null][] }[] = [
+      { name: 'Sunday market', cat: 'Food', ago: 1, items: [
+        ['Tomatoes', '1 kg', 60, 60], ['Onions', '2 kg', 80, 84], ['Coriander', '1 bunch', 20, 20], ['Paneer', '250 g', 110, null],
+        ['Milk', '2', 136, null], ['Eggs', '1 dozen', 96, null], ['Bananas', '6', 48, null], ['Atta', '5 kg', 250, null],
+      ] },
+      { name: 'Riya’s birthday', cat: 'Fun', ago: 3, items: [
+        ['Cake', '1', 900, 950], ['Balloons', '1 pack', 250, 240], ['Candles', '1 pack', 80, null], ['Snacks', '2 kg', 1200, null], ['Return gifts', '10', 1500, null],
+      ] },
+      { name: 'Diwali shopping', cat: 'Shopping', ago: 0, items: [
+        ['Diyas', '24', 150, null], ['Sweets', '1 kg', 600, null], ['Rangoli colours', '1 set', 120, null], ['New clothes', '3', 3000, null], ['Fairy lights', '2', 450, null],
+      ] },
+      { name: 'Trip packing', cat: 'Travel', ago: 5, items: [
+        ['Bus tickets', '2', 1200, 1200], ['Sunscreen', '1', 350, 320], ['Power bank', '1', 1200, 1150], ['Road snacks', '1 pack', 300, 280],
+      ] },
+    ];
+    const planEvents: StashEvent[] = [];
+    samplePlans.forEach((p, pi) => {
+      const evId = uuid();
+      const cat = catOf(p.cat);
+      const dayIso = addDays(today, -Math.max(1, p.ago));
+      const items: EventItem[] = p.items.map(([name, qty, planned, paid], ii) => {
+        const id = uuid();
+        let linked: string | null = null;
+        if (paid != null && dayIso >= startDate) {
+          linked = txnId();
+          txns.push({
+            id: linked, updatedAt: stamp, txnDate: dayIso, amount: paid, label: name,
+            type: cat?.name ?? 'Other', categoryId: cat?.id ?? 'other', subtype: null,
+            event: p.name, eventId: evId, payment: 'UPI', note: null, fromSavings: false, adjustsPool: true, isEstimate: false,
+            hour: 11, createdAt: new Date(`${dayIso}T11:00:00`).getTime() + ii,
+          });
+        }
+        return { id, name, qty, planned, txnId: linked, createdAt: stamp - pi * 1000 + ii };
+      });
+      planEvents.push({ id: evId, updatedAt: stamp, name: p.name, note: null, categories: [], createdAt: stamp - 10_000 + pi * 1000, items });
+    });
+    await db.evts.bulkAdd(planEvents);
     await db.transactions.bulkAdd(txns);
   });
 }
