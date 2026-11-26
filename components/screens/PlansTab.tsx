@@ -22,15 +22,9 @@ export function PlansTab({ cycle }: { cycle: DerivedCycle }) {
   }, [wantNew]);
   if (!plans) return null;
   return (
-    <div className="mt-2">
-      <p className="mb-3 text-[13px] text-soft">Planning to buy many things? List them all here, add prices if you know them, and tick each one off as you buy it.</p>
-      <button
-        type="button"
-        onClick={() => setOpen({ eventId: null })}
-        className="flex min-h-0 w-full items-center gap-3 rounded-note border-[1.5px] border-dashed border-line px-4 py-3.5 text-left text-[15px] font-medium text-ink hover:border-ink"
-      >
-        <span className="text-[18px] leading-none">+</span> New plan
-      </button>
+    <div className="mt-2 flex min-h-0 flex-1 flex-col">
+      <div className="min-h-0 flex-1 overflow-y-auto px-6">
+      <p className="mb-3 text-[13px] text-soft">Your rough books for the market, a party, a trip. Scribble what you need, add prices if you know them, and tick each thing off as it goes in the bag.</p>
       {plans.length === 0 ? null : (
         <ul className="mt-2 divide-y divide-line">
           {plans.map(({ event, totals }) => {
@@ -54,6 +48,16 @@ export function PlansTab({ cycle }: { cycle: DerivedCycle }) {
           })}
         </ul>
       )}
+      </div>
+      <div className="shrink-0 bg-white px-6 pb-4 pt-3">
+        <button
+          type="button"
+          onClick={() => setOpen({ eventId: null })}
+          className="flex h-[50px] min-h-0 w-full items-center justify-center gap-2 rounded-btn border border-line bg-white text-[15px] font-semibold text-ink shadow-[0_6px_18px_-6px_rgba(30,27,75,0.28)]"
+        >
+          <span className="text-[18px] leading-none">+</span> New plan
+        </button>
+      </div>
       {open && <EventPlanSheet cycle={cycle} start={{ k: 'list', eventId: open.eventId }} onClose={() => setOpen(null)} />}
     </div>
   );

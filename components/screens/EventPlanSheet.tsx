@@ -2,16 +2,17 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { CloseIcon, IconButton, PrimaryButton } from '../ui/Button';
 import {
-  addEventItem, createOccasion, payEventItem, removeEvent, removeEventItem, renameEvent, unpayEventItem, updateEventItem, useEventPlan, useOccasions,
+  addEventItem, createOccasion, payEventItem, removeEvent, removeEventItem, renameEvent, tickEventItem, unpayEventItem, updateEventItem, useEventPlan, useOccasions,
   type PlannedItem,
 } from '@/db/queries';
 import { MAX_NAME } from '@/lib/categories';
-import { MAX_ITEMS, MAX_ITEM_NAME, defaultPlanName, parseQuickItem, validateItem, type PlanTotals } from '@/lib/eventPlan';
+import { MAX_ITEMS, MAX_ITEM_NAME, MAX_QTY, cleanQty, defaultPlanName, parseQuickItem, validateItem, type PlanTotals } from '@/lib/eventPlan';
 import { inr } from '@/lib/format';
 import { clockISO, dateOfDay } from '@/lib/dates';
 import type { DerivedCycle } from '@/lib/period';
 import { useToast } from '@/store/toast';
 import { captureEvent } from '@/lib/analytics';
+import { planBlob, planText, type ShareData } from '@/lib/planImage';
 
 type View =
   | { k: 'hub' }
@@ -58,7 +59,7 @@ export function EventPlanSheet({
         aria-modal="true"
         aria-label="Plan"
         onClick={(e) => e.stopPropagation()}
-        className="plan-up flex h-[90%] w-full flex-col rounded-t-[24px] bg-white px-6 pt-4"
+        className="plan-up relative flex h-[90%] w-full flex-col rounded-t-[24px] bg-white px-6 pt-4"
         style={{ paddingBottom: 'calc(var(--safe-bottom) + 20px)' }}
       >
         {effective.k === 'hub' && <Hub onClose={onClose} onOpen={(eventId) => setView({ k: 'list', eventId })} onNew={() => setView({ k: 'list', eventId: null })} />}
@@ -83,22 +84,129 @@ export function EventPlanSheet({
 
 /* ---------- shared bits ---------- */
 
-const Header = ({ title, sub, onClose, onBack }: { title: ReactNode; sub?: ReactNode; onClose: () => void; onBack?: () => void }) => (
+const Header = ({ title, sub, onClose, onBack, left, right }: { title: ReactNode; sub?: ReactNode; onClose: () => void; onBack?: () => void; left?: ReactNode; right?: ReactNode }) => (
   <div className="flex items-start justify-between gap-2">
     <div className="min-w-0 flex-1">
-      {onBack && (
-        <button type="button" onClick={onBack} className="mb-3 min-h-0 text-[12px] font-medium text-soft">
-          ‹ All plans
-        </button>
+      {(onBack || left) && (
+        <div className="mb-1 flex items-center gap-1">
+          {left}
+          {onBack && (
+            <button type="button" onClick={onBack} className="min-h-0 py-2 text-[12px] font-medium text-soft">
+              ‹ All plans
+            </button>
+          )}
+        </div>
       )}
       {typeof title === 'string' ? <h2 className="truncate text-section font-semibold text-ink">{title}</h2> : title}
       {sub && <div className="mt-3.5 text-[13px] text-soft">{sub}</div>}
     </div>
-    <IconButton label="Close" onClick={onClose} className="-mr-3 shrink-0">
-      <CloseIcon />
-    </IconButton>
+    <div className="-mr-3 flex shrink-0 items-center">
+      {right}
+      <IconButton label="Close" onClick={onClose}>
+        <CloseIcon />
+      </IconButton>
+    </div>
   </div>
 );
+
+const TrashIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 002 2h6a2 2 0 002-2l1-12M9 7V4h6v3" />
+  </svg>
+);
+
+const ShareIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M12 3v12M7.5 7.5L12 3l4.5 4.5" />
+    <path d="M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7" />
+  </svg>
+);
+
+/** "Share" sheet: picture of the list (Clean card) with a choice to strike through bought items, or copy as text. */
+function ShareSheet({ data, onClose }: { data: ShareData; onClose: () => void }) {
+  const toast = useToast((s) => s.show);
+  const [strike, setStrike] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const opts = { strike };
+  const fileName = `${data.title.replace(/[^\w]+/g, '-').replace(/^-|-$/g, '') || 'list'}.png`;
+
+  async function picture(mode: 'share' | 'save') {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const blob = await planBlob(data, opts);
+      if (!blob) return toast('Could not make the picture. Try again.', 'warm');
+      const file = new File([blob], fileName, { type: 'image/png' });
+      if (mode === 'share' && typeof navigator.share === 'function' && navigator.canShare?.({ files: [file] })) {
+        try {
+          await navigator.share({ files: [file], title: data.title });
+          captureEvent('plan_shared', { how: 'picture', strike });
+          onClose();
+        } catch {
+          /* closed the share sheet: nothing to do */
+        }
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      a.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 2000);
+      captureEvent('plan_shared', { how: 'save', strike });
+      toast('Picture saved');
+      onClose();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(planText(data, opts));
+      captureEvent('plan_shared', { how: 'text', strike });
+      toast('List copied');
+      onClose();
+    } catch {
+      toast('Could not copy. Try again.', 'warm');
+    }
+  }
+
+  const Row = ({ title, sub, onClick }: { title: string; sub: string; onClick: () => void }) => (
+    <button type="button" onClick={onClick} disabled={busy} className="flex min-h-0 w-full flex-col rounded-note px-1 py-3 text-left hover:bg-tint disabled:opacity-50">
+      <span className="text-[15px] font-medium text-ink">{title}</span>
+      <span className="text-[12px] text-soft">{sub}</span>
+    </button>
+  );
+
+  return (
+    <div className="absolute inset-0 z-10 flex items-end bg-ink/40" role="presentation" onClick={onClose}>
+      <div role="dialog" aria-modal="true" aria-label="Share this list" onClick={(e) => e.stopPropagation()} className="plan-up w-full rounded-t-[24px] bg-white px-6 pb-8 pt-3">
+        <span className="mx-auto mb-3 block h-1 w-10 rounded-full bg-line" aria-hidden="true" />
+        <p className="mb-1 truncate text-[13px] font-semibold text-soft">Share “{data.title}”</p>
+        <label className="flex min-h-[44px] items-center justify-between gap-3 border-b border-line py-2">
+          <span className="min-w-0 text-[14px] text-ink">
+            Strike through bought items
+            <span className="block text-[12px] text-soft">{strike ? 'Bought names are crossed out' : 'Bought items are only ticked'}</span>
+          </span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={strike}
+            aria-label="Strike through the names of bought items"
+            onClick={() => setStrike((v) => !v)}
+            className={`relative h-6 min-h-0 w-10 shrink-0 rounded-full transition-colors ${strike ? 'bg-ink' : 'bg-line'}`}
+          >
+            <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${strike ? 'left-[18px]' : 'left-0.5'}`} />
+          </button>
+        </label>
+        <Row title="Share as picture" sub="A clean picture with quantities and total" onClick={() => void picture('share')} />
+        <Row title="Copy as text" sub="Paste it in any chat" onClick={() => void copy()} />
+        <Row title="Save picture" sub="Keep it in your downloads or photos" onClick={() => void picture('save')} />
+      </div>
+    </div>
+  );
+}
 
 const Check = ({ on, onClick, label }: { on: boolean; onClick: () => void; label: string }) => (
   <button
@@ -126,13 +234,16 @@ const progressText = (t: PlanTotals) =>
   t.count === 0 ? 'No items yet' : t.doneCount === t.count ? `All ${t.count} bought` : `${t.count - t.doneCount} of ${t.count} to buy · ${inr(t.toGo)} to go`;
 
 /** The one add box: "Milk 60" + Enter adds Milk at 60; "Candles" adds it with the amount later. `onAdd` returns an error or null. */
-function QuickAdd({ onAdd, disabled, autoFocus }: { onAdd: (name: string, planned: number) => Promise<string | null> | string | null; disabled?: boolean; autoFocus?: boolean }) {
+function QuickAdd({ onAdd, disabled, autoFocus }: { onAdd: (name: string, planned: number, qty: string) => Promise<string | null> | string | null; disabled?: boolean; autoFocus?: boolean }) {
   const [v, setV] = useState('');
   const [err, setErr] = useState<string | null>(null);
-  const p = parseQuickItem(v);
+  // "Milk x2 60" -> qty 2, then "Milk 60" -> name + price
+  const qm = v.match(/(?:^|\s)x\s?(\d{1,4})(?=\s|$)/i);
+  const qty = qm ? qm[1] : '';
+  const p = parseQuickItem(qm ? v.replace(qm[0], ' ') : v);
   async function submit() {
     if (!p) return;
-    const e = await onAdd(p.name, p.planned);
+    const e = await onAdd(p.name, p.planned, qty);
     setErr(e);
     if (!e) {
       setV('');
@@ -157,13 +268,14 @@ function QuickAdd({ onAdd, disabled, autoFocus }: { onAdd: (name: string, planne
             setV(e.target.value);
             setErr(null);
           }}
-          placeholder="Add item, e.g. Milk 60"
-          aria-label="Add an item. Put the amount at the end, or leave it out"
+          placeholder="Add item, e.g. Milk x2 60"
+          aria-label="Add an item. Put x and a number for how many, and the price at the end, or leave them out"
           maxLength={MAX_ITEM_NAME + 12}
           disabled={disabled}
           enterKeyHint="done"
           className="min-h-0 min-w-0 flex-1 bg-transparent text-[16px] text-ink placeholder:text-faint focus:outline-none"
         />
+        {p && qty && <span className="num shrink-0 rounded-full bg-tint px-2 py-0.5 text-[11px] font-medium text-soft">× {qty}</span>}
         {p && p.planned > 0 && <span className="num shrink-0 rounded-full bg-tint px-2 py-0.5 text-[11px] font-medium text-soft">{inr(p.planned)}</span>}
         {p && (
           <button type="submit" disabled={disabled} aria-label="Add" className="h-7 min-h-0 shrink-0 rounded-full bg-ink px-3 text-[12px] font-semibold text-white disabled:opacity-30">
@@ -181,15 +293,9 @@ function QuickAdd({ onAdd, disabled, autoFocus }: { onAdd: (name: string, planne
 function Hub({ onClose, onOpen, onNew }: { onClose: () => void; onOpen: (id: string) => void; onNew: () => void }) {
   const occasions = useOccasions() ?? [];
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
-      <Header title="Plans" sub="To-do lists with prices. Tick each one as you buy it." onClose={onClose} />
-      <button
-        type="button"
-        onClick={onNew}
-        className="mt-4 flex min-h-0 w-full items-center gap-3 rounded-note border-[1.5px] border-dashed border-line px-4 py-3.5 text-left text-[15px] font-medium text-ink hover:border-ink"
-      >
-        <span className="text-[18px] leading-none">+</span> New plan
-      </button>
+    <>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+      <Header title="Plans" sub="Rough-book lists for the market, a party, a trip. Tick things off as they go in the bag." onClose={onClose} />
       <ul className="mt-3 flex flex-col gap-2">
         {occasions.map(({ event, totals }) => (
           <li key={event.id}>
@@ -209,7 +315,15 @@ function Hub({ onClose, onOpen, onNew }: { onClose: () => void; onOpen: (id: str
           </li>
         ))}
       </ul>
-    </div>
+      </div>
+      <button
+        type="button"
+        onClick={onNew}
+        className="mt-3 flex h-[50px] min-h-0 w-full shrink-0 items-center justify-center gap-2 rounded-btn border border-line bg-white text-[15px] font-semibold text-ink shadow-[0_6px_18px_-6px_rgba(30,27,75,0.28)]"
+      >
+        <span className="text-[18px] leading-none">+</span> New plan
+      </button>
+    </>
   );
 }
 
@@ -254,11 +368,10 @@ function Checklist({
   const [err, setErr] = useState<string | null>(null);
   const [logOnly, setLogOnly] = useState(false);
   const [delAsk, setDelAsk] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   /** Amounts being typed right now (item id -> number), so the total moves with every keystroke. */
   const [typing, setTyping] = useState<Record<string, number>>({});
   const [busy, setBusy] = useState<string | null>(null);
-  /** An item with no amount yet asks for it here before it is logged. */
-  const [ask, setAsk] = useState<{ id: string; amt: string } | null>(null);
   const todayIso = dateOfDay(cycle.startDate, cycle.currentDay);
 
   const live = eventId !== null;
@@ -292,17 +405,17 @@ function Checklist({
   }
 
   /** The first item creates the plan (named "Plan · 26 Nov" if you never typed a name); later ones just add. */
-  async function add(n: string, planned: number): Promise<string | null> {
+  async function add(n: string, planned: number, qty: string): Promise<string | null> {
     if (!live) {
       const bad = validateItem(n, planned, []);
       if (bad) return bad;
-      const r = await createOccasion(name.trim() || defaultPlanName(clockISO()), [{ name: n, planned }]);
+      const r = await createOccasion(name.trim() || defaultPlanName(clockISO()), [{ name: n, planned, qty }]);
       if (r.error || !r.id) return r.error ?? 'Could not save it. Try again.';
       captureEvent('occasion_created', { items: 1 });
       onCreated(r.id);
       return null;
     }
-    const e = await addEventItem(eventId!, n, planned);
+    const e = await addEventItem(eventId!, n, planned, qty);
     if (!e) captureEvent('event_item_added');
     return e;
   }
@@ -311,12 +424,15 @@ function Checklist({
   async function pay(row: PlannedItem, amountOverride?: number) {
     if (busy || !live) return;
     const amount = amountOverride ?? row.item.planned;
-    if (amount <= 0) {
-      setAsk({ id: row.item.id, amt: '' });
-      return;
-    }
     setBusy(row.item.id);
     setErr(null);
+    if (amount <= 0) {
+      // No price on the item: it is just ticked off, nothing is logged.
+      const e = await tickEventItem(eventId!, row.item.id);
+      setBusy(null);
+      if (e) setErr(e);
+      return;
+    }
     const e = await payEventItem(cycle, eventId!, row.item.id, {
       amount,
       fromSavings: logOnly,
@@ -324,7 +440,6 @@ function Checklist({
     });
     setBusy(null);
     if (e) return setErr(e);
-    setAsk(null);
     captureEvent('event_item_paid', { from_savings: logOnly, over_plan: row.item.planned > 0 && amount > row.item.planned });
     toast(`${row.item.name} bought · ${inr(amount)}`);
   }
@@ -340,7 +455,7 @@ function Checklist({
     const e = await unpayEventItem(eventId!, row.item.id);
     setConfirm(null);
     if (e) setErr(e);
-    else toast(`${row.item.name} unticked · spend removed`);
+    else toast(`${row.item.name} unticked`);
   }
 
   const itemRow = (row: PlannedItem) => {
@@ -350,8 +465,9 @@ function Checklist({
     return (
       <li key={row.item.id} className="group py-2.5">
         <div className="flex items-center gap-3">
-          <Check on={bought} label={row.item.name} onClick={() => (bought ? setConfirm(row.item.id) : void pay(row))} />
+          <Check on={bought} label={row.item.name} onClick={() => (bought ? (actual != null ? setConfirm(row.item.id) : void untick(row)) : void pay(row))} />
           <InlineName eventId={eventId!} row={row} onError={setErr} />
+          <InlineQty eventId={eventId!} row={row} onError={setErr} />
           <div className="flex flex-col items-end">
             {bought ? (
               <span className="num text-[15px] text-faint line-through decoration-faint">{inr(actual ?? row.item.planned)}</span>
@@ -371,32 +487,6 @@ function Checklist({
             </button>
           )}
         </div>
-        {ask?.id === row.item.id && (
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              void pay(row, Number(ask.amt) || 0);
-            }}
-            className="ml-9 mt-2 flex items-center gap-2 rounded-note bg-tint px-3 py-2 text-[12px] text-soft"
-          >
-            <span className="shrink-0">What did it cost?</span>
-            <input
-              autoFocus
-              value={ask.amt}
-              onChange={(e) => setAsk({ id: ask.id, amt: cleanAmount(e.target.value, ask.amt) })}
-              inputMode="decimal"
-              placeholder="₹0"
-              aria-label={`Amount paid for ${row.item.name}`}
-              className="num h-8 min-h-0 min-w-0 flex-1 rounded-key border border-line bg-white px-2 text-right text-[14px] text-ink focus:border-ink focus:outline-none"
-            />
-            <button type="submit" disabled={!ask.amt || Number(ask.amt) <= 0 || busy === row.item.id} className="h-8 min-h-0 rounded-full bg-ink px-3 font-semibold text-white disabled:opacity-30">
-              Bought
-            </button>
-            <button type="button" onClick={() => setAsk(null)} className="h-8 min-h-0 px-1 font-medium text-soft">
-              Cancel
-            </button>
-          </form>
-        )}
         {confirm === row.item.id && (
           <div className="ml-9 mt-2 flex items-center gap-2 rounded-note bg-tint px-3 py-2 text-[12px] text-soft">
             <span className="flex-1">Remove the {inr(row.state.actual ?? 0)} spend and untick?</span>
@@ -412,11 +502,35 @@ function Checklist({
     );
   };
 
+  const shareData: ShareData = {
+    title: name.trim() || plan?.event.name || 'Shopping list',
+    dateText: new Intl.DateTimeFormat('en-IN', { weekday: 'short', day: 'numeric', month: 'short' }).format(new Date()),
+    rows: items.map((r) => ({ name: r.item.name, qty: r.item.qty ?? '', price: r.state.actual ?? r.item.planned, bought: r.state.paid })),
+    planned: totals?.planned ?? 0,
+    spent: totals?.paid ?? 0,
+    toGo: totals?.toGo ?? 0,
+    money: inr,
+  };
+
   return (
     <>
       <Header
         onBack={canGoBack ? onBack : undefined}
         onClose={onClose}
+        right={
+          live ? (
+            <>
+              {items.length > 0 && (
+                <IconButton label="Share this list" onClick={() => setShareOpen(true)}>
+                  <ShareIcon />
+                </IconButton>
+              )}
+              <IconButton label="Delete plan" onClick={() => setDelAsk((v) => !v)} className="text-soft">
+                <TrashIcon />
+              </IconButton>
+            </>
+          ) : undefined
+        }
         title={
           <>
             <input
@@ -433,7 +547,7 @@ function Checklist({
                 (document.getElementById('plan-add-item') as HTMLInputElement | null)?.focus();
               }}
               ref={nameRef}
-              placeholder="Name it, e.g. Riya’s birthday"
+              placeholder="Name it, e.g. Sunday market"
               aria-label="Plan name"
               maxLength={MAX_NAME + 6}
               className="mt-2 block min-h-0 w-full bg-transparent text-[22px] font-semibold leading-tight text-ink placeholder:text-faint focus:outline-none"
@@ -444,10 +558,24 @@ function Checklist({
           totals && totals.count > 0 ? (
             <span className="num">{open.length === 0 ? `All ${totals.count} bought` : `${open.length} of ${totals.count} to buy`}</span>
           ) : (
-            'Planning to buy many things? List them here and tick each off.'
+            'Your rough book for the market. Scribble it down, tick it off as it goes in the bag.'
           )
         }
       />
+      {live && delAsk && (
+        <div role="alertdialog" aria-label="Delete this plan?" className="absolute right-6 top-[60px] z-20 w-[230px] rounded-[16px] border border-line bg-white p-3.5 shadow-[0_14px_30px_-10px_rgba(30,27,75,0.35)]">
+          <p className="text-[14px] font-semibold text-ink">Delete this plan?</p>
+          {done.length > 0 && <p className="mt-0.5 text-[12px] text-soft">Logged spends stay in History.</p>}
+          <div className="mt-3 flex gap-2">
+            <button type="button" onClick={() => setDelAsk(false)} className="h-9 min-h-0 flex-1 rounded-full bg-tint text-[13px] font-medium text-ink">
+              Keep
+            </button>
+            <button type="button" onClick={() => void deletePlan()} className="h-9 min-h-0 flex-1 rounded-full bg-warm text-[13px] font-semibold text-white">
+              Delete
+            </button>
+          </div>
+        </div>
+      )}
       <div className="mt-2 min-h-0 flex-1 overflow-y-auto">
         {totals && totals.doneCount > 0 && totals.variance !== 0 && (
           <p className={`num text-[12px] ${totals.variance > 0 ? 'text-warm' : 'text-faint'}`}>
@@ -472,28 +600,8 @@ function Checklist({
               </div>
             )}
         </>
-        {live && (
-          <div className="mt-4 pb-1">
-            {delAsk ? (
-              <div className="flex items-center gap-2 rounded-note bg-tint px-3 py-2.5 text-[12px] text-soft">
-                <span className="flex-1">
-                  Delete this plan?{done.length > 0 ? ` The ${done.length} spend${done.length === 1 ? '' : 's'} you logged stay in History.` : ''}
-                </span>
-                <button type="button" onClick={() => void deletePlan()} className="h-8 min-h-0 rounded-full bg-warm px-3 font-semibold text-white">
-                  Delete
-                </button>
-                <button type="button" onClick={() => setDelAsk(false)} className="h-8 min-h-0 px-1 font-medium text-soft">
-                  Keep
-                </button>
-              </div>
-            ) : (
-              <button type="button" onClick={() => setDelAsk(true)} className="min-h-0 py-1 text-[12px] font-medium text-faint hover:text-warm">
-                Delete plan
-              </button>
-            )}
-          </div>
-        )}
       </div>
+      {shareOpen && <ShareSheet data={shareData} onClose={() => setShareOpen(false)} />}
       {live && totals && items.length > 0 && (
         <div className="mt-2 shrink-0">
           <div className="rounded-[18px] border border-line bg-white px-4 pb-3.5 pt-3 shadow-[0_6px_20px_-8px_rgba(30,27,75,0.18)]">
@@ -586,6 +694,35 @@ function InlineAmount({ eventId, row, onError, onType }: { eventId: string; row:
       placeholder="amount later"
       aria-label={`Planned amount for ${item.name}. Tap to change`}
       className="num min-h-0 w-24 rounded-md bg-transparent text-right text-[15px] text-ink placeholder:text-faint focus:bg-tint focus:outline-none"
+    />
+  );
+}
+
+/** Quantity: "qty" until you tap it and type how many ("2", "500 g"). Saves when you leave the field. */
+function InlineQty({ eventId, row, onError }: { eventId: string; row: PlannedItem; onError: (e: string | null) => void }) {
+  const { item, state } = row;
+  const [q, setQ] = useState(item.qty ?? '');
+  const [focus, setFocus] = useState(false);
+  useEffect(() => setQ(item.qty ?? ''), [item.qty]);
+  async function save() {
+    setFocus(false);
+    const next = cleanQty(q);
+    if (next === (item.qty ?? '')) return setQ(item.qty ?? '');
+    const e = await updateEventItem(eventId, item.id, { qty: next });
+    onError(e);
+    if (e) setQ(item.qty ?? '');
+  }
+  const label = (v: string) => (/^\d+(\.\d+)?$/.test(v) ? `× ${v}` : v);
+  return (
+    <input
+      value={focus || !q ? q : label(q)}
+      onFocus={() => setFocus(true)}
+      onChange={(e) => setQ(e.target.value.slice(0, MAX_QTY))}
+      onBlur={() => void save()}
+      onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+      placeholder="qty"
+      aria-label={`How many ${item.name}. Tap to change`}
+      className={`num min-h-0 w-14 shrink-0 rounded-md bg-transparent text-right text-[13px] placeholder:text-faint focus:bg-tint focus:outline-none ${state.paid ? 'text-faint' : 'text-soft'}`}
     />
   );
 }

@@ -57,7 +57,7 @@ import { DEFAULT_INCOME_SOURCE, incomeEffects, validateIncome } from '@/lib/inco
 import { uuidv7 } from '@/lib/uuid';
 import { roundMoney } from '@/lib/money';
 import {
-  addItem, itemState, normalizeItems, planTotals, removeItem, setItemTxn, updateItem, validateAmount,
+  addItem, itemState, normalizeItems, planTotals, removeItem, setItemBought, setItemTxn, updateItem, validateAmount,
   type EventItem, type ItemState, type ItemTxn, type PlanTotals,
 } from '@/lib/eventPlan';
 
@@ -1456,7 +1456,7 @@ async function liveEvent(db: StashDB, eventId: string): Promise<StashEvent | nul
  */
 export async function createOccasion(
   name: string,
-  items: { name: string; planned: number }[],
+  items: { name: string; planned?: number; qty?: string }[],
 ): Promise<{ error: string | null; id?: string }> {
   const db = getDB();
   const trimmed = name.trim();
@@ -1466,7 +1466,7 @@ export async function createOccasion(
   let list: EventItem[] = [];
   const now = Date.now();
   for (const it of items) {
-    const r = addItem(list, it.name, it.planned, uuid(), now);
+    const r = addItem(list, it.name, it.planned ?? 0, uuid(), now, it.qty);
     if (r.error || !r.items) return { error: `${it.name || 'An item'}: ${r.error ?? 'could not add'}` };
     list = r.items;
   }
@@ -1494,11 +1494,20 @@ async function editItems(eventId: string, edit: ItemEdit): Promise<string | null
   return error;
 }
 
-export const addEventItem = (eventId: string, name: string, planned: number) =>
-  editItems(eventId, (items) => addItem(items, name, planned, uuid(), Date.now()));
+export const addEventItem = (eventId: string, name: string, planned = 0, qty = '') =>
+  editItems(eventId, (items) => addItem(items, name, planned, uuid(), Date.now(), qty));
 
-export const updateEventItem = (eventId: string, itemId: string, patch: { name?: string; planned?: number }) =>
+export const updateEventItem = (eventId: string, itemId: string, patch: { name?: string; planned?: number; qty?: string }) =>
   editItems(eventId, (items) => updateItem(items, itemId, patch));
+
+/** Ticks an item off a price-free list: nothing is logged, the item is just bought. */
+export const tickEventItem = (eventId: string, itemId: string) =>
+  editItems(eventId, (items, txns) => {
+    const cur = items.find((i) => i.id === itemId);
+    if (!cur) return { items: null, error: 'That item is gone.' };
+    if (itemState(cur, txns).paid) return { items, error: null };
+    return { items: setItemBought(items, itemId, true), error: null };
+  });
 
 /** Refused while the item is paid: untick it first. */
 export const removeEventItem = (eventId: string, itemId: string) =>
@@ -1561,7 +1570,7 @@ export async function unpayEventItem(eventId: string, itemId: string): Promise<s
       const t = await db.transactions.get(item.txnId);
       if (t && alive(t)) await db.transactions.update(t.id, { deletedAt: now, updatedAt: now });
     }
-    await db.evts.update(eventId, { items: setItemTxn(items, itemId, null), updatedAt: now });
+    await db.evts.update(eventId, { items: setItemBought(items, itemId, false), updatedAt: now });
   });
   if (!error) requestSync();
   return error;

@@ -163,8 +163,8 @@ export function HistoryTab({ activeCycle, plan, initialTab = 'spends' }: { activ
 
   if (tab === 'plans') {
     return (
-      <div className="flex-1 overflow-y-auto px-6 pb-8 pt-6">
-        {titleTabs}
+      <div className="flex min-h-0 flex-1 flex-col pt-6">
+        <div className="px-6">{titleTabs}</div>
         <PlansTab cycle={activeCycle} />
       </div>
     );

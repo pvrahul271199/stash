@@ -171,3 +171,39 @@ describe('parseQuickItem / defaultPlanName', () => {
     expect(defaultPlanName('2026-11-26')).toBe('Plan · 26 Nov');
   });
 });
+
+describe('rough-book list (qty, no prices)', () => {
+  it('parseQuickQty reads a quantity at either end', async () => {
+    const { parseQuickQty } = await import('@/lib/eventPlan');
+    expect(parseQuickQty('Milk 2')).toEqual({ name: 'Milk', qty: '2' });
+    expect(parseQuickQty('Milk x2')).toEqual({ name: 'Milk', qty: '2' });
+    expect(parseQuickQty('Rice 5 kg')).toEqual({ name: 'Rice', qty: '5 kg' });
+    expect(parseQuickQty('2 kg rice')).toEqual({ name: 'rice', qty: '2 kg' });
+    expect(parseQuickQty('Candles')).toEqual({ name: 'Candles', qty: '' });
+    expect(parseQuickQty('7')).toEqual({ name: '7', qty: '' });
+    expect(parseQuickQty('  ')).toBeNull();
+  });
+
+  it('a ticked item counts as bought with nothing logged; unticking clears it', async () => {
+    const { addItem, setItemBought, itemState, normalizeItems } = await import('@/lib/eventPlan');
+    const r = addItem([], 'Milk', 0, 'a', 1, '2');
+    const items = r.items!;
+    expect(items[0].qty).toBe('2');
+    const ticked = setItemBought(items, 'a', true);
+    expect(itemState(ticked[0], new Map())).toEqual({ paid: true, actual: null, fromSavings: false });
+    expect(normalizeItems(ticked)[0].bought).toBe(true);
+    expect(itemState(setItemBought(ticked, 'a', false)[0], new Map()).paid).toBe(false);
+  });
+});
+
+describe('shared picture', () => {
+  it('qtyLabel and planText', async () => {
+    const { qtyLabel } = await import('@/lib/eventPlan');
+    const { planText } = await import('@/lib/planImage');
+    expect(qtyLabel('2')).toBe('× 2');
+    expect(qtyLabel('500 g')).toBe('500 g');
+    const d = { title: 'Market', dateText: 'Sun', rows: [{ name: 'Milk', qty: '2', price: 60, bought: true }, { name: 'Eggs', qty: '', price: 0, bought: false }], planned: 60, spent: 60, toGo: 0, money: (n: number) => `₹${n}` };
+    expect(planText(d, { strike: true })).toBe('*Market*\nSun\n\n✅ ~Milk~  × 2  –  ₹60\n⬜ Eggs\n\nPlanned: ₹60\nSpent so far: ₹60\nStill to buy: ₹0\n\n– Chelav');
+    expect(planText(d, { strike: false })).toContain('✅ Milk  × 2');
+  });
+});

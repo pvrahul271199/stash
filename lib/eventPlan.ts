@@ -16,6 +16,10 @@ export interface EventItem {
   /** The spend that paid this item, or null while it is still a plan. */
   txnId: string | null;
   createdAt: number;
+  /** How many / how much, free text: "2", "500 g", "1 dozen". Empty = not said. */
+  qty?: string;
+  /** Ticked off the list without logging a spend (the list has no prices). A live `txnId` also counts as bought. */
+  bought?: boolean;
 }
 
 /** The part of a transaction the checklist cares about. */
@@ -26,6 +30,7 @@ export interface ItemTxn {
 }
 
 export const MAX_ITEM_NAME = 40;
+export const MAX_QTY = 12;
 /** Keeps the jsonb column far below the 20,000 byte server limit (~190 bytes per item). */
 export const MAX_ITEMS = 80;
 /** Same ceiling as the keypad (7 digits). */
@@ -57,6 +62,26 @@ export function parseQuickItem(raw: string): { name: string; planned: number } |
   return { name: s, planned: 0 };
 }
 
+/**
+ * The rough-book add box: "Milk 2", "Milk x2", "Rice 5 kg", "2 kg rice" -> name + qty; "Candles" -> no qty.
+ * A name that is only digits ("7") stays a name. Pure; validation still goes through `validateItem` / `cleanQty`.
+ */
+export function parseQuickQty(raw: string): { name: string; qty: string } | null {
+  const s = raw.trim().replace(/\s+/g, ' ');
+  if (!s) return null;
+  const q = '(?:x\\s*)?(\\d{1,4}(?:\\.\\d{1,2})?(?:\\s?[a-zA-Z]{1,8})?)';
+  const tail = s.match(new RegExp(`^(.*?\\S)\\s+${q}$`, 'i')) ?? s.match(new RegExp(`^(.*?[^\\d\\s])x(\\d{1,4})$`, 'i'));
+  if (tail) return { name: tail[1].trim(), qty: cleanQty(tail[2]) };
+  const head = s.match(new RegExp(`^${q}\\s+(.+)$`, 'i'));
+  if (head) return { name: head[2].trim(), qty: cleanQty(head[1]) };
+  return { name: s, qty: '' };
+}
+
+/** Tidy a quantity: trimmed, single spaces, at most MAX_QTY characters. */
+export function cleanQty(raw: string | undefined | null): string {
+  return (raw ?? '').trim().replace(/\s+/g, ' ').slice(0, MAX_QTY);
+}
+
 /** Name for a plan whose owner added items but never typed one: "Plan · 26 Nov". */
 export function defaultPlanName(iso: string): string {
   const [, m, d] = iso.split('-').map(Number);
@@ -81,8 +106,10 @@ export interface ItemState {
 /** Paid only while `txnId` points at a live transaction. */
 export function itemState(item: EventItem, txns: ReadonlyMap<string, ItemTxn>): ItemState {
   const t = item.txnId ? txns.get(item.txnId) : undefined;
-  if (!t || t.deletedAt != null) return { paid: false, actual: null, fromSavings: false };
-  return { paid: true, actual: roundMoney(t.amount), fromSavings: !!t.fromSavings };
+  if (t && t.deletedAt == null) return { paid: true, actual: roundMoney(t.amount), fromSavings: !!t.fromSavings };
+  // Ticked off a price-free list: bought, with nothing logged.
+  if (item.bought) return { paid: true, actual: null, fromSavings: false };
+  return { paid: false, actual: null, fromSavings: false };
 }
 
 export interface PlanTotals {
@@ -123,16 +150,17 @@ export function planTotals(items: readonly EventItem[], txns: ReadonlyMap<string
 export type EditResult = { items: EventItem[]; error: null } | { items: null; error: string };
 const fail = (error: string): EditResult => ({ items: null, error });
 
-export function addItem(items: readonly EventItem[], name: string, planned: number, id: string, now: number): EditResult {
+export function addItem(items: readonly EventItem[], name: string, planned: number, id: string, now: number, qty = ''): EditResult {
   const err = validateItem(name, planned, items.map((i) => i.name), items.length);
   if (err) return fail(err);
-  return { items: [...items, { id, name: name.trim(), planned: roundMoney(planned), txnId: null, createdAt: now }], error: null };
+  const q = cleanQty(qty);
+  return { items: [...items, { id, name: name.trim(), planned: roundMoney(planned), txnId: null, createdAt: now, ...(q ? { qty: q } : {}) }], error: null };
 }
 
 export function updateItem(
   items: readonly EventItem[],
   id: string,
-  patch: { name?: string; planned?: number },
+  patch: { name?: string; planned?: number; qty?: string },
 ): EditResult {
   const cur = items.find((i) => i.id === id);
   if (!cur) return fail('That item is gone.');
@@ -140,7 +168,8 @@ export function updateItem(
   const planned = patch.planned ?? cur.planned;
   const err = validateItem(name, planned, items.filter((i) => i.id !== id).map((i) => i.name), 0);
   if (err) return fail(err);
-  return { items: items.map((i) => (i.id === id ? { ...i, name: name.trim(), planned: roundMoney(planned) } : i)), error: null };
+  const qty = patch.qty === undefined ? cur.qty : cleanQty(patch.qty);
+  return { items: items.map((i) => (i.id === id ? { ...i, name: name.trim(), planned: roundMoney(planned), qty } : i)), error: null };
 }
 
 /** An item that was paid cannot be removed: untick it first, so the money never drifts away from the list. */
@@ -149,6 +178,11 @@ export function removeItem(items: readonly EventItem[], id: string, txns: Readon
   if (!cur) return fail('That item is gone.');
   if (itemState(cur, txns).paid) return fail('Untick it first, then remove it.');
   return { items: items.filter((i) => i.id !== id), error: null };
+}
+
+/** Ticks (or unticks) an item on a price-free list. Unticking also drops any spend link; the caller removes the spend. */
+export function setItemBought(items: readonly EventItem[], id: string, bought: boolean): EventItem[] {
+  return items.map((i) => (i.id === id ? { ...i, bought, ...(bought ? {} : { txnId: null }) } : i));
 }
 
 /** Links an item to the spend that paid it (or clears the link with null). */
@@ -179,7 +213,12 @@ export function normalizeItems(raw: unknown): EventItem[] {
       else seenTxns.add(txnId);
     }
     seenIds.add(id);
-    out.push({ id, name, planned, txnId, createdAt: typeof o.createdAt === 'number' ? o.createdAt : 0 });
+    const qty = typeof o.qty === 'string' ? cleanQty(o.qty) : '';
+    out.push({
+      id, name, planned, txnId, createdAt: typeof o.createdAt === 'number' ? o.createdAt : 0,
+      ...(qty ? { qty } : {}),
+      ...(o.bought === true ? { bought: true } : {}),
+    });
   }
   return out;
 }
@@ -215,3 +254,6 @@ export function payEffect(args: {
     changes: !args.fromSavings && args.amount > 0,
   };
 }
+
+/** How a quantity reads on screen and in a shared picture: "2" -> "× 2"; "500 g" stays as typed. */
+export const qtyLabel = (q: string): string => (/^\d+(\.\d+)?$/.test(q) ? `× ${q}` : q);
