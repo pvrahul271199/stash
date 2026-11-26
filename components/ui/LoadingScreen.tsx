@@ -1,8 +1,8 @@
 'use client';
 
 /** Calm loader: the Malayalam ച (cha) is drawn in, then the Chelav name fades in, over a softly breathing circle and a slow ripple.
- *  A message is optional; the app-open loader shows none. */
-export function LoadingScreen({ message }: { message?: string }) {
+ *  A message is optional; the app-open loader shows none. `onRetry` adds a Reload button (start-up that stays stuck). */
+export function LoadingScreen({ message, onRetry }: { message?: string; onRetry?: () => void }) {
   return (
     <main
       role="status"
@@ -39,6 +39,11 @@ export function LoadingScreen({ message }: { message?: string }) {
         <p className="mt-2 animate-pulse font-display text-[15px] font-medium tracking-[-0.01em] text-soft motion-reduce:animate-none">
           {message}
         </p>
+      )}
+      {onRetry && (
+        <button type="button" onClick={onRetry} className="mt-4 h-11 min-h-0 rounded-full border border-line bg-white px-6 text-[14px] font-semibold text-ink shadow-sm">
+          Reload
+        </button>
       )}
     </main>
   );

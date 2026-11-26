@@ -68,6 +68,9 @@ function describeRestoreError(e: unknown): string {
   return e instanceof Error ? e.message : 'Something unexpected went wrong.';
 }
 
+/** How long start-up may take before we retry it by reloading once. A slow phone on a weak connection can need a few seconds, so a very slow start may reload once; that is harmless. */
+const BOOT_STUCK_MS = 5000;
+
 /** After this long the loader says it is still connecting (the data is fine, the network is slow). */
 const RESTORE_SLOW_MS = 5000;
 /** After this long we give up waiting and offer a retry. The sync keeps running; `onLate` fires if it then succeeds. */
@@ -239,6 +242,29 @@ export function AppShell() {
       .then(() => setReady(true));
   }, []);
 
+  // Safety net for a first visit that never gets past the loader (the browser's database can hang on its very first open, mostly on
+  // Safari, until the page is reloaded). If start-up has not finished after BOOT_STUCK_MS, reload once by ourselves; if it is still
+  // stuck after that, say so and offer a Reload button instead of looping.
+  const [bootStuck, setBootStuck] = useState(false);
+  const started = ready && !!snap;
+  useEffect(() => {
+    if (started) {
+      setBootStuck(false);
+      try { sessionStorage.removeItem('stash:bootRetry'); } catch { /* ignore */ }
+      return;
+    }
+    const t = setTimeout(() => {
+      let tried = true;
+      try {
+        tried = sessionStorage.getItem('stash:bootRetry') === '1';
+        sessionStorage.setItem('stash:bootRetry', '1');
+      } catch { /* no storage: do not loop, just offer the button */ }
+      if (!tried) window.location.reload();
+      else setBootStuck(true);
+    }, BOOT_STUCK_MS);
+    return () => clearTimeout(t);
+  }, [started]);
+
   // Signing in leaves sample mode for good (the sandbox is dropped; nothing from it is ever claimed).
   useEffect(() => {
     if (auth.status === 'signedIn') void discardSampleAfterSignIn();
@@ -349,7 +375,9 @@ export function AppShell() {
 
   let body: React.ReactNode = null;
   if (!ready || !snap) {
-    body = <LoadingScreen />;
+    body = bootStuck
+      ? <LoadingScreen message="Taking longer than usual…" onRetry={() => window.location.reload()} />
+      : <LoadingScreen />;
   } else if (farewell) {
     body = <ThankYou onDone={() => setFarewell(false)} />;
   } else if (restoring) {
