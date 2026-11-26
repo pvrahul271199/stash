@@ -184,6 +184,11 @@ select:focus {
 .splits-fade { animation: splits-fade 0.2s ease-out; }
 .splits-up { animation: splits-up 0.28s cubic-bezier(0.22, 1, 0.36, 1); }
 @media (prefers-reduced-motion: reduce) { .splits-fade, .splits-up { animation: none; } }
+/* Plan sheet: the backdrop fades in and the panel rises from the bottom edge (transform only, so nothing reflows). */
+@keyframes plan-sheet-up { from { transform: translateY(100%); } to { transform: none; } }
+.plan-fade { animation: splits-fade 0.22s ease-out; }
+.plan-up { animation: plan-sheet-up 0.34s cubic-bezier(0.22, 1, 0.36, 1); }
+@media (prefers-reduced-motion: reduce) { .plan-fade, .plan-up { animation: none; } }
 /* A couple's group header: the navy header's white text becomes ink on the rose background (GroupScreen). */
 .splits-rose-head .text-white { color: #1E1B4B; }
 .splits-rose-head .\!text-white { color: #1E1B4B !important; }

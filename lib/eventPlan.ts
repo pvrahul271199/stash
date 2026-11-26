@@ -11,7 +11,7 @@ import { roundMoney, sumMoney } from './money';
 export interface EventItem {
   id: string;
   name: string;
-  /** What you expect to pay (plan only). */
+  /** What you expect to pay (plan only). 0 = not known yet; it can be added later. */
   planned: number;
   /** The spend that paid this item, or null while it is still a plan. */
   txnId: string | null;
@@ -33,14 +33,34 @@ export const MAX_AMOUNT = 9_999_999.99;
 
 const hasTwoDecimalsAtMost = (n: number) => roundMoney(n) === n;
 
-/** Gentle error message for an item, or null. `others` = the other item names on the same event. */
+/** Gentle error message for an item, or null. `planned` may be 0 (amount not known yet). `others` = the other item names on the same event. */
 export function validateItem(rawName: string, planned: number, others: string[], count = others.length): string | null {
   const name = rawName.trim();
   if (!name) return 'Give the item a name first.';
   if (name.length > MAX_ITEM_NAME) return `Keep it to ${MAX_ITEM_NAME} characters or less.`;
   if (others.some((o) => o.trim().toLowerCase() === name.toLowerCase())) return 'That item is already on the list.';
   if (count >= MAX_ITEMS) return `A list holds up to ${MAX_ITEMS} items.`;
-  return validateAmount(planned);
+  return planned === 0 ? null : validateAmount(planned);
+}
+
+/**
+ * The one "add item" box: "Milk 60", "Milk ₹60" or "60 milk" -> name + amount; "Candles" -> amount later (0).
+ * A name that is only digits ("7") stays a name. Pure; validation still goes through `validateItem`.
+ */
+export function parseQuickItem(raw: string): { name: string; planned: number } | null {
+  const s = raw.trim().replace(/\s+/g, ' ');
+  if (!s) return null;
+  const tail = s.match(/^(.*?\S)\s+₹?\s*(\d{1,7}(?:\.\d{1,2})?)$/) ?? s.match(/^(.*?[^\d\s₹])₹?(\d{1,7}(?:\.\d{1,2})?)$/);
+  if (tail) return { name: tail[1].trim(), planned: Number(tail[2]) };
+  const head = s.match(/^₹?\s*(\d{1,7}(?:\.\d{1,2})?)\s+(.+)$/);
+  if (head) return { name: head[2].trim(), planned: Number(head[1]) };
+  return { name: s, planned: 0 };
+}
+
+/** Name for a plan whose owner added items but never typed one: "Plan · 26 Nov". */
+export function defaultPlanName(iso: string): string {
+  const [, m, d] = iso.split('-').map(Number);
+  return `Plan · ${d} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m - 1]}`;
 }
 
 /** Amount rules shared by planned and paid amounts. */
@@ -84,14 +104,16 @@ export function planTotals(items: readonly EventItem[], txns: ReadonlyMap<string
   const states = items.map((i) => ({ i, s: itemState(i, txns) }));
   const paidItems = states.filter((x) => x.s.paid);
   const paid = sumMoney(paidItems.map((x) => x.s.actual ?? 0));
-  const plannedOfPaid = sumMoney(paidItems.map((x) => x.i.planned));
+  // items with no amount planned have nothing to be over or under
+  const priced = paidItems.filter((x) => x.i.planned > 0);
+  const plannedOfPaid = sumMoney(priced.map((x) => x.i.planned));
   return {
     count: items.length,
     doneCount: paidItems.length,
     planned: sumMoney(items.map((i) => i.planned)),
     paid,
     toGo: sumMoney(states.filter((x) => !x.s.paid).map((x) => x.i.planned)),
-    variance: roundMoney(paid - plannedOfPaid),
+    variance: roundMoney(sumMoney(priced.map((x) => x.s.actual ?? 0)) - plannedOfPaid),
     fromSavings: sumMoney(paidItems.filter((x) => x.s.fromSavings).map((x) => x.s.actual ?? 0)),
   };
 }
@@ -150,7 +172,7 @@ export function normalizeItems(raw: unknown): EventItem[] {
     const id = typeof o.id === 'string' ? o.id : '';
     const name = typeof o.name === 'string' ? o.name.trim().slice(0, MAX_ITEM_NAME) : '';
     const planned = typeof o.planned === 'number' ? roundMoney(o.planned) : NaN;
-    if (!id || !name || seenIds.has(id) || !Number.isFinite(planned) || planned <= 0 || planned > MAX_AMOUNT) continue;
+    if (!id || !name || seenIds.has(id) || !Number.isFinite(planned) || planned < 0 || planned > MAX_AMOUNT) continue;
     let txnId = typeof o.txnId === 'string' && o.txnId ? o.txnId : null;
     if (txnId) {
       if (seenTxns.has(txnId)) txnId = null;

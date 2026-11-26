@@ -10,8 +10,7 @@ import type { Entry, Plan } from '@/db/schema';
 import { AtAGlance } from './AtAGlance';
 import { EditSpendSheet } from './EditSpendSheet';
 import { EventPlanSheet } from './EventPlanSheet';
-import { OccasionCards } from './OccasionCards';
-import { Disclosure } from '../ui/Disclosure';
+import { EventsSection } from './EventsSection';
 import { monthLabel, type DerivedCycle } from '@/lib/period';
 import {
   MIN_CLOSED_DAYS,
@@ -205,7 +204,6 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
   const barColor = activeFocus ? focusColor : colors.ink;
   const fillPct = Math.min((summary.spentSoFar / cycle.planAmount) * 100, 100);
   const tryAgain = 'Close a few days to see this.';
-  const topEventTotal = evList.reduce((m, e) => Math.max(m, e.total), 0);
   const space = currency.symbol.length > 1 ? ' ' : '';
   const paceRatio =
     summary.closedDays >= MIN_CLOSED_DAYS
@@ -498,7 +496,7 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
       </Section>
 
       </>)}
-      {(sec === 'Categories' ? !!(activeFocus || activeEvent) : sec === 'Events' && !!activeEvent) && (<>
+      {sec === 'Categories' && !!(activeFocus || activeEvent) && (<>
       {/* 4a. Every spend behind the numbers: same for any month, tap to edit */}
       {(
         <Section
@@ -534,90 +532,18 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
 
       </>)}
       {sec === 'Events' && (<>
-      {/* 4a. Occasions: planned checklists, above the plain tagged events */}
-      <OccasionCards onOpen={current ? setPlanFor : undefined} />
-      {evList.length === 0 && occasions && occasions.length === 0 && (
-        <p className="mt-3 text-[13px] text-soft">Events you tag, and occasions you plan, show up here.</p>
-      )}
-      {/* 4b. By event (with sub-categories breakdown) */}
-      {evList.length > 0 && (
-      <Disclosure
-        title="By event"
-        hint="Trips, parties, anything you tagged."
-        summary={`${evList.length} ${evList.length === 1 ? 'event' : 'events'} · ${inr1(evList.reduce((t, e) => t + e.total, 0))}`}
-        storageKey="stash:insights:events"
-      >
-        {(
-          <ul className="flex flex-col gap-3">
-            {evList.map((ev) => {
-              const isSelected = activeEvent === ev.name;
-              const barWidth = topEventTotal > 0 ? Math.max((ev.total / topEventTotal) * 100, ev.total > 0 ? 4 : 0) : 0;
-
-              return (
-                <li
-                  key={ev.name}
-                  className={`rounded-note border p-4 transition-colors ${
-                    isSelected ? 'border-ink bg-white' : 'border-line bg-white'
-                  }`}
-                >
-                  <button
-                    type="button"
-                    onClick={() => setFocusEvent(isSelected ? null : ev.name)}
-                    aria-pressed={isSelected}
-                    className="flex w-full items-start justify-between gap-3 text-left"
-                  >
-                    <div>
-                      <p className="text-[16px] font-semibold text-ink">{ev.name}</p>
-                      {ev.note && <p className="mt-0.5 text-[13px] text-soft">{ev.note}</p>}
-                      <p className="mt-1 text-[12px] text-faint">
-                        {ev.count} {ev.count === 1 ? 'spend' : 'spends'}
-                        {ev.pct > 0 ? ` · ${Math.round(ev.pct)}% of spending` : ''}
-                      </p>
-                    </div>
-                    <p className="num text-[20px] font-semibold text-ink">{inr1(ev.total)}</p>
-                  </button>
-
-                  <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-tint">
-                    <div
-                      className="h-full rounded-full transition-all"
-                      style={{ width: `${barWidth}%`, background: barColor }}
-                    />
-                  </div>
-
-                  {ev.categories.length > 0 && (
-                    <div className="mt-3 flex flex-wrap gap-1.5" aria-label={`Categories in ${ev.name}`}>
-                      {ev.categories.map((cat) => (
-                        <button
-                          key={cat.name}
-                          type="button"
-                          onClick={() => toggleFocus(cat.name)}
-                          aria-pressed={activeFocus === cat.name}
-                          className={`flex min-h-[30px] items-center gap-1.5 rounded-full border px-2.5 text-[12px] font-medium ${
-                            activeFocus === cat.name
-                              ? 'border-ink bg-ink text-white'
-                              : cat.total > 0
-                                ? 'border-line bg-white text-ink'
-                                : 'border-line bg-white text-faint'
-                          }`}
-                        >
-                          <span
-                            className="h-2 w-2 rounded-full"
-                            style={{ background: colorOf[cat.name] ?? colors.ink }}
-                          />
-                          <span>{cat.name}</span>
-                          <span className="num opacity-80">{inr1(cat.total)}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </Disclosure>
-      )}
-
+      <EventsSection
+        occasions={occasions ?? []}
+        events={evList}
+        entries={entries ?? []}
+        activeEvent={activeEvent}
+        activeFocus={activeFocus}
+        colorOf={colorOf}
+        onToggleEvent={(name) => setFocusEvent(activeEvent === name ? null : name)}
+        onToggleCategory={toggleFocus}
+        onOpenOccasion={current ? setPlanFor : undefined}
+        onEditEntry={setEditing}
+      />
       </>)}
       {sec === 'Categories' && (<>
       {/* 4c. By payment mode */}

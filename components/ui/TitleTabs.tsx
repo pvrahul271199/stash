@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * Page title that is also the switch between two sections (History | Lend). Same size as the other tab titles; the
+ * Page title that is also the switch between sections (History | Lend | Plans). Same size as the other tab titles; the
  * selected one is ink with a short dash under it, the others are faint.
  */
 export function TitleTabs<T extends string>({

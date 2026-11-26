@@ -54,7 +54,7 @@ describe('occasions (event checklist) in the database', () => {
     await setup();
     await createOccasion('Party', []);
     expect((await createOccasion('party', [])).error).toMatch(/already/);
-    expect((await createOccasion('Trip', [{ name: 'Tickets', planned: 0 }])).error).toMatch(/above 0/);
+    expect((await createOccasion('Trip', [{ name: 'Tickets', planned: -1 }])).error).toMatch(/above 0/);
     expect((await createOccasion('Trip', [{ name: 'A', planned: 5 }, { name: 'a', planned: 5 }])).error).toMatch(/already/);
     expect((await createOccasion('x'.repeat(40), [])).error).toMatch(/characters/);
     expect((await getDB().evts.toArray()).filter((e) => e.deletedAt == null)).toHaveLength(1); // nothing half-created
@@ -202,5 +202,15 @@ describe('occasions (event checklist) in the database', () => {
     await db.evts.add({ id: 'legacy', updatedAt: 1, name: 'Old', note: null, categories: [], createdAt: 1 });
     expect(await getEventPlan('legacy')).toMatchObject({ items: [], totals: { count: 0 } });
     expect(await addEventItem('legacy', 'First', 10)).toBeNull();
+  });
+});
+
+describe('an item with no amount yet', () => {
+  it('can be created, then paid with an amount given at tick time', async () => {
+    const r = await createOccasion('Party', [{ name: 'Venue', planned: 0 }]);
+    expect(r.error).toBeNull();
+    const plan = await getEventPlan(r.id!);
+    expect(plan?.items[0].item.planned).toBe(0);
+    expect(plan?.totals).toMatchObject({ planned: 0, toGo: 0 });
   });
 });

@@ -1,6 +1,6 @@
 'use client';
 import { initAnalytics, track } from '@/lib/analytics';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { Toast } from './ui/Toast';
 import { SampleNote } from './ui/SampleNote';
@@ -107,14 +107,20 @@ export function AppShell() {
   const [forceWelcome, setForceWelcome] = useState(false);
   const [tab, setTab] = useState<Tab>('today');
   /** Which section History opens on: the Today card for money that is due jumps straight to Lend. */
-  const [historyTab, setHistoryTab] = useState<'spends' | 'lend'>('spends');
+  const [historyTab, setHistoryTab] = useState<'spends' | 'lend' | 'plans'>('spends');
   // Flows that end on another screen (a new occasion -> Insights > Events) ask for it through the UI store.
   const tabRequest = useUI((s) => s.tabRequest);
   const clearTabRequest = useUI((s) => s.clearTabRequest);
-  useEffect(() => {
+  // Layout effect: the tab switches before the next paint, so the old tab never flashes between the log screen and History.
+  useLayoutEffect(() => {
     if (!tabRequest) return;
-    setHistoryTab('spends');
-    setTab(tabRequest);
+    if (tabRequest === 'history-plans') {
+      setHistoryTab('plans');
+      setTab('history');
+    } else {
+      setHistoryTab('spends');
+      setTab(tabRequest);
+    }
     clearTabRequest();
   }, [tabRequest, clearTabRequest]);
   const [busy, setBusy] = useState(false);

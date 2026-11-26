@@ -35,7 +35,7 @@ import { useCurrency } from '@/lib/currency';
 import { useToast } from '@/store/toast';
 import { captureEvent } from '@/lib/analytics';
 import { EventHint } from '../ui/EventHint';
-import { EventPlanSheet } from './EventPlanSheet';
+import { useUI } from '@/store/ui';
 import { HugeNumber } from '../ui/HugeNumber';
 
 
@@ -68,8 +68,6 @@ export function LogSpend({
   const [note, setNote] = useState('');
   const [noteOpen, setNoteOpen] = useState(false);
   const [eventMenuOpen, setEventMenuOpen] = useState(false);
-  /** "Plan an occasion": the checklist side of events (EventPlanSheet). */
-  const [planOpen, setPlanOpen] = useState(false);
   const [newEventName, setNewEventName] = useState('');
   const [eventErr, setEventErr] = useState<string | null>(null);
   const [view, setView] = useState<'keypad' | 'picker'>('keypad');
@@ -479,9 +477,9 @@ export function LogSpend({
               )}
             </div>
 
-            {/* Plan an occasion: a small icon, top right. The first-time hint points at it and stays perfectly still. */}
+            {/* Plan: a small icon, top right. The first-time hint points at it and stays perfectly still. */}
             <div className="relative -mr-2 h-9 w-9 shrink-0">
-              {showEventHint && view === 'keypad' && !eventMenuOpen && !planOpen && occasions.length === 0 && (
+              {showEventHint && view === 'keypad' && !eventMenuOpen && occasions.length === 0 && (
                 <EventHint onDone={endEventHint} />
               )}
               <button
@@ -489,10 +487,12 @@ export function LogSpend({
                 onClick={() => {
                   endEventHint();
                   setEventMenuOpen(false);
-                  setPlanOpen(true);
+                  // Plans live in History > Plans: go there (the log screen closes behind us).
+                  useUI.getState().goToHistoryPlans();
+                  onClose();
                 }}
-                aria-label="Plan an occasion"
-                title="Plan an occasion"
+                aria-label="Plan: a to-do list with prices"
+                title="Plan"
                 className="flex h-9 w-9 min-h-0 items-center justify-center rounded-full text-soft transition-colors hover:text-ink active:bg-tint"
               >
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -884,7 +884,6 @@ export function LogSpend({
           </PrimaryButton>
         </>
       )}
-      {planOpen && <EventPlanSheet cycle={cycle} targetDate={targetDate} onClose={() => setPlanOpen(false)} />}
     </div>
   );
 }

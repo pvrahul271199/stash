@@ -18,6 +18,7 @@ import { EditSpendSheet } from './EditSpendSheet';
 import { LogSpend } from './LogSpend';
 import { incomeBetween, incomeLabel } from '@/lib/income';
 import { LendTab } from './LendTab';
+import { PlansTab } from './PlansTab';
 import { MonthRecapButton } from './MonthRecaps';
 import { TitleTabs } from '../ui/TitleTabs';
 import {
@@ -40,10 +41,10 @@ import { useToast } from '@/store/toast';
 
 const WEEKDAY_HEADERS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
-export function HistoryTab({ activeCycle, plan, initialTab = 'spends' }: { activeCycle: DerivedCycle; plan?: Plan; initialTab?: 'spends' | 'lend' }) {
+export function HistoryTab({ activeCycle, plan, initialTab = 'spends' }: { activeCycle: DerivedCycle; plan?: Plan; initialTab?: 'spends' | 'lend' | 'plans' }) {
   const { currency } = useCurrency();
   const allCycles = useAllCycles() ?? [activeCycle];
-  const [tab, setTab] = useState<'spends' | 'lend'>(initialTab);
+  const [tab, setTab] = useState<'spends' | 'lend' | 'plans'>(initialTab);
   const loans = useLoans() ?? [];
   const incomes = useIncomes() ?? [];
   const [query, setQuery] = useState('');
@@ -145,7 +146,7 @@ export function HistoryTab({ activeCycle, plan, initialTab = 'spends' }: { activ
   const titleTabs = (
     <TitleTabs
       label="History sections"
-      tabs={[{ id: 'spends', label: 'History' }, { id: 'lend', label: 'Lend' }]}
+      tabs={[{ id: 'spends', label: 'History' }, { id: 'lend', label: 'Lend' }, { id: 'plans', label: 'Plans' }]}
       value={tab}
       onChange={setTab}
     />
@@ -156,6 +157,15 @@ export function HistoryTab({ activeCycle, plan, initialTab = 'spends' }: { activ
       <div className="flex-1 overflow-y-auto px-6 pb-8 pt-6">
         {titleTabs}
         <LendTab />
+      </div>
+    );
+  }
+
+  if (tab === 'plans') {
+    return (
+      <div className="flex-1 overflow-y-auto px-6 pb-8 pt-6">
+        {titleTabs}
+        <PlansTab cycle={activeCycle} />
       </div>
     );
   }

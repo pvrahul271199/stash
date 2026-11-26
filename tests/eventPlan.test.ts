@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  MAX_AMOUNT, MAX_ITEMS, MAX_ITEM_NAME, addItem, itemState, normalizeItems, payEffect, planTotals, removeItem,
+  MAX_AMOUNT, MAX_ITEMS, defaultPlanName, parseQuickItem, MAX_ITEM_NAME, addItem, itemState, normalizeItems, payEffect, planTotals, removeItem,
   setItemTxn, updateItem, validateAmount, validateItem, type EventItem, type ItemTxn,
 } from '@/lib/eventPlan';
 
@@ -12,7 +12,7 @@ describe('validateItem / validateAmount', () => {
     expect(validateItem('', 100, [])).toMatch(/name/);
     expect(validateItem('   ', 100, [])).toMatch(/name/);
     expect(validateItem('x'.repeat(MAX_ITEM_NAME + 1), 100, [])).toMatch(/characters/);
-    expect(validateItem('Cake', 0, [])).toMatch(/above 0/);
+    expect(validateItem('Cake', 0, [])).toBeNull(); // 0 = amount not known yet
     expect(validateItem('Cake', -5, [])).toMatch(/above 0/);
     expect(validateItem('Cake', NaN, [])).toMatch(/above 0/);
     expect(validateItem('Cake', Infinity, [])).toMatch(/above 0/);
@@ -43,6 +43,12 @@ describe('itemState / planTotals', () => {
     expect(itemState(items[3], t).paid).toBe(false); // no link
     expect(itemState(item('z', 'Gone', 10, 'missing'), t).paid).toBe(false); // txn not found (not synced yet)
   });
+  it('an item with no amount yet has nothing to be over or under', () => {
+    const xs = [item('a', 'A', 0, 'x'), item('b', 'B', 100, 'y'), item('c', 'C', 0)];
+    const t = new Map([['x', { amount: 80, fromSavings: false }], ['y', { amount: 120, fromSavings: false }]]);
+    expect(planTotals(xs, t)).toMatchObject({ paid: 200, planned: 100, toGo: 0, variance: 20, doneCount: 2 });
+  });
+
   it('totals planned, paid, to go, variance and savings', () => {
     expect(planTotals(items, t)).toEqual({
       count: 4, doneCount: 2, planned: 17000, paid: 9500, toGo: 8000, variance: 500, fromSavings: 6000,
@@ -70,7 +76,8 @@ describe('list edits', () => {
   it('refuses a duplicate or a bad amount', () => {
     const base = [item('a', 'Food', 100)];
     expect(addItem(base, 'food', 100, 'b', 1).error).toMatch(/already/);
-    expect(addItem(base, 'Cake', 0, 'b', 1).error).toMatch(/above 0/);
+    expect(addItem(base, 'Cake', -1, 'b', 1).error).toMatch(/above 0/);
+    expect(addItem(base, 'Cake', 0, 'b', 1).error).toBeNull(); // amount can be added later
   });
   it('edits name and plan; renaming to its own name is fine; a clash is not', () => {
     const base = [item('a', 'Food', 100), item('b', 'Cake', 50)];
@@ -144,5 +151,23 @@ describe('payEffect (same rules as the Today screen)', () => {
   });
   it('a bad day count never divides by zero', () => {
     expect(Number.isFinite(payEffect({ pool: 100, daysLeft: 0, spentToday: 0, amount: 10, fromSavings: false }).leftToday)).toBe(true);
+  });
+});
+
+describe('parseQuickItem / defaultPlanName', () => {
+  it('reads "name amount", "name ₹amount" and "amount name"', () => {
+    expect(parseQuickItem('Milk 60')).toEqual({ name: 'Milk', planned: 60 });
+    expect(parseQuickItem('  Return   gifts 1500')).toEqual({ name: 'Return gifts', planned: 1500 });
+    expect(parseQuickItem('Cake ₹900.50')).toEqual({ name: 'Cake', planned: 900.5 });
+    expect(parseQuickItem('₹120 plates')).toEqual({ name: 'plates', planned: 120 });
+    expect(parseQuickItem('Cake900')).toEqual({ name: 'Cake', planned: 900 });
+  });
+  it('no amount means amount later; digits alone stay a name', () => {
+    expect(parseQuickItem('Candles')).toEqual({ name: 'Candles', planned: 0 });
+    expect(parseQuickItem('7')).toEqual({ name: '7', planned: 0 });
+    expect(parseQuickItem('   ')).toBeNull();
+  });
+  it('names an unnamed plan by its date', () => {
+    expect(defaultPlanName('2026-11-26')).toBe('Plan · 26 Nov');
   });
 });
