@@ -65,6 +65,7 @@ export function SplitsTab({ onSignIn, sample }: { onSignIn: () => void; sample?:
   const [creating, setCreating] = useState(false);
   const [inviteFor, setInviteFor] = useState<string | null>(null);
   const [details, setDetails] = useState(false);
+  const [side, setSide] = useState<'get' | 'owe'>('get');
   const me = sample ? SAMPLE_ME : auth.uid ?? '';
 
   // a group made or joined elsewhere (new group, invite link) opens straight away
@@ -109,7 +110,7 @@ export function SplitsTab({ onSignIn, sample }: { onSignIn: () => void; sample?:
       {rows.length > 0 && (
         <section className="mx-5" aria-label="Across all groups">
           <div className="flex flex-col overflow-hidden rounded-[26px] border border-line bg-white shadow-[0_12px_32px_rgba(30,27,75,0.09)]">
-            <button onClick={() => setDetails(true)} aria-label="Show who you get from and who you owe" className="block w-full px-5 pb-3 pt-4 text-left active:bg-tint/50">
+            <button onClick={() => { setSide(owed > 0 || owe === 0 ? 'get' : 'owe'); setDetails(true); }} aria-label="Show who you get from and who you owe" className="block w-full px-5 pb-3 pt-4 text-left active:bg-tint/50">
                 <span className="flex items-center justify-between">
                   <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-faint">Across all groups</span>
                   <span className="rounded-full bg-tint px-2.5 py-0.5 text-[10px] font-medium text-soft">{pending ? `${pending} to settle` : 'Nothing to settle'}</span>
@@ -147,28 +148,30 @@ export function SplitsTab({ onSignIn, sample }: { onSignIn: () => void; sample?:
       </div>
       {details && (
         <Sheet title="Who and how much" onClose={() => setDetails(false)} full>
-          <div className="mt-2 -mx-6">
-            {([['You get', owed, 'text-ink', 'bg-ink', (d: Debt) => d.to === me], ['You owe', owe, 'text-warm', 'bg-warm', (d: Debt) => d.from === me]] as const).map(([label, total, tone, dot, pick]) => {
-              const list = same.flatMap((r) => r.mine.filter(pick).map((d) => ({ d, r })));
-              return (
-                <div key={label} className="border-b border-line px-6 py-3 last:border-0">
-                  <div className="flex items-center justify-between">
-                    <p className="flex items-center gap-1.5 text-[12px] font-medium text-soft"><span className={`h-1.5 w-1.5 rounded-full ${dot}`} />{label}</p>
-                    <p className={`num text-[16px] ${tone}`}>{fmt(total)}</p>
-                  </div>
-                  {list.length === 0 && <p className="pt-1.5 text-[12px] text-faint">{label === 'You get' ? 'Nobody owes you right now.' : 'You do not owe anyone right now.'}</p>}
-                  {list.map(({ d, r }) => {
-                    const who = label === 'You get' ? d.from : d.to;
-                    return (
-                      <button key={r.data.room.id + d.from + d.to} onClick={() => { setDetails(false); setOpenId(r.data.room.id); }} className="flex w-full items-center gap-3 pt-2.5 text-left">
-                        <Person members={r.data.members} id={who} size={28} />
-                        <span className="min-w-0 flex-1"><span className="block truncate text-[13px] font-medium text-ink">{nameOf(r.data.members, who, me)}</span><span className="block truncate text-[11px] text-faint">{r.data.room.name}</span></span>
-                        <span className={`num text-[13px] font-semibold ${tone}`}>{fmt(d.amount)}</span>
-                        <span className="text-faint" aria-hidden="true">{'›'}</span>
-                      </button>);
-                  })}
-                </div>);
-            })}
+          <div role="tablist" aria-label="You get or you owe" className="mt-4 grid grid-cols-2 rounded-full bg-tint p-0.5">
+            {([['get', 'You get', owed], ['owe', 'You owe', owe]] as const).map(([k, label, total]) => (
+              <button key={k} role="tab" aria-selected={side === k} onClick={() => setSide(k)}
+                className={`h-9 min-h-0 rounded-full text-[13px] font-medium transition-colors ${side === k ? 'bg-white text-ink shadow-sm' : 'text-soft'}`}>
+                {label} {'·'} <span className="num">{fmt(total)}</span>
+              </button>
+            ))}
+          </div>
+          {/* fixed minimum height: switching sides never makes the sheet jump */}
+          <div className="mt-2 min-h-[200px]">
+            {(() => {
+              const list = same.flatMap((r) => r.mine.filter((d) => (side === 'get' ? d.to === me : d.from === me)).map((d) => ({ d, r })));
+              if (list.length === 0) return <p className="pt-4 text-[13px] text-faint">{side === 'get' ? 'Nobody owes you right now.' : 'You do not owe anyone right now.'}</p>;
+              return list.map(({ d, r }) => {
+                const who = side === 'get' ? d.from : d.to;
+                return (
+                  <button key={r.data.room.id + d.from + d.to} onClick={() => { setDetails(false); setOpenId(r.data.room.id); }} className="flex w-full items-center gap-3 py-2.5 text-left">
+                    <Person members={r.data.members} id={who} size={32} />
+                    <span className="min-w-0 flex-1"><span className="block truncate text-[14px] font-medium text-ink">{nameOf(r.data.members, who, me)}</span><span className="block truncate text-[11px] text-faint">{r.data.room.name}</span></span>
+                    <span className={`num text-[14px] font-semibold ${side === 'owe' ? 'text-warm' : 'text-ink'}`}>{fmt(d.amount)}</span>
+                    <span className="text-faint" aria-hidden="true">{'›'}</span>
+                  </button>);
+              });
+            })()}
           </div>
         </Sheet>)}
       {creating && <NewGroupSheet onClose={() => setCreating(false)} onCreated={(id) => { setCreating(false); setInviteFor(id); }} />}
