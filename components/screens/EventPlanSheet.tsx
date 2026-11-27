@@ -294,7 +294,7 @@ function Hub({ onClose, onOpen, onNew }: { onClose: () => void; onOpen: (id: str
   const occasions = useOccasions() ?? [];
   return (
     <>
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1 touch-pan-y overflow-x-clip overflow-y-auto overscroll-x-none">
       <Header title="Plans" sub="Rough-book lists for the market, a party, a trip. Tick things off as they go in the bag." onClose={onClose} />
       <ul className="mt-3 flex flex-col gap-2">
         {occasions.map(({ event, totals }) => (
@@ -463,7 +463,7 @@ function Checklist({
     const actual = row.state.actual;
     const diff = bought && actual != null && row.item.planned > 0 ? actual - row.item.planned : 0;
     return (
-      <li key={row.item.id} className="group py-2.5">
+      <li key={row.item.id} className="group min-w-0 py-2.5">
         <div className="flex items-center gap-3">
           <Check on={bought} label={row.item.name} onClick={() => (bought ? (actual != null ? setConfirm(row.item.id) : void untick(row)) : void pay(row))} />
           <InlineName eventId={eventId!} row={row} onError={setErr} />
@@ -576,7 +576,7 @@ function Checklist({
           </div>
         </div>
       )}
-      <div className="mt-2 min-h-0 flex-1 overflow-y-auto">
+      <div className="mt-2 min-h-0 flex-1 touch-pan-y overflow-x-clip overflow-y-auto overscroll-x-none">
         {totals && totals.doneCount > 0 && totals.variance !== 0 && (
           <p className={`num text-[12px] ${totals.variance > 0 ? 'text-warm' : 'text-faint'}`}>
             {totals.variance > 0 ? `${inr(totals.variance)} over plan so far` : `${inr(-totals.variance)} under plan so far`}

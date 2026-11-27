@@ -9,7 +9,7 @@ interface UIState {
   focusCategory: string | null;
   chartSelection: number | null;
   /** A one-shot request for AppShell to switch tab (set by flows that end on another screen); AppShell clears it. */
-  tabRequest: 'insights' | 'history-plans' | null;
+  tabRequest: 'insights' | 'history-plans' | 'history-lend' | null;
   /** The Insights section to open on (read once by InsightsTab, then cleared). */
   insightsSec: string | null;
   /** A new occasion lands the user on Insights > Events. */
@@ -19,6 +19,8 @@ interface UIState {
   clearNewPlanRequest: () => void;
   /** The log screen's Plan button: leave it, open History > Plans and start a new plan. */
   goToHistoryPlans: () => void;
+  /** After a lend is saved: leave the log screen and open History > Lend. */
+  goToHistoryLend: () => void;
   clearTabRequest: () => void;
   clearInsightsSec: () => void;
   setSheet: (s: Sheet) => void;
@@ -38,6 +40,7 @@ export const useUI = create<UIState>((set) => ({
   newPlanRequest: false,
   clearNewPlanRequest: () => set({ newPlanRequest: false }),
   goToHistoryPlans: () => set({ tabRequest: 'history-plans', newPlanRequest: true }),
+  goToHistoryLend: () => set({ tabRequest: 'history-lend' }),
   clearTabRequest: () => set({ tabRequest: null }),
   clearInsightsSec: () => set({ insightsSec: null }),
   setSheet: (sheet) => set({ sheet }),

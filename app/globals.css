@@ -57,6 +57,18 @@ select {
   -webkit-appearance: none;
   appearance: none;
 }
+/* iOS Safari zooms the page when a field under 16px gets focus: keep every field at 16px so the screen never zooms */
+input,
+textarea,
+select {
+  font-size: max(16px, 1em) !important;
+  touch-action: manipulation;
+}
+html,
+body {
+  overflow-x: clip;
+  overscroll-behavior-x: none;
+}
 /* Inputs show focus by darkening their own border instead of an outline box */
 input:focus,
 textarea:focus,

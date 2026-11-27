@@ -12,7 +12,7 @@ import { InviteTicket } from '../splits/InviteTicket';
 import { NewGroupSheet } from '../splits/NewGroupSheet';
 import { SAMPLE_GROUPS, SAMPLE_ME } from '@/lib/splitsSample';
 import { SplitsLoading } from '../splits/SplitsLoading';
-import { COUPLE_ROSE, Eyebrow, Person, PersonStack, Signed, nameOf, paletteFor, relTime, useMoney } from '../splits/parts';
+import { COUPLE_ROSE, Eyebrow, Person, PersonStack, Sheet, Signed, nameOf, paletteFor, relTime, useMoney } from '../splits/parts';
 
 interface Summary { data: GroupData; net: number; pending: number; mine: Debt[]; last: number | null }
 
@@ -64,6 +64,7 @@ export function SplitsTab({ onSignIn, sample }: { onSignIn: () => void; sample?:
   const [openId, setOpenId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [inviteFor, setInviteFor] = useState<string | null>(null);
+  const [details, setDetails] = useState(false);
   const me = sample ? SAMPLE_ME : auth.uid ?? '';
 
   // a group made or joined elsewhere (new group, invite link) opens straight away
@@ -108,7 +109,7 @@ export function SplitsTab({ onSignIn, sample }: { onSignIn: () => void; sample?:
       {rows.length > 0 && (
         <section className="mx-5" aria-label="Across all groups">
           <div className="flex flex-col overflow-hidden rounded-[26px] border border-line bg-white shadow-[0_12px_32px_rgba(30,27,75,0.09)]">
-            <div className="block w-full px-5 pb-3 pt-4 text-left">
+            <button onClick={() => setDetails(true)} aria-label="Show who you get from and who you owe" className="block w-full px-5 pb-3 pt-4 text-left active:bg-tint/50">
                 <span className="flex items-center justify-between">
                   <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-faint">Across all groups</span>
                   <span className="rounded-full bg-tint px-2.5 py-0.5 text-[10px] font-medium text-soft">{pending ? `${pending} to settle` : 'Nothing to settle'}</span>
@@ -122,8 +123,8 @@ export function SplitsTab({ onSignIn, sample }: { onSignIn: () => void; sample?:
                     <span className="rounded-full bg-ink" style={{ width: `${(owed / (owed + owe)) * 100}%` }} />
                     <span className="rounded-full bg-warm" style={{ width: `${(owe / (owed + owe)) * 100}%` }} />
                   </span>)}
-                <span className="mt-3 block h-[18px]" aria-hidden="true" />
-            </div>
+                <span className="mt-3 flex justify-end text-[11px] font-medium text-faint" aria-hidden="true">Who and how much {'›'}</span>
+            </button>
               {other > 0 && <p className="border-t border-line px-6 py-2 text-[11px] text-faint">+{other} {other === 1 ? 'group' : 'groups'} in other currencies, not added here</p>}
           </div>
         </section>)}
@@ -144,6 +145,32 @@ export function SplitsTab({ onSignIn, sample }: { onSignIn: () => void; sample?:
           ? <PrimaryButton onClick={onSignIn}>Sign in to make your own group</PrimaryButton>
           : <PrimaryButton onClick={() => setCreating(true)} disabled={!(groups || error)}>New group</PrimaryButton>}
       </div>
+      {details && (
+        <Sheet title="Who and how much" onClose={() => setDetails(false)} full>
+          <div className="mt-2 -mx-6">
+            {([['You get', owed, 'text-ink', 'bg-ink', (d: Debt) => d.to === me], ['You owe', owe, 'text-warm', 'bg-warm', (d: Debt) => d.from === me]] as const).map(([label, total, tone, dot, pick]) => {
+              const list = same.flatMap((r) => r.mine.filter(pick).map((d) => ({ d, r })));
+              return (
+                <div key={label} className="border-b border-line px-6 py-3 last:border-0">
+                  <div className="flex items-center justify-between">
+                    <p className="flex items-center gap-1.5 text-[12px] font-medium text-soft"><span className={`h-1.5 w-1.5 rounded-full ${dot}`} />{label}</p>
+                    <p className={`num text-[16px] ${tone}`}>{fmt(total)}</p>
+                  </div>
+                  {list.length === 0 && <p className="pt-1.5 text-[12px] text-faint">{label === 'You get' ? 'Nobody owes you right now.' : 'You do not owe anyone right now.'}</p>}
+                  {list.map(({ d, r }) => {
+                    const who = label === 'You get' ? d.from : d.to;
+                    return (
+                      <button key={r.data.room.id + d.from + d.to} onClick={() => { setDetails(false); setOpenId(r.data.room.id); }} className="flex w-full items-center gap-3 pt-2.5 text-left">
+                        <Person members={r.data.members} id={who} size={28} />
+                        <span className="min-w-0 flex-1"><span className="block truncate text-[13px] font-medium text-ink">{nameOf(r.data.members, who, me)}</span><span className="block truncate text-[11px] text-faint">{r.data.room.name}</span></span>
+                        <span className={`num text-[13px] font-semibold ${tone}`}>{fmt(d.amount)}</span>
+                        <span className="text-faint" aria-hidden="true">{'›'}</span>
+                      </button>);
+                  })}
+                </div>);
+            })}
+          </div>
+        </Sheet>)}
       {creating && <NewGroupSheet onClose={() => setCreating(false)} onCreated={(id) => { setCreating(false); setInviteFor(id); }} />}
       {inviteGroup && <InviteTicket data={inviteGroup} me={me} onClose={() => { setOpenId(inviteGroup.room.id); setInviteFor(null); }} />}
     </>

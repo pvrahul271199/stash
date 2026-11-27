@@ -117,6 +117,9 @@ export function AppShell() {
     if (tabRequest === 'history-plans') {
       setHistoryTab('plans');
       setTab('history');
+    } else if (tabRequest === 'history-lend') {
+      setHistoryTab('lend');
+      setTab('history');
     } else {
       setHistoryTab('spends');
       setTab(tabRequest);

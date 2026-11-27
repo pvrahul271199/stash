@@ -53,6 +53,8 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
+  userScalable: false, // Android Chrome honours this one
+  maximumScale: 1, // no auto-zoom when a text field is focused
   viewportFit: 'cover',
   themeColor: '#FFFFFF',
   colorScheme: 'light', // the page is light only: stops a dark-mode phone painting the canvas dark before our CSS loads

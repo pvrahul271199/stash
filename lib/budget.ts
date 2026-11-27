@@ -177,8 +177,8 @@ export function pace(moneyToLive: number, totalDays: number, closedDays: number,
     kind === 'on'
       ? 'Right on pace for the month.'
       : kind === 'under'
-        ? `${inr(diff)} under pace so far. That's room in the days ahead.`
-        : `${inr(-diff)} above pace so far. Your daily amount has already adjusted for it.`;
+        ? `${inr(diff)} under pace so far. An even split would have you at ${inr(expected)} by now and you are at ${inr(actualSpent)}. That gap is spread over the days ahead.`
+        : `${inr(-diff)} above pace so far. An even split would have you at ${inr(expected)} by now and you are at ${inr(actualSpent)}. Your daily amount has already adjusted for it.`;
   return { expected, actual: actualSpent, diff, kind, message };
 }
 

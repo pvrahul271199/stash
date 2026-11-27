@@ -1,10 +1,11 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { roundMoney } from '@/lib/money';
 import { DayChart, type ChartMode } from '../charts/DayChart';
 import { CategoryList, Donut } from '../charts/Donut';
 import { TimeOfDayChart, WeekdayChart } from '../charts/WeekdayTime';
 import { Note } from '../ui/Chip';
-import { dayRowsOf, useOccasions, useSavedFromLeftovers, useAllCycles, useCategories, useCycleEntries, useEvents, useIncomes } from '@/db/queries';
+import { dayRowsOf, useOccasions, useSavedFromLeftovers, useAllCycles, useCategories, useCycleEntries, useEvents, useIncomes, useLoans } from '@/db/queries';
 import { incomeBetween } from '@/lib/income';
 import type { Entry, Plan } from '@/db/schema';
 import { AtAGlance } from './AtAGlance';
@@ -90,6 +91,8 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
   const leftovers = useSavedFromLeftovers();
   const events = useEvents();
   const incomes = useIncomes() ?? [];
+  const loans = useLoans() ?? [];
+  const [showLeft, setShowLeft] = useState(false);
 
   // Clear sub-type selection whenever the parent category changes
   useEffect(() => {
@@ -200,6 +203,16 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
   const focusColor = activeFocus ? colorOf[activeFocus] : colors.ink;
   const barColor = activeFocus ? focusColor : colors.ink;
   const fillPct = Math.min((summary.spentSoFar / cycle.planAmount) * 100, 100);
+  // The pool already has lends taken out (and extra income added), so this matches the daily amount
+  const left = roundMoney(summary.leftToLive);
+  const cycleIncome = incomeBetween(incomes, cycle.monthStart, cycle.monthEnd);
+  // Lends are charged to the month they were lent and repayments credited to the month they arrive (lib/lend.ts loanEffects)
+  const inMonth = (d: string) => d >= cycle.monthStart && d <= cycle.monthEnd;
+  const liveLoans = loans.filter((l) => l.deletedAt == null);
+  const lentThisMonth = roundMoney(liveLoans.filter((l) => inMonth(l.lentOn)).reduce((t, l) => t + l.amount, 0));
+  const paidBackThisMonth = roundMoney(liveLoans.flatMap((l) => l.repayments).filter((r) => inMonth(r.date)).reduce((t, r) => t + r.amount, 0));
+  const incomeThisMonth = roundMoney(cycleIncome);
+  const other = roundMoney(left - (cycle.planAmount - summary.spentSoFar - lentThisMonth + paidBackThisMonth + incomeThisMonth));
   const tryAgain = 'Close a few days to see this.';
   const space = currency.symbol.length > 1 ? ' ' : '';
   const paceRatio =
@@ -209,7 +222,6 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
   const paceLevel: Level | null = paceRatio == null ? null : paceRatio <= 1 ? 'good' : paceRatio <= 1.1 ? 'warn' : 'bad';
 
   const hasFocus = !!(activeFocus || activeEvent);
-  const cycleIncome = incomeBetween(incomes, cycle.monthStart, cycle.monthEnd);
 
   return (
     <div className="relative min-h-0 flex-1">
@@ -288,7 +300,9 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
           <span className="text-faint">{currency.symbol}{space}</span>
           {num1(summary.spentSoFar)}
         </p>
-        <p className="mt-1 text-[14px] text-soft">of {inr1(cycle.planAmount)} to live on</p>
+        <p className={`num mt-1 text-[14px] ${left < 0 ? 'text-bad' : 'text-soft'}`}>
+          {left < 0 ? `${inr1(-left)} over` : `${inr1(left)} left`} <span className="text-faint">· of {inr1(cycle.planAmount)}</span>
+        </p>
         {cycleIncome > 0 && <p className="num mt-0.5 text-[12px] text-faint">+ {inr1(cycleIncome)} income this month, not counted as spent</p>}
         <div
           className="relative mt-5 h-3 rounded-full bg-tint"
@@ -315,22 +329,13 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
             <span className="h-2 w-0.5 rounded-full bg-good" /> on plan
           </span>
         </div>
-        <p
-          className={`mt-3 flex items-start gap-2.5 rounded-note px-3.5 py-2.5 text-[14px] ${
-            !summary.paceMessage || !paceLevel
-              ? 'bg-tint text-soft'
-              : paceLevel === 'good'
-                ? 'bg-tint text-good'
-                : paceLevel === 'warn'
-                  ? 'bg-warm/10 text-ink'
-                  : 'bg-bad/10 text-ink'
-          }`}
+        <button
+          type="button"
+          onClick={() => setShowLeft(true)}
+          className="ml-auto mt-3 flex h-8 min-h-0 items-center gap-1 text-[13px] font-medium text-soft"
         >
-          {summary.paceMessage && paceLevel && (
-            <span aria-hidden="true" className={`mt-[7px] h-2 w-2 shrink-0 rounded-full ${LEVEL_DOT[paceLevel]}`} />
-          )}
-          <span>{summary.paceMessage ?? tryAgain}</span>
-        </p>
+          View breakdown <span aria-hidden="true" className="text-[16px] leading-none text-faint">›</span>
+        </button>
       </section>
 
       <Section title="At a glance" hint="What stands out this month.">
@@ -670,6 +675,39 @@ export function InsightsTab({ cycle: current, plan }: { cycle: DerivedCycle | un
         )}
       </Section>
       </>)}
+      {showLeft && (
+        <div className="plan-fade absolute inset-0 z-[50] flex items-end bg-ink/40" role="presentation" onClick={() => setShowLeft(false)}>
+          <div role="dialog" aria-modal="true" aria-label="How left is worked out" onClick={(e) => e.stopPropagation()}
+            className="plan-up w-full rounded-t-[24px] bg-white px-6 pt-3" style={{ paddingBottom: 'calc(var(--safe-bottom) + 28px)' }}>
+            <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-line" />
+            <div className="flex items-center justify-between">
+              <h2 className="font-display text-[20px] font-semibold text-ink">How left is worked out</h2>
+              <button type="button" onClick={() => setShowLeft(false)} aria-label="Close" className="flex h-8 min-h-0 w-8 items-center justify-center text-[20px] leading-none text-faint">×</button>
+            </div>
+            <div className="mt-3">
+              {([
+                ['To live on', cycle.planAmount, '', 'ink', true],
+                ['Spent', summary.spentSoFar, '− ', 'ink', true],
+                ['Lent this month', lentThisMonth, '− ', 'warm', lentThisMonth > 0],
+                ['Paid back this month', paidBackThisMonth, '+ ', 'good', paidBackThisMonth > 0],
+                ['Extra income', incomeThisMonth, '+ ', 'good', incomeThisMonth > 0],
+                ['Other adjustments', Math.abs(other), other < 0 ? '− ' : '+ ', 'ink', Math.abs(other) >= 0.5],
+              ] as const).filter((r) => r[4]).map(([label, v, sign, tone]) => (
+                <div key={label} className="flex items-baseline justify-between py-2 text-[14px]">
+                  <span className="text-soft">{label}</span>
+                  <span className={`num ${tone === 'warm' ? 'text-warm' : tone === 'good' ? 'text-good' : 'text-ink'}`}>{sign}{inr1(v)}</span>
+                </div>
+              ))}
+              <div className="my-1 border-t-[1.5px] border-dashed border-line" />
+              <div className="flex items-baseline justify-between py-2 text-[16px] font-semibold">
+                <span className="text-ink">{left < 0 ? 'Over by' : 'Left'}</span>
+                <span className={`num ${left < 0 ? 'text-bad' : 'text-ink'}`}>{inr1(Math.abs(left))}</span>
+              </div>
+              <p className="mt-2 text-[12px] leading-relaxed text-faint">Money you lend is set aside from this month when you lend it. It comes back in the month it is paid back.</p>
+            </div>
+          </div>
+        </div>
+      )}
       {editing && <EditSpendSheet entry={editing} onClose={() => setEditing(null)} />}
     </div>
     <div className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center">

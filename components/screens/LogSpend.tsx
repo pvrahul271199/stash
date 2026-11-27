@@ -250,8 +250,9 @@ export function LogSpend({
       );
       navigator.vibrate?.(10);
       captureEvent('lend_logged', { kind: lend.kind, has_due_date: dueDate != null });
-      toast(`Tracking ${inr(amount)} lent to ${lend.person.trim() || lend.kind}. See History > Lend`);
+      toast(`Tracking ${inr(amount)} lent to ${lend.person.trim() || lend.kind}.`);
       onClose();
+      useUI.getState().goToHistoryLend();
     } catch {
       toast('Couldn’t save that. Please try again.', 'warm');
     } finally {
